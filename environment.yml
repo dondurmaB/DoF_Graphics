@@ -1,0 +1,13 @@
+name: dof-graphics
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - cmake
+  - ninja
+  - pip
+  - numpy
+  - pillow
+  - matplotlib
+  - opencv
+  - ipython

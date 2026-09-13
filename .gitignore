@@ -1,0 +1,53 @@
+.DS_Store
+
+# Build outputs
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+*.o
+*.obj
+*.a
+*.dylib
+*.so
+*.dll
+*.exe
+DepthResearch
+
+# Conda / Python
+.conda/
+.mamba/
+conda-meta/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# VS Code local settings
+.vscode/
+.idea/
+
+# Generated ML artifacts and datasets
+*.ckpt
+*.pt
+*.pth
+*.onnx
+checkpoints/
+runs/
+wandb/
+dataset/generated/
+dataset/cache/
+
+# Generated screenshots
+output/*
+!output/.gitkeep
+
+# Local environment/secrets
+.env
+.env.*
+.venv/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp

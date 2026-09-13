@@ -1,0 +1,542 @@
+#include <glad/glad.h>
+
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+using namespace std;
+
+// DEVELOPMENT SETTINGS
+const int windowWidth = 600;
+const int windowHeight = 600;
+const int windowPosX = 50;
+const int windowPosY = 100;
+
+// ==============================
+// EXPERIMENT 07 CONTROLS
+// ==============================
+float fieldOfViewDegrees = 45.0f;
+// Near and far define the camera-space depth range that can appear after projection.
+float nearPlane = 0.1f;
+float farPlane = 100.0f;
+
+glm::vec3 cameraPosition = glm::vec3(0.0f, 1.0f, 5.0f);
+glm::vec3 cameraTarget = glm::vec3(0.0f, 0.0f, -2.0f);
+glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
+
+// Try false to remove perspective projection; this is not orthographic projection.
+bool usePerspectiveProjection = true;
+
+glm::vec3 cubeAPosition = glm::vec3(-1.2f, 0.0f, -1.0f);
+float cubeARotationXDegrees = 50.0f;
+float cubeARotationYDegrees = 70.0f;
+float cubeAUniformScale = 0.7f;
+
+glm::vec3 cubeBPosition = glm::vec3(0.0f, 0.0f, -3.0f);
+float cubeBRotationXDegrees = -20.0f;
+float cubeBRotationYDegrees = -35.0f;
+float cubeBUniformScale = 0.7f;
+
+glm::vec3 cubeCPosition = glm::vec3(1.2f, 0.0f, -6.0f);
+float cubeCRotationXDegrees = 15.0f;
+float cubeCRotationYDegrees = 35.0f;
+float cubeCUniformScale = 0.7f;
+
+bool animateIntensity = false;
+float intensitySpeed = 1.0f;
+float staticIntensity = 1.0f;
+
+// Draw filled cube faces by default. Try GL_LINE to inspect the triangle mesh.
+bool wireframeMode = false;
+
+string readFile(const string& path) {
+    ifstream file(path);
+
+    if (!file.is_open()) {
+        cout << "Failed to open shader file: " << path << endl;
+        return "";
+    }
+
+    stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+
+void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
+    glViewport(0, 0, width, height);
+}
+
+void processInput(GLFWwindow *window) {
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+        glfwSetWindowShouldClose(window, true);
+    }
+}
+
+bool checkShaderCompilation(unsigned int shader, const string& shaderName) {
+    int success = 0;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+
+    if (!success) {
+        int logLength = 0;
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &logLength);
+
+        string infoLog(logLength, '\0');
+        glGetShaderInfoLog(shader, logLength, NULL, infoLog.data());
+
+        cout << "Failed to compile shader: " << shaderName << endl;
+        cout << infoLog << endl;
+        return false;
+    }
+
+    return true;
+}
+
+bool checkProgramLinking(unsigned int shaderProgram) {
+    int success = 0;
+    glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
+
+    if (!success) {
+        int logLength = 0;
+        glGetProgramiv(shaderProgram, GL_INFO_LOG_LENGTH, &logLength);
+
+        string infoLog(logLength, '\0');
+        glGetProgramInfoLog(shaderProgram, logLength, NULL, infoLog.data());
+
+        cout << "Failed to link shader program" << endl;
+        cout << infoLog << endl;
+        return false;
+    }
+
+    return true;
+}
+
+void appendUint32BE(vector<unsigned char>& bytes, uint32_t value) {
+    bytes.push_back(static_cast<unsigned char>((value >> 24) & 0xff));
+    bytes.push_back(static_cast<unsigned char>((value >> 16) & 0xff));
+    bytes.push_back(static_cast<unsigned char>((value >> 8) & 0xff));
+    bytes.push_back(static_cast<unsigned char>(value & 0xff));
+}
+
+uint32_t crc32(const unsigned char* data, size_t size) {
+    uint32_t crc = 0xffffffffu;
+
+    for (size_t i = 0; i < size; ++i) {
+        crc ^= data[i];
+        for (int bit = 0; bit < 8; ++bit) {
+            if (crc & 1u) {
+                crc = (crc >> 1u) ^ 0xedb88320u;
+            } else {
+                crc >>= 1u;
+            }
+        }
+    }
+
+    return crc ^ 0xffffffffu;
+}
+
+uint32_t adler32(const vector<unsigned char>& data) {
+    uint32_t a = 1;
+    uint32_t b = 0;
+
+    for (unsigned char byte : data) {
+        a = (a + byte) % 65521u;
+        b = (b + a) % 65521u;
+    }
+
+    return (b << 16u) | a;
+}
+
+void appendPngChunk(vector<unsigned char>& png, const char type[4], const vector<unsigned char>& data) {
+    appendUint32BE(png, static_cast<uint32_t>(data.size()));
+
+    size_t chunkStart = png.size();
+    png.insert(png.end(), type, type + 4);
+    png.insert(png.end(), data.begin(), data.end());
+
+    appendUint32BE(png, crc32(png.data() + chunkStart, png.size() - chunkStart));
+}
+
+bool writePng(const string& path, int width, int height, const vector<unsigned char>& rgbPixels) {
+    vector<unsigned char> scanlines;
+    const int rowSize = width * 3;
+    scanlines.reserve(static_cast<size_t>((rowSize + 1) * height));
+
+    for (int y = 0; y < height; ++y) {
+        scanlines.push_back(0); // PNG filter type 0: no filter.
+        const unsigned char* rowStart = rgbPixels.data() + static_cast<size_t>(y * rowSize);
+        scanlines.insert(scanlines.end(), rowStart, rowStart + rowSize);
+    }
+
+    vector<unsigned char> compressed;
+    compressed.push_back(0x78); // zlib header for uncompressed deflate data.
+    compressed.push_back(0x01);
+
+    size_t offset = 0;
+    while (offset < scanlines.size()) {
+        const uint16_t blockSize = static_cast<uint16_t>(min<size_t>(65535, scanlines.size() - offset));
+        const bool finalBlock = offset + blockSize >= scanlines.size();
+
+        compressed.push_back(finalBlock ? 0x01 : 0x00);
+        compressed.push_back(static_cast<unsigned char>(blockSize & 0xff));
+        compressed.push_back(static_cast<unsigned char>((blockSize >> 8) & 0xff));
+
+        const uint16_t inverseBlockSize = static_cast<uint16_t>(~blockSize);
+        compressed.push_back(static_cast<unsigned char>(inverseBlockSize & 0xff));
+        compressed.push_back(static_cast<unsigned char>((inverseBlockSize >> 8) & 0xff));
+
+        compressed.insert(compressed.end(), scanlines.begin() + static_cast<long>(offset),
+                          scanlines.begin() + static_cast<long>(offset + blockSize));
+        offset += blockSize;
+    }
+
+    appendUint32BE(compressed, adler32(scanlines));
+
+    vector<unsigned char> png = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+
+    vector<unsigned char> ihdr;
+    appendUint32BE(ihdr, static_cast<uint32_t>(width));
+    appendUint32BE(ihdr, static_cast<uint32_t>(height));
+    ihdr.push_back(8); // 8 bits per channel.
+    ihdr.push_back(2); // RGB color.
+    ihdr.push_back(0); // deflate compression.
+    ihdr.push_back(0); // standard PNG filter method.
+    ihdr.push_back(0); // no interlacing.
+
+    appendPngChunk(png, "IHDR", ihdr);
+    appendPngChunk(png, "IDAT", compressed);
+    appendPngChunk(png, "IEND", {});
+
+    ofstream file(path, ios::binary);
+    if (!file.is_open()) {
+        cout << "Failed to save screenshot: " << path << endl;
+        return false;
+    }
+
+    file.write(reinterpret_cast<const char*>(png.data()), static_cast<streamsize>(png.size()));
+    return file.good();
+}
+
+bool saveScreenshot(const string& path, int width, int height) {
+    vector<unsigned char> pixels(static_cast<size_t>(width * height * 3));
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+
+    vector<unsigned char> flippedPixels(pixels.size());
+    const int rowSize = width * 3;
+    for (int y = 0; y < height; ++y) {
+        const unsigned char* source = pixels.data() + static_cast<size_t>((height - 1 - y) * rowSize);
+        unsigned char* destination = flippedPixels.data() + static_cast<size_t>(y * rowSize);
+        copy(source, source + rowSize, destination);
+    }
+
+    filesystem::create_directories(filesystem::path(path).parent_path());
+
+    if (writePng(path, width, height, flippedPixels)) {
+        cout << "Saved screenshot: " << path << endl;
+        return true;
+    }
+
+    return false;
+}
+
+int main() {
+    if (!glfwInit()) {
+        cout << "Failed to initialize GLFW" << endl;
+        return -1;
+    }
+
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+
+    GLFWwindow* window = glfwCreateWindow(windowWidth, windowHeight, "DOF_Research", NULL, NULL);
+    if (window == NULL) {
+        cout << "Failed to create GLFW window" << endl;
+        glfwTerminate();
+        return -1;
+    }
+    glfwSetWindowPos(window, windowPosX, windowPosY);
+    glfwMakeContextCurrent(window);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);  
+
+    if (!gladLoadGLLoader((GLADloadfunc)glfwGetProcAddress)) {
+        cout << "Failed to initialize GLAD" << endl;
+        glfwTerminate();
+        return -1;
+    }
+
+    int framebufferWidth = 0;
+    int framebufferHeight = 0;
+    glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
+    glViewport(0, 0, framebufferWidth, framebufferHeight);
+
+    // basic.vert shader
+    string vertexCode = readFile(string(PROJECT_SOURCE_DIR) + "/shaders/basic.vert");
+    const char* vertexShaderSource = vertexCode.c_str();
+    
+    unsigned int vertexShader;
+    vertexShader = glCreateShader(GL_VERTEX_SHADER);
+
+    glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
+    glCompileShader(vertexShader);
+    if (!checkShaderCompilation(vertexShader, "basic.vert")) {
+        glDeleteShader(vertexShader);
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return -1;
+    }
+    
+    // basic.frag shader
+    string fragmentCode = readFile(string(PROJECT_SOURCE_DIR) + "/shaders/basic.frag");
+    const char* fragmentShaderSource = fragmentCode.c_str();
+
+    unsigned int fragmentShader;
+    fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
+    glCompileShader(fragmentShader);
+    if (!checkShaderCompilation(fragmentShader, "basic.frag")) {
+        glDeleteShader(vertexShader);
+        glDeleteShader(fragmentShader);
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return -1;
+    }
+
+    //Shader Program
+    unsigned int shaderProgram;
+    shaderProgram = glCreateProgram();
+    glAttachShader(shaderProgram, vertexShader);
+    glAttachShader(shaderProgram, fragmentShader);
+    glLinkProgram(shaderProgram);
+    if (!checkProgramLinking(shaderProgram)) {
+        glDeleteShader(vertexShader);
+        glDeleteShader(fragmentShader);
+        glDeleteProgram(shaderProgram);
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return -1;
+    }
+
+    // glUseProgram(shaderProgram);
+
+    // Uniform locations are queried once after linking. A -1 location can mean the uniform was optimized away.
+    int intensityLocation = glGetUniformLocation(shaderProgram, "uIntensity");
+    if (intensityLocation == -1) {
+        cout << "Warning: could not find uniform uIntensity" << endl;
+    }
+
+    int modelLocation = glGetUniformLocation(shaderProgram, "uModel");
+    if (modelLocation == -1) {
+        cout << "Warning: could not find uniform uModel" << endl;
+    }
+
+    int viewLocation = glGetUniformLocation(shaderProgram, "uView");
+    if (viewLocation == -1) {
+        cout << "Warning: could not find uniform uView" << endl;
+    }
+
+    int projectionLocation = glGetUniformLocation(shaderProgram, "uProjection");
+    if (projectionLocation == -1) {
+        cout << "Warning: could not find uniform uProjection" << endl;
+    }
+
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+
+    // Vertex attributes vary per vertex; uniforms are shared for the whole draw call.
+    // The cube uses 24 face vertices so each face can have one clear color.
+    // Each vertex has six floats: position.xyz followed by color.rgb.
+    // Positions are fixed model-space geometry; transformation happens with a matrix uniform.
+    float vertices[] = {
+        // Front face: red
+        -0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
+
+        // Back face: green
+         0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
+
+        // Left face: blue
+        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f, 0.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 0.0f, 1.0f,
+
+        // Right face: yellow
+         0.5f, -0.5f,  0.5f,  1.0f, 1.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 1.0f, 0.0f,
+
+        // Top face: cyan
+        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  0.0f, 1.0f, 1.0f,
+         0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 1.0f,
+
+        // Bottom face: magenta
+        -0.5f, -0.5f, -0.5f,  1.0f, 0.0f, 1.0f,
+         0.5f, -0.5f, -0.5f,  1.0f, 0.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 1.0f
+    };
+
+    // The index array describes two triangles per cube face: 6 faces * 2 triangles * 3 indices = 36.
+    unsigned int indices[] = {
+         0,  1,  2,   2,  3,  0,
+         4,  5,  6,   6,  7,  4,
+         8,  9, 10,  10, 11,  8,
+        12, 13, 14,  14, 15, 12,
+        16, 17, 18,  18, 19, 16,
+        20, 21, 22,  22, 23, 20
+    };
+    const GLsizei indexCount = static_cast<GLsizei>(sizeof(indices) / sizeof(indices[0]));
+
+    //create Vertex Buffer Object, Vertex Array Object, and Element Buffer Object
+    unsigned int VBO, VAO, EBO;
+    glGenBuffers(1, &VBO);  
+    glGenVertexArrays(1, &VAO);
+    glGenBuffers(1, &EBO);
+    // glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    // glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    // Vertex Attributes
+    // 0. copy our vertices array in a buffer for OpenGL to use
+    // The VAO remembers this attribute layout. The VBO stores the vertex bytes.
+    glBindVertexArray(VAO);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    // The EBO stores index data. Its binding is remembered by the currently bound VAO.
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+    // 1. then set the vertex attributes pointers
+    // Stride is the byte distance from one vertex to the next: 6 floats here.
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);  
+
+    // Color starts after the first three floats because position takes x, y, z.
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    // 2. use our shader program when we want to render an object
+    // glUseProgram(shaderProgram);
+    // 3. now draw the object.
+    glBindBuffer(GL_ARRAY_BUFFER, 0); 
+    glBindVertexArray(0); 
+
+    if (wireframeMode) {
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    } else {
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    }
+
+    glEnable(GL_DEPTH_TEST);
+    // GL_LESS keeps the nearest fragment for each framebuffer location.
+    glDepthFunc(GL_LESS);
+
+    bool screenshotKeyWasPressed = false;
+
+    while (!glfwWindowShouldClose(window)) {
+        //input
+        processInput(window);
+
+        //rendering
+        glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+        // Clearing the color buffer does not clear stored depth values; reset both buffers every frame.
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // glfwGetTime() gives elapsed time; sin() creates smooth periodic animation.
+        float time = static_cast<float>(glfwGetTime());
+        float intensity = animateIntensity
+            ? 0.6f + 0.4f * sin(time * intensitySpeed)
+            : staticIntensity;
+
+        glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
+        const float aspectRatio = framebufferHeight > 0
+            ? static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight)
+            : 1.0f;
+
+        // View transforms world-space geometry into the camera's coordinate system.
+        glm::mat4 view = glm::lookAt(cameraPosition, cameraTarget, cameraUp);
+
+        // Projection transforms camera/view space into clip space. Perspective creates w for the later perspective divide.
+        glm::mat4 projection = usePerspectiveProjection
+            ? glm::perspective(glm::radians(fieldOfViewDegrees), aspectRatio, nearPlane, farPlane)
+            : glm::mat4(1.0f);
+
+        // draw cubes
+        glUseProgram(shaderProgram);
+        // Uniforms are shared values for this draw call and are uploaded to the active shader program.
+        if (intensityLocation != -1) {
+            glUniform1f(intensityLocation, intensity);
+        }
+        if (viewLocation != -1) {
+            glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view));
+        }
+        if (projectionLocation != -1) {
+            glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
+        }
+        glBindVertexArray(VAO);
+
+        auto drawCube = [&](glm::vec3 position, float rotationX, float rotationY, float scale) {
+            // Model transforms this cube from local/object space into world space.
+            glm::mat4 model(1.0f);
+            model = glm::translate(model, position);
+            model = glm::rotate(model, glm::radians(rotationY), glm::vec3(0.0f, 1.0f, 0.0f));
+            model = glm::rotate(model, glm::radians(rotationX), glm::vec3(1.0f, 0.0f, 0.0f));
+            model = glm::scale(model, glm::vec3(scale, scale, scale));
+
+            if (modelLocation != -1) {
+                glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model));
+            }
+            glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, nullptr);
+        };
+
+        // P * V * M is uploaded as three uniforms; perspective divide happens after the vertex shader and produces NDC.
+        drawCube(cubeAPosition, cubeARotationXDegrees, cubeARotationYDegrees, cubeAUniformScale);
+        drawCube(cubeBPosition, cubeBRotationXDegrees, cubeBRotationYDegrees, cubeBUniformScale);
+        drawCube(cubeCPosition, cubeCRotationXDegrees, cubeCRotationYDegrees, cubeCUniformScale);
+
+        const bool screenshotKeyIsPressed = glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS;
+        if (screenshotKeyIsPressed && !screenshotKeyWasPressed) {
+            glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
+            saveScreenshot("output/latest.png", framebufferWidth, framebufferHeight);
+        }
+        screenshotKeyWasPressed = screenshotKeyIsPressed;
+
+        //check and call events and swap buffers
+        glfwSwapBuffers(window);
+        glfwPollEvents(); //check updates
+
+    }
+
+    //Delete everything
+    glDeleteVertexArrays(1, &VAO);
+    glDeleteBuffers(1, &VBO);
+    glDeleteBuffers(1, &EBO);
+    glDeleteProgram(shaderProgram);
+
+    glfwTerminate();
+    return 0;
+}
