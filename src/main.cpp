@@ -87,7 +87,7 @@ enum class ScreenMode {
     LinearDepth = 2
 };
 
-ScreenMode screenMode = ScreenMode::Color;
+ScreenMode screenMode = ScreenMode::LinearDepth;
 
 float fieldOfViewDegrees = 45.0f;
 // Near and far define the camera-space depth range that can appear after projection.
