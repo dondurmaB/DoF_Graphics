@@ -11,3 +11,4 @@
 | 07 | Model, View, and Projection | [Code](07_model_view_projection/) | [Notes](../../notes/graphics/07_model_view_projection.md) |
 | 08 | Interactive Camera | [Code](08_interactive_camera/) | [Notes](../../notes/graphics/08_interactive_camera.md) |
 | 11 | Off-Screen Framebuffers and Post-Processing | [Code](11_framebuffers/) | [Notes](../../notes/graphics/11_framebuffers.md) |
+| 12 | Sampling and Linearizing the Depth Texture | [Code](12_depth_texture_postprocess/) | [Notes](../../notes/graphics/12_depth_texture_postprocess.md) |
