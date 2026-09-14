@@ -14,3 +14,4 @@
 | 10 | [Linear Depth Reconstruction](10_linear_depth.md) | Reconstruct linear view depth from raw perspective depth for cleaner depth visualization. |
 | 11 | [Off-Screen Framebuffers and Post-Processing](11_framebuffers.md) | Render the scene into color/depth textures, then present it through a full-screen quad. |
 | 12 | [Sampling and Linearizing the Depth Texture](12_depth_texture_postprocess.md) | Sample FBO color/depth textures in the screen pass and reconstruct linear depth. |
+| 13 | [Physical Focus Distance and Circle of Confusion](13_coc_visualization.md) | Calculate and visualize pixel-space CoC from sampled linear depth. |
