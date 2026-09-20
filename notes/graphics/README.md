@@ -17,3 +17,4 @@
 | 13 | [Physical Focus Distance and Circle of Confusion](13_coc_visualization.md) | Calculate and visualize pixel-space CoC from sampled linear depth. |
 | 14 | [Basic Depth of Field](14_basic_dof.md) | Render the first DoF blur with a 17-tap disk gather driven by CoC magnitude. |
 | 15 | [Complex Scene Loading](15_complex_scene.md) | Load indexed OBJ geometry with explicit physical scale into the existing DoF pipeline; preserve a missing-asset fallback. |
+| 16 | [Ray-Traced DoF Reference](16_raytraced_dof_reference.md) | Match physical projection and prepare a Cycles lens-sampled reference with the same scene and camera. |

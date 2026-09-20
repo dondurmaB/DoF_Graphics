@@ -15,3 +15,4 @@
 | 13 | Physical Focus Distance and Circle of Confusion | [Code](13_coc_visualization/) | [Notes](../../notes/graphics/13_coc_visualization.md) |
 | 14 | Basic Depth of Field | [Code](14_basic_dof/) | [Notes](../../notes/graphics/14_basic_dof.md) |
 | 15 | Complex Scene Loading | [Code](15_complex_scene/) | [Notes](../../notes/graphics/15_complex_scene.md) |
+| 16 | Physically Matched Camera and Ray-Traced DoF Reference | [Code](16_raytraced_dof_reference/) | [Notes](../../notes/graphics/16_raytraced_dof_reference.md) |

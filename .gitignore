@@ -44,6 +44,12 @@ dataset/cache/
 output/*
 !output/.gitkeep
 
+# Generated Cycles references, metadata and Blender caches; retain output documentation.
+reports/raytraced_dof/*
+!reports/raytraced_dof/README.md
+*.blend1
+*.blend2
+
 # Local environment/secrets
 .env
 .env.*
