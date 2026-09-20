@@ -5,6 +5,7 @@ import io
 import math
 from pathlib import Path
 import re
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +19,27 @@ def transform(matrix, point):
 
 
 class ReferenceConfigTests(unittest.TestCase):
+    def test_geometry_only_import_preserves_bytes_and_cleans_up(self):
+        geometry = (b"# keep mtllib in comments\r\no teapot\r\n"
+                    b"v 1 2 3\r\nvt 0.25 0.5\r\nvn 0 1 0\r\n"
+                    b"g handle\r\ns 1\r\nf 1/1/1 1/1/1 1/1/1\r\n")
+        original = b"mtllib absent.mtl\r\n  usemtl old\r\n" + geometry
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "scene.obj"
+            source.write_bytes(original)
+            for import_fails in (False, True):
+                try:
+                    with reference.geometry_only_obj(source) as sanitized:
+                        self.assertNotEqual(sanitized, source)
+                        self.assertEqual(sanitized.read_bytes(), geometry)
+                        if import_fails:
+                            raise RuntimeError("simulated importer failure")
+                except RuntimeError:
+                    if not import_fails:
+                        raise
+                self.assertFalse(sanitized.parent.exists())
+                self.assertEqual(source.read_bytes(), original)
+
     def test_camera_and_non_square_sensor(self):
         plan = reference.make_plan(reference.parse_args(["--width", "1600", "--height", "900"]))
         self.assertAlmostEqual(plan["vertical_fov_degrees"], 26.99146656, places=6)

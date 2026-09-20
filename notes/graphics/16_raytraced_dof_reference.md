@@ -4,7 +4,7 @@ Review time: approximately 3–5 minutes.
 
 ## Goal
 
-Match the raster camera to physical lens settings and provide a reproducible Blender Cycles DoF reference using the same teapot, scale and scene layout. Use an existing renderer; no custom ray tracer is implemented. The reference workflow is prepared, but Blender was unavailable, so no ray-traced images or visual comparison are claimed.
+Match the raster camera to physical lens settings and provide a reproducible Blender Cycles DoF reference using the same teapot, scale and scene layout. Use an existing renderer; no custom ray tracer is implemented. Four Cycles previews now render successfully in Blender 5.2.2 LTS on Apple M4 Max Metal. A paired comparison against the new OpenGL projection is still pending.
 
 ## Why a Ray-Traced Reference?
 
@@ -42,7 +42,7 @@ Physical camera → lens samples / rays → actual scene geometry
                 → accumulated path-traced DoF image
 ```
 
-The separate script selects `CYCLES`, enables camera DoF, and uses direct focus distance and f-stop. It does not read OpenGL depth or blur an image in compositing. Defaults are 32 preview samples or 128 final samples, with OpenImageDenoise. Device selection attempts Metal and falls back to CPU; actual device use can only be reported after a successful run.
+The separate script selects `CYCLES`, enables camera DoF, and uses direct focus distance and f-stop. It does not read OpenGL depth or blur an image in compositing. Defaults are 32 preview samples or 128 final samples, with OpenImageDenoise. Device selection attempts Metal and falls back to CPU; the verified preview used Apple M4 Max (GPU - 32 cores) through Metal without fallback.
 
 ## Coordinate-System Matching
 
@@ -86,6 +86,19 @@ Matching physical inputs does not make the baseline fully physical: its inherite
 
 ## Verification and Remember
 
-Build and all three CTest suites passed: mesh loading, physical camera projection, and Python reference configuration. The real application printed 26.9915° and loaded the teapot, but macOS window services blocked rendered-frame verification. Blender was not installed; script execution inside Blender, device use, generated PNGs, physical DoF appearance and paired framing still require manual verification. Previous Experiment 15 visual results do not verify the new projection.
+Build and all three CTest suites passed: mesh loading, physical camera projection, and Python reference configuration. The real application printed 26.9915° and loaded the teapot, but macOS window services blocked rendered-frame verification. The corrected Blender script completed four 1200×1200, 32-sample Cycles renders in Blender 5.2.2 LTS (`d13f752e3b9c`, built 2026-09-15), using Apple M4 Max Metal. Paired OpenGL/Cycles framing remains unverified. Previous Experiment 15 visual results do not verify the new projection.
+
+The OBJ references absent `20900_Brown_Betty_Teapot_v1.mtl`. Blender 5.2.2's inspected importer API offers no material-loading switch, so a temporary binary copy omits only `mtllib`/`usemtl` lines and is deleted after import, even on failure. All other bytes and the original OBJ remain unchanged. Import reports 61,638 positions / 123,264 triangles. Controlled materials are assigned afterward. Blender 5+ supplies material/world node trees directly; only older versions set `use_nodes`. `render.use_compositing = False` bypasses compositing. No warnings are suppressed.
+
+Preview results (all successful, under `reports/raytraced_dof/`):
+
+| PNG | Bytes | Render time |
+|---|---:|---:|
+| `rt_focus5m_f1.4.png` | 1,216,935 | 2.43 s |
+| `rt_focus5m_f2.8.png` | 1,210,066 | 2.01 s |
+| `rt_focus5m_f8.png` | 1,201,341 | 1.97 s |
+| `rt_sharp.png` | 1,194,873 | 1.86 s |
+
+Total render loop: **8.27 s**, including saves and metadata, excluding scene setup. All four images were visually inspected: nonblack, upright visible teapot, intended scene direction; f/1.4 visibly blurs foreground/background more than f/8. These are Cycles-only observations, not a BasicDoF comparison. The successful render log contains no missing-MTL errors, deprecation warnings or other warnings. A prior sandboxed probe crashed and the version command emitted a USD cache-line warning; the approved unsandboxed render succeeded without these diagnostics. All three CTest suites passed again, including byte-preservation and temporary-file cleanup checks.
 
 The workflow establishes explicit, reproducible comparison settings. It does not fix BasicDoF, implement ray tracing, or begin the AI stage.

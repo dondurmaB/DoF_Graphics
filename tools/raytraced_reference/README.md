@@ -4,7 +4,7 @@ This separate Blender tool recreates the Experiment 16 reference scene and rende
 
 ## Availability and Evidence
 
-Blender was absent from both `PATH` and `/Applications/Blender.app/Contents/MacOS/Blender` during implementation. Blender must be installed before the ray-traced reference can be rendered. The script targets Blender **4.2 or newer** with Cycles and the built-in OBJ importer; its Blender API path has not been runtime-verified here. Python configuration/math tests and dry runs pass. No Cycles version, successful device use, rendered image or visual comparison is claimed yet.
+Verified with installed **Blender 5.2.2 LTS**, hash `d13f752e3b9c`, built 2026-09-15. The exact `--preview --sharp` run completed four 1200×1200, 32-sample Cycles renders on **Metal: Apple M4 Max (GPU - 32 cores)** in 8.27 seconds total. All PNGs were inspected for basic scene sanity; paired OpenGL/Cycles comparison remains pending. Older Blender 4.2+ compatibility is retained with a small node-tree version check, but was not exercised in this verification.
 
 ## Run
 
@@ -60,7 +60,7 @@ Default output files, created only by a successful Blender run:
 
 Each completed render gets a JSON sidecar with the asset hash, transforms, physical settings, resolution, samples, Blender version, render device, elapsed time and DoF state. Re-running overwrites the same named outputs: keep preview/final runs separately if retaining both. Generated images and JSON are ignored by Git; the output README is retained.
 
-`auto` attempts to enumerate Metal devices, selects those exposed by Cycles, otherwise uses CPU. A caught GPU render error retries on CPU and records the fallback. A failed CPU render exits with an error; no success record is written for that attempt. The terminal distinguishes selected devices from completed renders. OpenImageDenoise is enabled, with deterministic seed 16. No GPU use has been verified in this environment.
+`auto` attempts to enumerate Metal devices, selects those exposed by Cycles, otherwise uses CPU. A caught GPU render error retries on CPU and records the fallback. A failed CPU render exits with an error; no success record is written for that attempt. The terminal distinguishes selected devices from completed renders. OpenImageDenoise is enabled, with deterministic seed 16. The verified run completed all four images on Metal without CPU fallback. Each render logs index/count, output, focus, aperture, samples and device, then completion time; the final summary lists generated files and total rendering time.
 
 ## Exact Scene and Coordinate Matching
 
@@ -84,7 +84,7 @@ OBJ import uses `forward_axis='Y'`, `up_axis='Z'`, `global_scale=1`, and `clamp_
 | Floor | `(0,-0.85,-7.5)` | `0° / 0°` | `(12,0.1,25)` |
 | Wall | `(0,1.2,-22)` | `0° / 0°` | `(14,4,0.1)` |
 
-Boxes use `T * Ry * Rx * S`, as in OpenGL. Fallback-only cubes B/C are omitted because the actual teapot is required. Its missing `.mtl` is harmless: the script assigns a warm diffuse material. Supporting boxes use the corresponding six face colors. One sun points along the converted OpenGL light direction; a modest world light supplies ambient illumination. Diffuse path-traced lighting, shadows, color management and indirect light are not pixel-identical to the OpenGL shading.
+Boxes use `T * Ry * Rx * S`, as in OpenGL. Fallback-only cubes B/C are omitted because the actual teapot is required. Its missing `.mtl` is intentionally bypassed: the installed OBJ operator has no material-loading switch, so a temporary binary OBJ copy strips only `mtllib` and `usemtl` lines before import. All other bytes are preserved, the original asset is unchanged, and the copy is deleted even if import raises an error. The script then assigns a warm diffuse material. Supporting boxes use the corresponding six face colors. One sun points along the converted OpenGL light direction; a modest world light supplies ambient illumination. Diffuse path-traced lighting, shadows, color management and indirect light are not pixel-identical to the OpenGL shading.
 
 ## Camera and Pixel Matching
 
@@ -118,5 +118,7 @@ The 1200×1200 default matches the dimensions of the existing local OpenGL PNG, 
 BasicDoF retains the original CoC calculation, magnitude-as-radius convention, 12-pixel cap, 0.5-pixel early exit and 17 taps. The thin-lens CoC expression describes a diameter, while the baseline uses its magnitude directly as a radius; it is an approximate baseline, not a calibrated match to Cycles blur diameter. No correction is introduced in this experiment.
 
 Cycles samples real geometry through the lens and can resolve visibility absent from one RGB/depth layer. It still has sampling noise and denoising bias. Imported polygon triangulation, shading and display transforms can differ. Match geometry/framing and physical inputs before drawing conclusions; do not attribute every pixel difference solely to DoF. No observed superiority or artifact comparison is claimed without rendered pairs.
+
+Blender 5+ creates material and world node trees automatically; the script directly edits those trees and only sets `use_nodes` on older versions. `scene.render.use_compositing = False` bypasses compositor processing without the deprecated scene property. No warnings are suppressed. The verified render log had no missing-MTL errors or deprecation warnings. The preceding sandbox probe crashed and the version command emitted a USD cache-line warning; approved unsandboxed rendering completed cleanly. See the Experiment 16 notes/archive for per-image sizes and timings.
 
 Implementation references: [Blender sensor-fit API](https://docs.blender.org/api/3.6/bpy.types.Camera.html), [Blender OBJ coordinate conversion](https://github.com/blender/blender/blob/v4.5.0/source/blender/io/wavefront_obj/importer/importer_mesh_utils.cc), [Cycles device enumeration](https://github.com/blender/blender/blob/v4.5.0/intern/cycles/blender/addon/properties.py).

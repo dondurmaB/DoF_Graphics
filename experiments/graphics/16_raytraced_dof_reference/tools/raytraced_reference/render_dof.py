@@ -1,11 +1,13 @@
 """Run with Blender 4.2+; --dry-run validates the reference plan with ordinary Python."""
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import math
 from pathlib import Path
 import sys
+import tempfile
 import time
 
 PREVIEW_SAMPLES = 32
@@ -44,6 +46,25 @@ def project_root():
         if (parent / "assets/models/scene.obj").is_file() and (parent / "CMakeLists.txt").is_file():
             return parent
     raise FileNotFoundError("Run inside the project checkout with assets/models/scene.obj supplied.")
+
+
+@contextmanager
+def geometry_only_obj(source):
+    """Keep every non-material byte; remove the temporary import even on failure."""
+    # Blender 5.2's OBJ operator has no option to skip external material libraries.
+    with tempfile.TemporaryDirectory(prefix="dof-reference-obj-") as directory:
+        sanitized = Path(directory) / source.name
+        removed = 0
+        with source.open("rb") as original, sanitized.open("wb") as target:
+            for line in original:
+                directive = line.split(maxsplit=1)
+                if directive and directive[0] in (b"mtllib", b"usemtl"):
+                    removed += 1
+                else:
+                    target.write(line)
+        if removed:
+            print("OBJ material directives omitted; importing geometry without external materials.", flush=True)
+        yield sanitized
 
 
 def multiply(a, b):
@@ -173,7 +194,7 @@ def create_scene(bpy, args, plan):
     scene.render.image_settings.color_mode = "RGB"
     scene.render.image_settings.color_depth = "8"
     scene.render.film_transparent = False
-    scene.use_nodes = False  # No compositor blur.
+    scene.render.use_compositing = False  # Bypass compositing; DoF comes from lens sampling.
     scene.view_settings.view_transform = "Standard"
     scene.view_settings.look = "None"
     scene.view_settings.exposure = 0.0
@@ -183,7 +204,8 @@ def create_scene(bpy, args, plan):
     def material(name, color):
         result = bpy.data.materials.new(name)
         result.diffuse_color = (*color, 1.0)
-        result.use_nodes = True
+        if bpy.app.version < (5, 0, 0):
+            result.use_nodes = True  # Blender 5+ creates the node tree automatically.
         nodes = result.node_tree.nodes
         nodes.clear()
         diffuse = nodes.new("ShaderNodeBsdfDiffuse")
@@ -193,8 +215,9 @@ def create_scene(bpy, args, plan):
         return result
 
     # Identity importer axis conversion. Apply the same C*M transform used for all objects once.
-    bpy.ops.wm.obj_import(filepath=str(project_root() / plan["asset"]), forward_axis="Y", up_axis="Z",
-                          global_scale=1.0, clamp_size=0.0, use_split_objects=False, use_split_groups=False)
+    with geometry_only_obj(project_root() / plan["asset"]) as obj_path:
+        bpy.ops.wm.obj_import(filepath=str(obj_path), forward_axis="Y", up_axis="Z",
+                              global_scale=1.0, clamp_size=0.0, use_split_objects=False, use_split_groups=False)
     imported = [obj for obj in bpy.context.selected_objects if obj.type == "MESH"]
     if not imported:
         raise RuntimeError("OBJ import produced no mesh; no fallback is allowed for reference renders.")
@@ -249,7 +272,8 @@ def create_scene(bpy, args, plan):
         raise RuntimeError(f"Blender vertical FOV mismatch: {actual_fov} versus {plan['vertical_fov_degrees']}")
 
     scene.world = bpy.data.worlds.new("reference_world")
-    scene.world.use_nodes = True
+    if bpy.app.version < (5, 0, 0):
+        scene.world.use_nodes = True
     background = scene.world.node_tree.nodes.get("Background")
     background.inputs["Color"].default_value = (0.2, 0.3, 0.3, 1.0)
     background.inputs["Strength"].default_value = 0.4
@@ -284,12 +308,18 @@ def main(argv=None):
     device = select_device(bpy, scene, args.device)
     output = project_root() / plan["output_directory"]
     output.mkdir(parents=True, exist_ok=True)
-    for filename, focus, fstop, use_dof in render_jobs(args):
+    jobs = render_jobs(args)
+    total_started = time.monotonic()
+    generated = []
+    print(f"Blender {bpy.app.version_string} | CYCLES | selected {device}", flush=True)
+    for index, (filename, focus, fstop, use_dof) in enumerate(jobs, start=1):
         camera.dof.use_dof = use_dof
         camera.dof.focus_distance = focus
         camera.dof.aperture_fstop = fstop
         scene.render.filepath = str(output / filename)
-        print(f"Blender {bpy.app.version_string} | CYCLES | selected {device} | {filename}", flush=True)
+        print(f"Rendering {index}/{len(jobs)}:\n  output: {filename}\n  focus: {focus} m\n"
+              f"  aperture: f/{fstop:g} | DoF: {'on' if use_dof else 'off'}\n"
+              f"  samples: {args.samples}\n  device: {device}", flush=True)
         started = time.monotonic()
         try:
             result = bpy.ops.render.render(write_still=True)
@@ -300,14 +330,19 @@ def main(argv=None):
             scene.cycles.device = "CPU"
             device = "CPU (fallback after GPU failure)"
             result = bpy.ops.render.render(write_still=True)
-        if "FINISHED" not in result or not (output / filename).is_file():
+        if ("FINISHED" not in result or not (output / filename).is_file()
+                or (output / filename).stat().st_size == 0):
             raise RuntimeError(f"Render did not finish: {filename}")
         record = dict(plan, blender_version=bpy.app.version_string, render_device=device,
                       focus_distance_m=focus, f_number=fstop, use_dof=use_dof,
                       render_seconds=time.monotonic() - started, denoising="OPENIMAGEDENOISE",
                       output=filename, render_completed=True)
         (output / Path(filename).with_suffix(".json")).write_text(json.dumps(record, indent=2) + "\n")
-        print(f"Completed {filename} using {device}", flush=True)
+        generated.append(filename)
+        print(f"Completed {filename} in {record['render_seconds']:.2f} s using {device}", flush=True)
+    print(f"Reference rendering complete in {time.monotonic() - total_started:.2f} s.\nGenerated:", flush=True)
+    for filename in generated:
+        print(f"- {output / filename}", flush=True)
 
 
 if __name__ == "__main__":
