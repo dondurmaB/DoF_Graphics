@@ -8,6 +8,8 @@ CMakeCache.txt
 compile_commands.json
 *.o
 *.obj
+# Wavefront OBJ assets are geometry, not compiler object files.
+!assets/models/**/*.obj
 *.a
 *.dylib
 *.so
