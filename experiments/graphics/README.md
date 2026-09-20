@@ -13,3 +13,4 @@
 | 11 | Off-Screen Framebuffers and Post-Processing | [Code](11_framebuffers/) | [Notes](../../notes/graphics/11_framebuffers.md) |
 | 12 | Sampling and Linearizing the Depth Texture | [Code](12_depth_texture_postprocess/) | [Notes](../../notes/graphics/12_depth_texture_postprocess.md) |
 | 13 | Physical Focus Distance and Circle of Confusion | [Code](13_coc_visualization/) | [Notes](../../notes/graphics/13_coc_visualization.md) |
+| 14 | Basic Depth of Field | [Code](14_basic_dof/) | [Notes](../../notes/graphics/14_basic_dof.md) |

@@ -15,3 +15,4 @@
 | 11 | [Off-Screen Framebuffers and Post-Processing](11_framebuffers.md) | Render the scene into color/depth textures, then present it through a full-screen quad. |
 | 12 | [Sampling and Linearizing the Depth Texture](12_depth_texture_postprocess.md) | Sample FBO color/depth textures in the screen pass and reconstruct linear depth. |
 | 13 | [Physical Focus Distance and Circle of Confusion](13_coc_visualization.md) | Calculate and visualize pixel-space CoC from sampled linear depth. |
+| 14 | [Basic Depth of Field](14_basic_dof.md) | Render the first DoF blur with a 17-tap disk gather driven by CoC magnitude. |
