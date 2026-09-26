@@ -16,3 +16,7 @@
 | 12 | [Sampling and Linearizing the Depth Texture](12_depth_texture_postprocess.md) | Sample FBO color/depth textures in the screen pass and reconstruct linear depth. |
 | 13 | [Physical Focus Distance and Circle of Confusion](13_coc_visualization.md) | Calculate and visualize pixel-space CoC from sampled linear depth. |
 | 14 | [Basic Depth of Field](14_basic_dof.md) | Render the first DoF blur with a 17-tap disk gather driven by CoC magnitude. |
+| 15 | [Where Screen-Space Depth of Field Breaks](15_screen_space_halo.md) | Build a scene that exposes every failure of a single-layer gather, and measure them. |
+| 16 | [Multi-View Depth of Field](16_multiview_dof.md) | Evaluate the aperture integral by re-rendering the scene once per point on the lens. |
+| 17 | [Lens-Sampled Ray Tracing](17_raytraced_dof.md) | Sample the same integral stochastically per pixel to build the reference, and what that reference found. |
+

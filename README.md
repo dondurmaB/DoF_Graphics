@@ -65,7 +65,7 @@ Configure and build:
 
 ```sh
 cmake -S . -B build
-cmake --build build --target DepthResearch DoFScene DoFSceneTests
+cmake --build build --target DepthResearch DoFScene DoFApproaches DoFSceneTests
 ```
 
 Run the original teaching renderer:
@@ -81,6 +81,13 @@ cmake --build build --target DoFScene
 ./build/DoFScene.app/Contents/MacOS/DoFScene
 ```
 
+Run the three-way depth-of-field comparison:
+
+```sh
+cmake --build build --target DoFApproaches
+./build/DoFApproaches.app/Contents/MacOS/DoFApproaches --method 2 --samples 64
+```
+
 Run the available tests:
 
 ```sh
@@ -93,6 +100,42 @@ ctest --test-dir build --output-on-failure
 `DepthResearch` is the original numbered-experiment renderer. It remains the learning path for OpenGL fundamentals and the archived experiments under `experiments/graphics/`.
 
 `DoFScene` is a separate native macOS GLFW application for the cafe tabletop depth-of-field demo. It keeps the teaching snapshots intact while providing a richer procedural scene with an interactive camera, focus controls, diagnostic render modes, validation capture paths, and a screenshot path for visual review.
+
+`DoFApproaches` renders one shared analytic scene through three different depth-of-field methods so they can be subtracted from each other: a single-layer screen-space gather, multi-view aperture accumulation, and lens-sampled ray tracing. It is the code behind Experiments 15-17.
+
+## DoFApproaches
+
+A three-way comparison of depth-of-field methods on one scene. All three share the same geometry and the same surface shading, so they differ in exactly one respect: how visibility through the aperture is resolved. That is what makes their difference images meaningful.
+
+```sh
+cmake --build build --target DoFApproaches
+BIN=./build/DoFApproaches.app/Contents/MacOS/DoFApproaches
+
+$BIN --method 1 --samples 64  --size 1280x860 --capture output/dof3-m1-gather.png
+$BIN --method 2 --samples 64  --size 1280x860 --capture output/dof3-m2-multiview-64.png
+$BIN --method 3 --samples 512 --size 1280x860 --capture output/dof3-m3-raytrace-512.png
+
+python3 tools/compare_dof_methods.py
+```
+
+| Method | What it does | Error type |
+|---|---|---|
+| `--method 1` | Screen-space gather over one colour and depth image | Bias: more taps do not fix it |
+| `--method 2` | N full scene renders from N points on the aperture, sheared to hold the focus plane | Banding from N discrete views, falls as 1/N |
+| `--method 3` | One stochastic lens sample per pixel per frame, accumulated | Noise, falls as 1/sqrt(N) |
+
+Options: `--method 1..3`, `--samples N` (64 max for methods 1-2, 512 for method 3), `--frames N`, `--focus meters`, `--f-number`, `--lens mm`, `--sensor-height mm`, `--max-radius pixels`, `--size WIDTHxHEIGHT`, `--capture path`.
+
+Controls: `1`/`2`/`3` switch method, `Up`/`Down` double and halve the sample count, `RMB` looks, `WASD` and `Q`/`E` move, scroll or `[`/`]` change focus distance, `-`/`=` change the f-number, `R` restarts accumulation, `Esc` quits.
+
+`tools/compare_dof_methods.py` measures each method against the 512-sample ray-traced reference and writes amplified difference maps plus `output/dof3-comparison.json`. Measured mean absolute error on a 0..255 range, 64 samples each:
+
+| Method | Overall | Sharp-silhouette halo | Near occluder | Defocused highlights |
+|---|---|---|---|---|
+| 1: gather | 4.946 | 2.925 | 12.641 | 4.014 |
+| 2: multi-view | 0.682 | 0.558 | 1.364 | 0.626 |
+
+The floor of the comparison is 0.518, measured by rendering the rasterized and ray-traced paths at f/22 where depth of field vanishes; it is nonzero because the rasterizer tessellates spheres the ray tracer intersects exactly.
 
 ## DoFScene Controls
 
@@ -198,7 +241,7 @@ If the window cannot create an OpenGL 3.3 Core context, check that you are runni
 
 If GLAD initialization fails, make sure `gladLoadGLLoader()` runs after `glfwMakeContextCurrent()`. OpenGL function pointers are context-dependent.
 
-`DepthResearch` loads shaders from the source-tree directory. `DoFScene` first loads its copied shaders beside the executable, then falls back to the source tree. Rebuild `DoFScene` after editing shaders to refresh its bundled copies.
+`DepthResearch` loads shaders from the source-tree directory. `DoFScene` and `DoFApproaches` first load their copied shaders beside the executable, then fall back to the source tree. Rebuild the target after editing shaders to refresh its bundled copies.
 
 If the triangle looks stretched or clipped after moving the window between displays, confirm the framebuffer resize callback is firing and that `glViewport()` receives framebuffer dimensions rather than logical window dimensions.
 

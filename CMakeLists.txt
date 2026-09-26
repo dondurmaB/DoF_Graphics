@@ -93,6 +93,41 @@ add_custom_command(TARGET DoFScene POST_BUILD
         $<TARGET_FILE_DIR:DoFScene>/shaders/dof_scene
 )
 
+# A three-way depth-of-field comparison on one shared analytic scene:
+# single-layer screen-space gather, multi-view aperture accumulation, and
+# lens-sampled ray tracing.
+add_executable(DoFApproaches MACOSX_BUNDLE
+    src/dof_approaches/main.cpp
+    src/dof_approaches/scene.cpp
+)
+target_include_directories(DoFApproaches PRIVATE src)
+target_link_libraries(DoFApproaches PRIVATE
+    glfw glm::glm ${MACOS_OPENGL_FRAMEWORK}
+    ${MACOS_COREGRAPHICS_FRAMEWORK} ${MACOS_IMAGEIO_FRAMEWORK}
+)
+target_compile_definitions(DoFApproaches PRIVATE PROJECT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_options(DoFApproaches PRIVATE -Wall -Wextra -Wpedantic)
+set_target_properties(DoFApproaches PROPERTIES
+    MACOSX_BUNDLE_BUNDLE_NAME "DoF Approaches"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "local.dof.approaches"
+)
+set_property(TARGET DoFApproaches APPEND PROPERTY LINK_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/dof_approaches/shading.glsl
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/dof_approaches/screen.vert
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/dof_approaches/scene.vert
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/dof_approaches/scene.frag
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/dof_approaches/additive.frag
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/dof_approaches/postprocess.frag
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/dof_approaches/resolve.frag
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/dof_approaches/raytrace.frag
+)
+add_custom_command(TARGET DoFApproaches POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/dof_approaches
+        $<TARGET_FILE_DIR:DoFApproaches>/shaders/dof_approaches
+    COMMENT "Copying DoF approach shaders next to the executable"
+)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(DoFSceneTests tests/dof_scene_tests.cpp src/dof_scene/scene.cpp)
