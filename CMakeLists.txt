@@ -60,3 +60,44 @@ add_custom_command(TARGET DepthResearch POST_BUILD
             $<TARGET_FILE_DIR:DepthResearch>/shaders
     COMMENT "Copying shader files next to the executable"
 )
+
+# A separate interactive scene keeps the numbered teaching snapshots intact.
+find_library(MACOS_COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
+find_library(MACOS_IMAGEIO_FRAMEWORK ImageIO REQUIRED)
+add_executable(DoFScene MACOSX_BUNDLE
+    src/dof_scene/main.cpp
+    src/dof_scene/scene.cpp
+)
+target_include_directories(DoFScene PRIVATE include)
+target_link_libraries(DoFScene PRIVATE
+    glfw glm::glm ${MACOS_OPENGL_FRAMEWORK}
+    ${MACOS_COREGRAPHICS_FRAMEWORK} ${MACOS_IMAGEIO_FRAMEWORK}
+)
+target_compile_definitions(DoFScene PRIVATE PROJECT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_options(DoFScene PRIVATE -Wall -Wextra -Wpedantic)
+set_target_properties(DoFScene PROPERTIES
+    MACOSX_BUNDLE_BUNDLE_NAME "Cafe - Depth of Field"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "local.dof.cafe"
+)
+set_property(TARGET DoFScene APPEND PROPERTY LINK_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/dof_scene/scene.vert
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/dof_scene/scene.frag
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/dof_scene/depth.vert
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/dof_scene/depth.frag
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/dof_scene/screen.vert
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/dof_scene/screen.frag
+)
+add_custom_command(TARGET DoFScene POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/dof_scene
+        $<TARGET_FILE_DIR:DoFScene>/shaders/dof_scene
+)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(DoFSceneTests tests/dof_scene_tests.cpp src/dof_scene/scene.cpp)
+    target_include_directories(DoFSceneTests PRIVATE include)
+    target_link_libraries(DoFSceneTests PRIVATE glm::glm)
+    target_compile_options(DoFSceneTests PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME dof_scene_math_and_mesh COMMAND DoFSceneTests)
+endif()
