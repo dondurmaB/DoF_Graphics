@@ -18,18 +18,26 @@ uniform float uCoCVisualizationMaxPixels;
 uniform float uFramebufferHeightPixels;
 uniform float uFramebufferWidthPixels;
 uniform float uMaxBlurRadiusPixels;
+// How many aperture samples BasicDoF gathers per pixel. Raising this reduces
+// the banding/ringing that a large blur radius exposes with only a few taps,
+// at a direct cost in texture fetches (samples x framebuffer pixels).
+uniform int uCoCSampleCount;
 
-// Two staggered rings within a unit disk: 16 neighbors plus the center.
-const vec2 diskOffsets[16] = vec2[](
-    vec2( 0.5000,  0.0000), vec2( 0.3536,  0.3536),
-    vec2( 0.0000,  0.5000), vec2(-0.3536,  0.3536),
-    vec2(-0.5000,  0.0000), vec2(-0.3536, -0.3536),
-    vec2( 0.0000, -0.5000), vec2( 0.3536, -0.3536),
-    vec2( 0.9239,  0.3827), vec2( 0.3827,  0.9239),
-    vec2(-0.3827,  0.9239), vec2(-0.9239,  0.3827),
-    vec2(-0.9239, -0.3827), vec2(-0.3827, -0.9239),
-    vec2( 0.3827, -0.9239), vec2( 0.9239, -0.3827)
-);
+const int MAX_COC_SAMPLES = 256; // GLSL loop bound: an upper cap, not the default count.
+const float GOLDEN_ANGLE_RADIANS = 2.39996323; // ~137.5 degrees.
+
+// A Vogel/Fermat spiral: conceptually the same idea as sampling points across
+// a real lens aperture, which is what the Cycles reference in
+// tools/raytraced_reference does by path tracing through the lens. sqrt()
+// keeps sample density even per unit area instead of bunching samples near
+// the disk center, and the golden angle keeps the spiral from lining up into
+// visible rays as sampleIndex grows.
+vec2 vogelDiskSample(int sampleIndex, int sampleCount)
+{
+    float r = sqrt((float(sampleIndex) + 0.5) / float(sampleCount));
+    float theta = float(sampleIndex) * GOLDEN_ANGLE_RADIANS;
+    return vec2(r * cos(theta), r * sin(theta));
+}
 
 float linearizeDepth(float rawDepth)
 {
@@ -106,15 +114,21 @@ void main()
         vec2 framebufferSizePixels = vec2(uFramebufferWidthPixels, uFramebufferHeightPixels);
         vec2 texelSize = 1.0 / max(framebufferSizePixels, vec2(1.0));
         vec2 edgeInset = 0.5 * texelSize;
-        vec4 gatheredColor = sceneColor;
-        // Cost scales with screen resolution x texture samples (17 color + 1 depth).
-        // Neighbors are not depth-tested here: silhouette bleeding is a baseline limitation.
-        for (int i = 0; i < 16; ++i) {
-            vec2 sampleUV = texCoord + diskOffsets[i] * blurRadiusPixels * texelSize;
+
+        // Clamp so a bad uniform value (0, negative, or absurdly large) can't
+        // divide by zero below or blow past the fixed GLSL loop bound.
+        int sampleCount = clamp(uCoCSampleCount, 1, MAX_COC_SAMPLES);
+
+        vec4 gatheredColor = vec4(0.0);
+        // Cost scales with screen resolution x sample count (color + depth per tap).
+        // Neighbors are not depth-tested here: silhouette bleeding is a baseline limitation,
+        // same as before, just less visible now that the disk is densely sampled.
+        for (int i = 0; i < sampleCount; ++i) {
+            vec2 sampleUV = texCoord + vogelDiskSample(i, sampleCount) * blurRadiusPixels * texelSize;
             sampleUV = clamp(sampleUV, edgeInset, vec2(1.0) - edgeInset);
             gatheredColor += texture(uSceneColor, sampleUV);
         }
-        fragColor = gatheredColor / 17.0;
+        fragColor = gatheredColor / float(sampleCount);
         return;
     }
 

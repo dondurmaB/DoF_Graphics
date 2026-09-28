@@ -7,6 +7,10 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include <imgui.h>
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_opengl3.h>
+
 #include "Mesh.h"
 #include "PhysicalCamera.h"
 
@@ -74,10 +78,16 @@ using namespace std;
 #ifndef GL_TEXTURE1
 #define GL_TEXTURE1 0x84C1
 #endif
+#ifndef GL_TEXTURE2
+#define GL_TEXTURE2 0x84C2
+#endif
+#ifndef GL_NONE
+#define GL_NONE 0x0000
+#endif
 
 // DEVELOPMENT SETTINGS
-const int windowWidth = 600;
-const int windowHeight = 600;
+const int windowWidth = 1200;
+const int windowHeight = 1200;
 const int windowPosX = 50;
 const int windowPosY = 100;
 
@@ -99,12 +109,36 @@ ScreenMode screenMode = ScreenMode::BasicDoF;
 bool usePhysicalCameraProjection = true;
 float focusDistanceMeters = 5.0f;
 float focalLengthMillimeters = 50.0f;
-float fNumber = 1.4f;
+float fNumber = 10.0f;
 float sensorHeightMillimeters = 24.0f;
 // Debug visualization scaling only; does not change the rendered blur.
 float cocVisualizationMaxPixels = 20.0f;
 // Actual maximum gathering radius used by BasicDoF.
-float maxBlurRadiusPixels = 12.0f;
+float maxBlurRadiusPixels = 120.0f;
+// Aperture samples per pixel for the BasicDoF gather (shaders/screen.frag).
+// At a 120 px radius, 16 taps band visibly; 100 is the meeting's target.
+int cocSampleCount = 100;
+
+// ==============================
+// EXPERIMENT 17 CONTROLS: shading, shadows, live UI
+// ==============================
+// Points FROM a lit surface TOWARD the light. Matches
+// tools/raytraced_reference/render_dof.py's LIGHT_DIRECTION_GL so the raster
+// pass and the Cycles ground truth share one lighting setup.
+glm::vec3 lightDirection = glm::vec3(-0.4f, 0.8f, 0.6f);
+glm::vec3 lightColor = glm::vec3(1.0f, 1.0f, 1.0f);
+float ambientStrength = 0.25f;
+bool enableShadows = true;
+const int shadowMapSize = 2048;
+// Half-extents of the orthographic light frustum, world-space meters. Sized
+// to cover the box layout below (roughly x[-4,3], y[-1,4], z[3,-22]) with
+// margin; not derived automatically, same "explicit over inferred" approach
+// the project already uses for camera and scene scale.
+const float shadowFrustumHalfExtent = 20.0f;
+const float shadowNearPlane = 0.1f;
+const float shadowFarPlane = 60.0f;
+
+bool showControlPanel = true;
 
 // OBJ units are arbitrary. Choose meters per authored unit explicitly; never auto-normalize.
 const string importedScenePath = "assets/models/scene.obj";
@@ -155,6 +189,23 @@ glm::vec3 cubeEPosition = glm::vec3(-3.8f, 0.4f, -20.0f);
 float cubeERotationXDegrees = -15.0f;
 float cubeERotationYDegrees = 60.0f;
 float cubeEUniformScale = 2.0f;
+
+// ==============================
+// EXPERIMENT 17 SCENE ADDITIONS: extra depth layers for a richer composition
+// ==============================
+// A/D/E above are read by tests/test_reference_config.py, which regex-matches
+// them against tools/raytraced_reference/render_dof.py's BOXES tuple; F and G
+// are new and are mirrored there separately (BOXES entries midground_F,
+// background_G) so the Cycles reference keeps the same environment.
+glm::vec3 cubeFPosition = glm::vec3(2.4f, -0.3f, -2.0f);
+float cubeFRotationXDegrees = 10.0f;
+float cubeFRotationYDegrees = -25.0f;
+float cubeFUniformScale = 0.35f;
+
+glm::vec3 cubeGPosition = glm::vec3(-2.2f, 0.2f, -13.0f);
+float cubeGRotationXDegrees = 0.0f;
+float cubeGRotationYDegrees = 40.0f;
+float cubeGUniformScale = 1.2f;
 
 // ==============================
 // EXPERIMENT 08 CAMERA CONTROLS
@@ -241,13 +292,14 @@ void showVerificationStatus(GLFWwindow* window, bool printToConsole = true) {
 }
 
 void printVerificationHelp() {
-    cout << "Experiment 16 verification keys (no rebuild needed):\n"
+    cout << "Experiment 17 verification keys (no rebuild needed):\n"
          << "  1 Color | 2 RawDepth | 3 LinearDepth | 4 CoCMagnitude | 5 CoCSigned | 6 BasicDoF\n"
          << "  7 focus 2 m | 8 focus 5 m | 9 focus 15 m | F toggle f/1.4 and f/8\n"
          << "  R reset camera | Tab release/capture cursor (pauses/resumes camera)\n"
          << "  T reference preset + release cursor | V physical/legacy projection | B f/2.8\n"
          << "  [ / ] focal length -/+5 mm | , / . sensor height -/+2 mm\n"
-         << "  WASD + mouse navigate | P screenshot | H help/status | Escape exit\n";
+         << "  WASD + mouse navigate | P screenshot | H help/status | Escape exit\n"
+         << "  G show/hide control panel (press Tab first to free the cursor for its sliders)\n";
 }
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
@@ -263,7 +315,16 @@ void updateCameraFront() {
     cameraFront = glm::normalize(front);
 }
 
+// Callbacks are installed before the ImGui context exists, so an early event must not touch ImGui::GetIO().
+static bool imguiWantsMouse() { return ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse; }
+static bool imguiWantsKeyboard() { return ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard; }
+
 void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
+    if (imguiWantsMouse()) {
+        // The control panel wants this mouse motion (e.g. dragging a slider); don't also turn the camera.
+        firstMouse = true;
+        return;
+    }
     if (glfwGetInputMode(window, GLFW_CURSOR) != GLFW_CURSOR_DISABLED) {
         firstMouse = true;
         return;
@@ -295,6 +356,10 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     // Ignore repeats: holding F or Tab must not toggle repeatedly.
     if (action != GLFW_PRESS) return;
+
+    // Let the control panel consume keys while it has focus, except Tab (release/capture
+    // the cursor, which is how the panel becomes reachable) and G (panel visibility itself).
+    if (imguiWantsKeyboard() && key != GLFW_KEY_TAB && key != GLFW_KEY_G) return;
 
     if (key >= GLFW_KEY_1 && key <= GLFW_KEY_6) {
         screenMode = static_cast<ScreenMode>(key - GLFW_KEY_1);
@@ -341,6 +406,8 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         glfwSetInputMode(window, GLFW_CURSOR, mouseLook ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
     } else if (key == GLFW_KEY_H) {
         printVerificationHelp();
+    } else if (key == GLFW_KEY_G) {
+        showControlPanel = !showControlPanel;
     } else {
         return;
     }
@@ -351,6 +418,9 @@ void processInput(GLFWwindow *window) {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
         glfwSetWindowShouldClose(window, true);
     }
+
+    // While the control panel is focused, let WASD type/interact there instead of moving the camera.
+    if (imguiWantsKeyboard()) return;
 
     // Keep the comparison view still while the cursor is released for window resizing.
     if (glfwGetInputMode(window, GLFW_CURSOR) != GLFW_CURSOR_DISABLED) return;
@@ -599,6 +669,10 @@ struct ExtraGlFunctions {
     void (*deleteTextures)(GLsizei, const GLuint*) = nullptr;
     void (*activeTexture)(GLenum) = nullptr;
     void (*uniform1i)(GLint, GLint) = nullptr;
+    void (*uniform3fv)(GLint, GLsizei, const GLfloat*) = nullptr;
+    // A depth-only FBO (the shadow map) needs both set to GL_NONE to be complete on strict drivers.
+    void (*drawBuffer)(GLenum) = nullptr;
+    void (*readBuffer)(GLenum) = nullptr;
 };
 
 template <typename FunctionPointer>
@@ -623,7 +697,10 @@ bool loadExtraGlFunctions(ExtraGlFunctions& functions) {
            loadGlFunction(functions.texParameteri, "glTexParameteri") &&
            loadGlFunction(functions.deleteTextures, "glDeleteTextures") &&
            loadGlFunction(functions.activeTexture, "glActiveTexture") &&
-           loadGlFunction(functions.uniform1i, "glUniform1i");
+           loadGlFunction(functions.uniform1i, "glUniform1i") &&
+           loadGlFunction(functions.uniform3fv, "glUniform3fv") &&
+           loadGlFunction(functions.drawBuffer, "glDrawBuffer") &&
+           loadGlFunction(functions.readBuffer, "glReadBuffer");
 }
 
 int main() {
@@ -727,6 +804,18 @@ int main() {
         return -1;
     }
 
+    unsigned int shadowShaderProgram = createShaderProgram(shaderDirectory + "shadow.vert",
+                                                            shaderDirectory + "shadow.frag",
+                                                            "shadow.vert",
+                                                            "shadow.frag");
+    if (shadowShaderProgram == 0) {
+        glDeleteProgram(shaderProgram);
+        glDeleteProgram(screenShaderProgram);
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return -1;
+    }
+
     // Uniform locations are queried once after linking. A -1 location can mean the uniform was optimized away.
     int intensityLocation = glGetUniformLocation(shaderProgram, "uIntensity");
     if (intensityLocation == -1) {
@@ -748,6 +837,48 @@ int main() {
     int projectionLocation = glGetUniformLocation(shaderProgram, "uProjection");
     if (projectionLocation == -1) {
         cout << "Warning: could not find uniform uProjection" << endl;
+    }
+
+    int lightSpaceMatrixLocation = glGetUniformLocation(shaderProgram, "uLightSpaceMatrix");
+    if (lightSpaceMatrixLocation == -1) {
+        cout << "Warning: could not find uniform uLightSpaceMatrix" << endl;
+    }
+
+    int lightDirectionLocation = glGetUniformLocation(shaderProgram, "uLightDirection");
+    if (lightDirectionLocation == -1) {
+        cout << "Warning: could not find uniform uLightDirection" << endl;
+    }
+
+    int lightColorLocation = glGetUniformLocation(shaderProgram, "uLightColor");
+    if (lightColorLocation == -1) {
+        cout << "Warning: could not find uniform uLightColor" << endl;
+    }
+
+    int ambientStrengthLocation = glGetUniformLocation(shaderProgram, "uAmbientStrength");
+    if (ambientStrengthLocation == -1) {
+        cout << "Warning: could not find uniform uAmbientStrength" << endl;
+    }
+
+    int useShadowsLocation = glGetUniformLocation(shaderProgram, "uUseShadows");
+    if (useShadowsLocation == -1) {
+        cout << "Warning: could not find uniform uUseShadows" << endl;
+    }
+
+    int shadowMapLocation = glGetUniformLocation(shaderProgram, "uShadowMap");
+    if (shadowMapLocation == -1) {
+        cout << "Warning: could not find uniform uShadowMap" << endl;
+    }
+
+    // The shadow pass shares the same uModel name so drawBox/drawCube can upload
+    // it identically whichever program is currently bound.
+    int shadowModelLocation = glGetUniformLocation(shadowShaderProgram, "uModel");
+    if (shadowModelLocation == -1) {
+        cout << "Warning: could not find uniform uModel (shadow.vert)" << endl;
+    }
+
+    int shadowLightSpaceMatrixLocation = glGetUniformLocation(shadowShaderProgram, "uLightSpaceMatrix");
+    if (shadowLightSpaceMatrixLocation == -1) {
+        cout << "Warning: could not find uniform uLightSpaceMatrix (shadow.vert)" << endl;
     }
 
     int sceneColorLocation = glGetUniformLocation(screenShaderProgram, "uSceneColor");
@@ -820,6 +951,11 @@ int main() {
         cout << "Warning: could not find uniform uMaxBlurRadiusPixels" << endl;
     }
 
+    int cocSampleCountLocation = glGetUniformLocation(screenShaderProgram, "uCoCSampleCount");
+    if (cocSampleCountLocation == -1) {
+        cout << "Warning: could not find uniform uCoCSampleCount" << endl;
+    }
+
     glUseProgram(screenShaderProgram);
     // Sampler uniforms store texture-unit indices, not texture object IDs.
     if (sceneColorLocation != -1) {
@@ -830,45 +966,46 @@ int main() {
     }
 
     // Vertex attributes vary per vertex; uniforms are shared for the whole draw call.
-    // The cube uses 24 face vertices so each face can have one clear color.
-    // Each vertex has six floats: position.xyz followed by color.rgb.
+    // The cube uses 24 face vertices so each face can have one clear color and one flat normal.
+    // Each vertex has nine floats: position.xyz, color.rgb, normal.xyz (object space;
+    // uModel's inverse-transpose in basic.vert carries this into world space).
     // Positions are fixed model-space geometry; transformation happens with a matrix uniform.
     float vertices[] = {
-        // Front face: red
-        -0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
-         0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
-         0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
-        -0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f,
+        // Front face: red, normal +Z
+        -0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 0.0f,   0.0f, 0.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 0.0f,   0.0f, 0.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f,   0.0f, 0.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,  1.0f, 0.0f, 0.0f,   0.0f, 0.0f, 1.0f,
 
-        // Back face: green
-         0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-         0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
+        // Back face: green, normal -Z
+         0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,   0.0f, 0.0f, -1.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,   0.0f, 0.0f, -1.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f,   0.0f, 0.0f, -1.0f,
+         0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 0.0f,   0.0f, 0.0f, -1.0f,
 
-        // Left face: blue
-        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, 1.0f,
-        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f, 1.0f,
-        -0.5f,  0.5f,  0.5f,  0.0f, 0.0f, 1.0f,
-        -0.5f,  0.5f, -0.5f,  0.0f, 0.0f, 1.0f,
+        // Left face: blue, normal -X
+        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, 1.0f,  -1.0f, 0.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f, 1.0f,  -1.0f, 0.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f, 0.0f, 1.0f,  -1.0f, 0.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 0.0f, 1.0f,  -1.0f, 0.0f, 0.0f,
 
-        // Right face: yellow
-         0.5f, -0.5f,  0.5f,  1.0f, 1.0f, 0.0f,
-         0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.0f,
-         0.5f,  0.5f, -0.5f,  1.0f, 1.0f, 0.0f,
-         0.5f,  0.5f,  0.5f,  1.0f, 1.0f, 0.0f,
+        // Right face: yellow, normal +X
+         0.5f, -0.5f,  0.5f,  1.0f, 1.0f, 0.0f,   1.0f, 0.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,  1.0f, 1.0f, 0.0f,   1.0f, 0.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  1.0f, 1.0f, 0.0f,   1.0f, 0.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  1.0f, 1.0f, 0.0f,   1.0f, 0.0f, 0.0f,
 
-        // Top face: cyan
-        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f, 1.0f,
-         0.5f,  0.5f,  0.5f,  0.0f, 1.0f, 1.0f,
-         0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 1.0f,
-        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 1.0f,
+        // Top face: cyan, normal +Y
+        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f, 1.0f,   0.0f, 1.0f, 0.0f,
+         0.5f,  0.5f,  0.5f,  0.0f, 1.0f, 1.0f,   0.0f, 1.0f, 0.0f,
+         0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 1.0f,   0.0f, 1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, 1.0f,   0.0f, 1.0f, 0.0f,
 
-        // Bottom face: magenta
-        -0.5f, -0.5f, -0.5f,  1.0f, 0.0f, 1.0f,
-         0.5f, -0.5f, -0.5f,  1.0f, 0.0f, 1.0f,
-         0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 1.0f,
-        -0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 1.0f
+        // Bottom face: magenta, normal -Y
+        -0.5f, -0.5f, -0.5f,  1.0f, 0.0f, 1.0f,   0.0f, -1.0f, 0.0f,
+         0.5f, -0.5f, -0.5f,  1.0f, 0.0f, 1.0f,   0.0f, -1.0f, 0.0f,
+         0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 1.0f,   0.0f, -1.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,  1.0f, 0.0f, 1.0f,   0.0f, -1.0f, 0.0f
     };
 
     // The index array describes two triangles per cube face: 6 faces * 2 triangles * 3 indices = 36.
@@ -902,13 +1039,17 @@ int main() {
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
     // 1. then set the vertex attributes pointers
-    // Stride is the byte distance from one vertex to the next: 6 floats here.
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    // Stride is the byte distance from one vertex to the next: 9 floats here (pos, color, normal).
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);  
 
     // Color starts after the first three floats because position takes x, y, z.
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
+
+    // Normal starts after position and color (location 2, matching Mesh.cpp's imported-mesh layout).
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
 
     // 2. use our shader program when we want to render an object
     // glUseProgram(shaderProgram);
@@ -1005,6 +1146,63 @@ int main() {
         return true;
     };
 
+    // ==============================
+    // EXPERIMENT 17: shadow map framebuffer
+    // ==============================
+    // Depth-only, fixed resolution (unlike the scene FBO, this never tracks
+    // the window size): the light's view of the scene doesn't change with
+    // the window, only with the scene and light direction.
+    unsigned int shadowFBO = 0;
+    unsigned int shadowDepthTexture = 0;
+    extraGl.genFramebuffers(1, &shadowFBO);
+    extraGl.genTextures(1, &shadowDepthTexture);
+
+    extraGl.bindTexture(GL_TEXTURE_2D, shadowDepthTexture);
+    extraGl.texImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, shadowMapSize, shadowMapSize, 0,
+                       GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
+    extraGl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    extraGl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    extraGl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    extraGl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    extraGl.bindFramebuffer(GL_FRAMEBUFFER, shadowFBO);
+    extraGl.framebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shadowDepthTexture, 0);
+    // No color attachment exists on this FBO; without these two calls some
+    // drivers report GL_FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER / READ_BUFFER.
+    extraGl.drawBuffer(GL_NONE);
+    extraGl.readBuffer(GL_NONE);
+    GLenum shadowFramebufferStatus = extraGl.checkFramebufferStatus(GL_FRAMEBUFFER);
+    extraGl.bindFramebuffer(GL_FRAMEBUFFER, 0);
+    extraGl.bindTexture(GL_TEXTURE_2D, 0);
+    if (shadowFramebufferStatus != GL_FRAMEBUFFER_COMPLETE) {
+        cout << "Shadow framebuffer is incomplete. Status: 0x" << hex << shadowFramebufferStatus << dec << endl;
+        glDeleteProgram(shaderProgram);
+        glDeleteProgram(screenShaderProgram);
+        glDeleteProgram(shadowShaderProgram);
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return -1;
+    }
+    cout << "Shadow framebuffer complete: " << shadowMapSize << " x " << shadowMapSize << endl;
+
+    // The scene (boxes + imported mesh) doesn't move once running, only the
+    // camera does, so one orthographic light-space matrix covers every frame.
+    // If objects ever animate, recompute this inside the render loop instead.
+    auto computeLightSpaceMatrix = [&]() {
+        glm::vec3 lightDir = glm::normalize(lightDirection);
+        // The scene sits roughly around z = -8; center the light's look-at
+        // there instead of at the origin so the frustum isn't wasted on empty space.
+        glm::vec3 sceneCenter = glm::vec3(0.0f, 0.0f, -8.0f);
+        glm::vec3 lightEye = sceneCenter + lightDir * shadowFrustumHalfExtent;
+        glm::vec3 upHint = (std::abs(lightDir.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+        glm::mat4 lightView = glm::lookAt(lightEye, sceneCenter, upHint);
+        glm::mat4 lightProjection = glm::ortho(-shadowFrustumHalfExtent, shadowFrustumHalfExtent,
+                                               -shadowFrustumHalfExtent, shadowFrustumHalfExtent,
+                                               shadowNearPlane, shadowFarPlane);
+        return lightProjection * lightView;
+    };
+    glm::mat4 lightSpaceMatrix = computeLightSpaceMatrix();
+
     if (wireframeMode) {
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
     } else {
@@ -1016,6 +1214,17 @@ int main() {
     glDepthFunc(GL_LESS);
 
     bool screenshotKeyWasPressed = false;
+
+    // ==============================
+    // EXPERIMENT 17: Dear ImGui control panel
+    // ==============================
+    // Callbacks were installed on the window above, so install_callbacks = true
+    // makes ImGui chain to them instead of replacing them.
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330 core");
 
     printVerificationHelp();
     showVerificationStatus(window);
@@ -1065,20 +1274,107 @@ int main() {
             ? glm::perspective(verticalFovRadians, aspectRatio, nearPlane, farPlane)
             : glm::mat4(1.0f);
 
-        auto renderScene = [&]() {
-            glUseProgram(shaderProgram);
-            // Uniforms are shared values for this draw call and are uploaded to the active shader program.
-            if (intensityLocation != -1) {
-                glUniform1f(intensityLocation, intensity);
+        // ---- Control panel (Experiment 17) ----
+        // Immediate-mode UI: this code runs every frame and edits the same globals the hotkeys edit,
+        // so keyboard and panel always agree. Press Tab to release the cursor before clicking it.
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        if (showControlPanel) {
+            ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(360.0f, 560.0f), ImGuiCond_FirstUseEver);
+            ImGui::Begin("DoF Controls (G hides, Tab frees cursor)", &showControlPanel);
+
+            const char* screenModeNames[] = {
+                "Color", "Raw depth", "Linear depth", "CoC magnitude", "CoC signed", "Basic DoF"
+            };
+            int screenModeIndex = static_cast<int>(screenMode);
+            if (ImGui::Combo("View", &screenModeIndex, screenModeNames, IM_ARRAYSIZE(screenModeNames))) {
+                screenMode = static_cast<ScreenMode>(screenModeIndex);
             }
-            if (viewLocation != -1) {
-                glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view));
+
+            if (ImGui::CollapsingHeader("Camera / lens", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::SliderFloat("Focus distance (m)", &focusDistanceMeters, 0.5f, 40.0f);
+                ImGui::SliderFloat("f-number", &fNumber, 1.0f, 22.0f);
+                ImGui::SliderFloat("Focal length (mm)", &focalLengthMillimeters, 18.0f, 200.0f);
+                ImGui::SliderFloat("Sensor height (mm)", &sensorHeightMillimeters, 8.0f, 36.0f);
+                ImGui::Checkbox("Physical camera FOV", &usePhysicalCameraProjection);
             }
-            if (projectionLocation != -1) {
-                glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
+
+            if (ImGui::CollapsingHeader("Blur gather", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::SliderFloat("Max blur radius (px)", &maxBlurRadiusPixels, 0.0f, 200.0f);
+                ImGui::SliderInt("CoC samples", &cocSampleCount, 4, 256);
+                ImGui::SliderFloat("CoC debug max (px)", &cocVisualizationMaxPixels, 1.0f, 200.0f);
+            }
+
+            if (ImGui::CollapsingHeader("Lighting / shadows", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::Checkbox("Shadows", &enableShadows);
+                ImGui::SliderFloat("Ambient", &ambientStrength, 0.0f, 1.0f);
+                ImGui::SliderFloat3("Light dir (to light)", glm::value_ptr(lightDirection), -1.0f, 1.0f);
+                if (glm::length(lightDirection) < 0.05f) {
+                    lightDirection = glm::vec3(-0.4f, 0.8f, 0.6f); // Avoid normalizing a zero vector.
+                }
+                ImGui::ColorEdit3("Light color", glm::value_ptr(lightColor));
+                ImGui::Checkbox("Show floor and wall", &showEnvironment);
+            }
+
+            ImGui::Separator();
+            ImGui::Text("%.1f FPS (%.2f ms)", ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);
+            ImGui::Text("Blur cost: %d taps x %d x %d px", cocSampleCount, framebufferWidth, framebufferHeight);
+            ImGui::End();
+        }
+
+        // Recomputed every frame so the light-direction slider in the control panel takes effect immediately.
+        lightSpaceMatrix = computeLightSpaceMatrix();
+
+        // shadowPass = true renders depth only from the light's point of view (shadow.vert/frag);
+        // false is the normal lit camera pass. Both walk the exact same geometry list below.
+        auto renderScene = [&](bool shadowPass) {
+            const int activeModelLocation = shadowPass ? shadowModelLocation : modelLocation;
+            if (shadowPass) {
+                glUseProgram(shadowShaderProgram);
+                if (shadowLightSpaceMatrixLocation != -1) {
+                    glUniformMatrix4fv(shadowLightSpaceMatrixLocation, 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
+                }
+            } else {
+                glUseProgram(shaderProgram);
+                // Uniforms are shared values for this draw call and are uploaded to the active shader program.
+                if (intensityLocation != -1) {
+                    glUniform1f(intensityLocation, intensity);
+                }
+                if (viewLocation != -1) {
+                    glUniformMatrix4fv(viewLocation, 1, GL_FALSE, glm::value_ptr(view));
+                }
+                if (projectionLocation != -1) {
+                    glUniformMatrix4fv(projectionLocation, 1, GL_FALSE, glm::value_ptr(projection));
+                }
+                if (lightSpaceMatrixLocation != -1) {
+                    glUniformMatrix4fv(lightSpaceMatrixLocation, 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
+                }
+                if (lightDirectionLocation != -1) {
+                    extraGl.uniform3fv(lightDirectionLocation, 1, glm::value_ptr(lightDirection));
+                }
+                if (lightColorLocation != -1) {
+                    extraGl.uniform3fv(lightColorLocation, 1, glm::value_ptr(lightColor));
+                }
+                if (ambientStrengthLocation != -1) {
+                    glUniform1f(ambientStrengthLocation, ambientStrength);
+                }
+                if (useShadowsLocation != -1) {
+                    extraGl.uniform1i(useShadowsLocation, enableShadows ? 1 : 0);
+                }
+                // Unit 0/1 belong to the screen pass (color/depth); the shadow map takes unit 2.
+                extraGl.activeTexture(GL_TEXTURE2);
+                extraGl.bindTexture(GL_TEXTURE_2D, shadowDepthTexture);
+                if (shadowMapLocation != -1) {
+                    extraGl.uniform1i(shadowMapLocation, 2);
+                }
+                extraGl.activeTexture(GL_TEXTURE0);
             }
             glBindVertexArray(VAO);
-            extraGl.uniform1i(importedMeshLocation, 0); // Preserve the original cube vertex colors.
+            if (!shadowPass) {
+                extraGl.uniform1i(importedMeshLocation, 0); // Preserve the original cube vertex colors.
+            }
 
             auto drawBox = [&](glm::vec3 position, float rotationX, float rotationY, glm::vec3 scale) {
                 // Model transforms this cube from local/object space into world space.
@@ -1088,8 +1384,8 @@ int main() {
                 model = glm::rotate(model, glm::radians(rotationX), glm::vec3(1.0f, 0.0f, 0.0f));
                 model = glm::scale(model, scale);
 
-                if (modelLocation != -1) {
-                    glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model));
+                if (activeModelLocation != -1) {
+                    glUniformMatrix4fv(activeModelLocation, 1, GL_FALSE, glm::value_ptr(model));
                 }
                 glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, nullptr);
             };
@@ -1105,6 +1401,9 @@ int main() {
             }
             drawCube(cubeDPosition, cubeDRotationXDegrees, cubeDRotationYDegrees, cubeDUniformScale);
             drawCube(cubeEPosition, cubeERotationXDegrees, cubeERotationYDegrees, cubeEUniformScale);
+            // Experiment 17 extra depth layers (mirrored in render_dof.py BOXES).
+            drawCube(cubeFPosition, cubeFRotationXDegrees, cubeFRotationYDegrees, cubeFUniformScale);
+            drawCube(cubeGPosition, cubeGRotationXDegrees, cubeGRotationYDegrees, cubeGUniformScale);
             if (showEnvironment) {
                 drawBox(glm::vec3(0.0f, -0.85f, -7.5f), 0.0f, 0.0f, glm::vec3(12.0f, 0.1f, 25.0f));
                 drawBox(glm::vec3(0.0f, 1.2f, -22.0f), 0.0f, 0.0f, glm::vec3(14.0f, 4.0f, 0.1f));
@@ -1119,14 +1418,28 @@ int main() {
                 );
                 model = glm::rotate(model, glm::radians(importedSceneRotationYDegrees), glm::vec3(0.0f, 1.0f, 0.0f));
                 model = glm::scale(model, glm::vec3(importedSceneScale));
-                glUniformMatrix4fv(modelLocation, 1, GL_FALSE, glm::value_ptr(model));
-                extraGl.uniform1i(importedMeshLocation, 1);
+                glUniformMatrix4fv(activeModelLocation, 1, GL_FALSE, glm::value_ptr(model));
+                if (!shadowPass) {
+                    extraGl.uniform1i(importedMeshLocation, 1);
+                }
                 // Same scene pass, depth test and FBO attachments as the cubes. No special depth path.
                 drawMesh(importedMesh);
             }
 
             glBindVertexArray(0);
         };
+
+        // Pass 0: render depth from the light into the shadow map. Front faces are kept
+        // (no culling tricks); the slope-scaled bias in basic.frag handles self-shadow acne.
+        if (enableShadows) {
+            extraGl.bindFramebuffer(GL_FRAMEBUFFER, shadowFBO);
+            glViewport(0, 0, shadowMapSize, shadowMapSize);
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_LESS);
+            glClear(GL_DEPTH_BUFFER_BIT);
+            renderScene(true);
+            extraGl.bindFramebuffer(GL_FRAMEBUFFER, 0);
+        }
 
         if (renderThroughFramebuffer) {
             if (!resizeSceneFramebuffer(framebufferWidth, framebufferHeight)) {
@@ -1142,7 +1455,7 @@ int main() {
             glDepthFunc(GL_LESS);
             glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-            renderScene();
+            renderScene(false);
 
             // Pass 2: present color, depth/CoC diagnostics, or BasicDoF through a screen quad.
             extraGl.bindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -1195,6 +1508,9 @@ int main() {
             if (maxBlurRadiusLocation != -1) {
                 glUniform1f(maxBlurRadiusLocation, maxBlurRadiusPixels);
             }
+            if (cocSampleCountLocation != -1) {
+                extraGl.uniform1i(cocSampleCountLocation, cocSampleCount);
+            }
             // A texture object is bound to a texture unit; the sampler chooses which unit to read.
             extraGl.activeTexture(GL_TEXTURE0);
             extraGl.bindTexture(GL_TEXTURE_2D, sceneColorTexture);
@@ -1211,7 +1527,7 @@ int main() {
             glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
             // Clearing the color buffer does not clear stored depth values; reset both buffers every frame.
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-            renderScene();
+            renderScene(false);
         }
 
         const bool screenshotKeyIsPressed = glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS;
@@ -1220,6 +1536,12 @@ int main() {
             saveScreenshot("output/latest.png", framebufferWidth, framebufferHeight);
         }
         screenshotKeyWasPressed = screenshotKeyIsPressed;
+
+        // Drawn after the screenshot read so saved PNGs never contain the control panel.
+        extraGl.bindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, framebufferWidth, framebufferHeight);
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         //check and call events and swap buffers
         glfwSwapBuffers(window);
@@ -1237,8 +1559,14 @@ int main() {
     extraGl.deleteFramebuffers(1, &sceneFBO);
     extraGl.deleteTextures(1, &sceneColorTexture);
     extraGl.deleteTextures(1, &sceneDepthTexture);
+    extraGl.deleteFramebuffers(1, &shadowFBO);
+    extraGl.deleteTextures(1, &shadowDepthTexture);
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
     glDeleteProgram(shaderProgram);
     glDeleteProgram(screenShaderProgram);
+    glDeleteProgram(shadowShaderProgram);
 
     glfwTerminate();
     return 0;

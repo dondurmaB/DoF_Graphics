@@ -37,6 +37,10 @@ BOXES = (
     ("background_E", (-3.8, 0.4, -20.0), -15.0, 60.0, (2.0, 2.0, 2.0)),
     ("floor", (0.0, -0.85, -7.5), 0.0, 0.0, (12.0, 0.1, 25.0)),
     ("wall", (0.0, 1.2, -22.0), 0.0, 0.0, (14.0, 4.0, 0.1)),
+    # Experiment 17 additions; mirror cubeF/cubeG in src/main.cpp. Appended after the
+    # first three so tests/test_reference_config.py's BOXES[:3] check is unaffected.
+    ("midground_F", (2.4, -0.3, -2.0), 10.0, -25.0, (0.35, 0.35, 0.35)),
+    ("background_G", (-2.2, 0.2, -13.0), 0.0, 40.0, (1.2, 1.2, 1.2)),
 )
 
 

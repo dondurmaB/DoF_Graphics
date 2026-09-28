@@ -30,7 +30,14 @@ FetchContent_Declare(
     GIT_TAG 2945a967c5303b2c8c14174117c45f3302591150 # v2.0.0rc13
 )
 
-FetchContent_MakeAvailable(glfw glm tinyobjloader)
+# Dear ImGui: immediate-mode UI for the live parameter panel (Experiment 17).
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG v1.91.9
+)
+
+FetchContent_MakeAvailable(glfw glm tinyobjloader imgui)
 
 find_library(MACOS_OPENGL_FRAMEWORK OpenGL REQUIRED)
 
@@ -43,6 +50,19 @@ target_include_directories(glad
         external/glad/include
 )
 
+# ImGui ships sources rather than a CMake target, so build the core + GLFW/OpenGL3 backends here.
+add_library(imgui_lib STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+)
+target_include_directories(imgui_lib PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+# ImGui's OpenGL3 backend loads its own GL entry points, so it does not use the project's minimal glad stub.
+target_link_libraries(imgui_lib PUBLIC glfw ${MACOS_OPENGL_FRAMEWORK})
+
 # CPU OBJ loading and one-time GPU upload stay in one small module.
 add_library(scene_mesh STATIC src/Mesh.cpp)
 target_include_directories(scene_mesh PUBLIC include)
@@ -53,6 +73,7 @@ add_executable(DepthResearch src/main.cpp)
 target_link_libraries(DepthResearch
     PRIVATE
         scene_mesh
+        imgui_lib
         glfw
         glm::glm
         ${MACOS_OPENGL_FRAMEWORK}
