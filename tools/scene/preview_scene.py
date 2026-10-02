@@ -6,7 +6,7 @@ This exists to check a scene edit in seconds without a rebuild or a Cycles
 render. It uses the same loader, the same camera convention and the same
 lighting equation as `shaders/basic.frag`:
 
-    Lo = albedo * (sky + sun_colour * sun_energy * max(N.L, 0) / pi) + albedo * emit
+    Lo = (1-F0)*albedo*(sky + sun*N.L/pi) + sun*N.L*GGX (or albedo*emit)
 
 with a linear-to-sRGB encode at the end. It deliberately omits shadows,
 occlusion and depth of field, so it is a framing and albedo check, not a
@@ -23,6 +23,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import scene_loader  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "raytraced_reference"))
+from brdf import specular
 
 
 def look_at(position, yaw_degrees, pitch_degrees):
@@ -115,7 +117,15 @@ def render(scene, geometry, width, height, focus_override=None):
     tri_colors = colors[triangles].mean(axis=1)
     tri_emissions = emissions[triangles].mean(axis=1)
     n_dot_l = np.maximum(tri_normals @ sun_direction, 0.0)
-    shaded = tri_colors * (sky + sun_radiance * n_dot_l[:, None])
+    tri_spec = np.array(geometry.specular)[triangles].mean(axis=1)
+    tri_rough = np.array(geometry.roughness)[triangles].mean(axis=1)
+    shaded = tri_colors * (1-tri_spec[:, None]) * (sky + sun_radiance * n_dot_l[:, None])
+    centers = positions[triangles].mean(axis=1)
+    directions = np.array(camera.position)-centers
+    directions /= np.maximum(np.linalg.norm(directions,axis=1,keepdims=True),1e-9)
+    for i in np.flatnonzero((tri_spec>0) & (n_dot_l>0)):
+        value = specular(tri_normals[i],sun_direction,directions[i],tri_rough[i],tri_spec[i])
+        shaded[i] += value*n_dot_l[i]*sun_radiance*math.pi
     emitted = tri_colors * tri_emissions[:, None]
     tri_radiance = np.where(tri_emissions[:, None] > 0.0, emitted, shaded)
 
@@ -184,11 +194,19 @@ def main(argv=None):
     parser.add_argument("--height", type=int, default=600)
     parser.add_argument("--depth-output", help="Also write a linear-depth preview PNG")
     parser.add_argument("--depth-max", type=float, default=40.0)
+    parser.add_argument("--lens", type=float, help="Preview-only wide-angle override; never rewrites scene camera")
+    parser.add_argument("--position", type=float, nargs=3)
+    parser.add_argument("--yaw", type=float)
+    parser.add_argument("--pitch", type=float)
     args = parser.parse_args(argv)
 
     root = Path(__file__).resolve().parents[2]
     scene_path = Path(args.scene) if Path(args.scene).is_absolute() else root / args.scene
     scene = scene_loader.load_scene(scene_path)
+    for arg, attribute in (("lens", "focal_length_mm"), ("position", "position"),
+                           ("yaw", "yaw_degrees"), ("pitch", "pitch_degrees")):
+        if getattr(args, arg) is not None:
+            setattr(scene.camera, attribute, getattr(args, arg))
     geometry = scene_loader.build_geometry(scene)
     color, depth, drawn = render(scene, geometry, args.width, args.height)
 

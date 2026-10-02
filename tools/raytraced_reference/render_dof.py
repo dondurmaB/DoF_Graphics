@@ -1,4 +1,4 @@
-"""Run with Blender 4.2+; --dry-run validates the reference plan with ordinary Python."""
+"""Run with Blender 5.2.2 (verified GGX/F82 Metallic node); --dry-run validates the reference plan with ordinary Python."""
 
 import argparse
 from contextlib import contextmanager
@@ -280,7 +280,8 @@ def make_plan(args):
         "bounds_max": list(summary["bounds_max"]),
         "sun_direction_gl": list(scene.sun.direction),
         "sun_energy_w_per_m2": scene.sun.energy,
-        "sun_angular_diameter_degrees": scene.sun.angular_diameter_degrees,
+        "sun_angular_diameter_degrees": scene.sun.angular_diameter_degrees if args.full_gi else 0.0,
+        "authored_sun_angular_diameter_degrees": scene.sun.angular_diameter_degrees,
         "sky_radiance": list(scene.sky_radiance),
     }
     scene_sky = list(scene.sky_radiance)
@@ -315,7 +316,7 @@ def make_plan(args):
         "sampling_seed": args.seed,
         "emitters_light_scene": args.full_gi,
         "shading_model": ("full global illumination" if args.full_gi else
-                          "matched to basic.frag: albedo * (sky + sun * N.L / pi), "
+                          "matched to basic.frag: (1-F0)*albedo*(sky + sun*N.L/pi) + sun*N.L*GGX, "
                           "direct only, unoccluded ambient fill as emission"),
         "ambient_fill_radiance": list(scene_sky),
         "imported_mesh": args.imported_mesh,
@@ -411,7 +412,7 @@ def create_scene(bpy, args, plan):
         # surface, so allowing diffuse bounces would scatter it around the room
         # and make Cycles brighter than the raster pass by an amount that
         # depends on the geometry. Zero bounces makes the shading model exactly
-        # albedo * (sky + sun * N.L / pi), which is what basic.frag computes.
+        # Lambert + single-scatter GGX + explicit fill, as in basic.frag.
         scene.cycles.diffuse_bounces = 0
         for attribute in ("glossy_bounces", "transmission_bounces", "volume_bounces"):
             if hasattr(scene.cycles, attribute):
@@ -437,71 +438,41 @@ def create_scene(bpy, args, plan):
     #
     # This is a deliberately non-physical fill in BOTH renderers, and that is
     # the point: the experiment measures the lens, so the shading model is
-    # pinned to be identical and the only difference left is how depth of field
-    # was computed. --full-gi swaps it for real global illumination, at the cost
+    # pinned; shadow visibility and lens sampling still differ. --full-gi uses
+    # real global illumination, at the cost
     # of the two images no longer being comparable.
+    loader, shared_scene, geometry = load_shared_scene()
     sky = tuple(shared_scene.sky_radiance)
 
-    def add_ambient_fill(result, albedo_output):
-        """Emission of albedo * sky, added to whatever surface shader is there."""
-        nodes, links = result.node_tree.nodes, result.node_tree.links
-        surface = nodes["__surface__"]
-        output = nodes["__output__"]
-        # VectorMath rather than MixRGB: ShaderNodeMixRGB was replaced in
-        # Blender 4.x and this node has been stable across every version.
-        multiply = nodes.new("ShaderNodeVectorMath")
-        multiply.operation = "MULTIPLY"
-        multiply.inputs[1].default_value = sky
-        links.new(albedo_output, multiply.inputs[0])
-        fill = nodes.new("ShaderNodeEmission")
-        fill.inputs["Strength"].default_value = 1.0
-        links.new(multiply.outputs["Vector"], fill.inputs["Color"])
-        combine = nodes.new("ShaderNodeAddShader")
-        links.new(surface.outputs[0], combine.inputs[0])
-        links.new(fill.outputs[0], combine.inputs[1])
-        links.new(combine.outputs[0], output.inputs["Surface"])
+    # One production graph is also used by the numerical Cycles BRDF probe.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from materials import surface_material
 
     def flat_material(name, color):
-        """One albedo for the whole object; used for the imported mesh."""
-        result = new_material(name)
-        result.diffuse_color = (*color, 1.0)
-        nodes = result.node_tree.nodes
-        diffuse = nodes.new("ShaderNodeBsdfDiffuse")
-        diffuse.name = "__surface__"
-        diffuse.inputs["Color"].default_value = (*color, 1.0)
-        constant = nodes.new("ShaderNodeRGB")
-        constant.outputs[0].default_value = (*color, 1.0)
-        output = nodes.new("ShaderNodeOutputMaterial")
-        output.name = "__output__"
-        result.node_tree.links.new(diffuse.outputs[0], output.inputs["Surface"])
-        if not args.full_gi:
-            add_ambient_fill(result, constant.outputs[0])
-        return result
+        return surface_material(bpy, name, sky, albedo=color, full_gi=args.full_gi)
 
     def vertex_color_material(name, emission):
         """Reads the per-vertex colour the scene file supplies.
 
-        A Diffuse BSDF for surfaces, matching basic.frag's albedo/pi Lambert
-        term, plus the ambient fill above; an Emission shader at strength 1.0
+        The shared Lambert + GGX graph for surfaces, plus explicit fill; an Emission shader at strength 1.0
         for emitters, whose colour the builder has already premultiplied by
         `emit` so both renderers emit the same radiance. Emitters get no fill:
         basic.frag returns their radiance directly without a shading term.
         """
+        if not emission:
+            return surface_material(bpy, name, sky, full_gi=args.full_gi)
         result = new_material(name)
         nodes = result.node_tree.nodes
         attribute = nodes.new("ShaderNodeVertexColor")
         attribute.layer_name = "Col"
-        shader = nodes.new("ShaderNodeEmission" if emission else "ShaderNodeBsdfDiffuse")
+        shader = nodes.new("ShaderNodeEmission")
         shader.name = "__surface__"
-        if emission:
-            shader.inputs["Strength"].default_value = 1.0
+        shader.inputs["Strength"].default_value = 1.0
         output = nodes.new("ShaderNodeOutputMaterial")
         output.name = "__output__"
         links = result.node_tree.links
         links.new(attribute.outputs["Color"], shader.inputs["Color"])
         links.new(shader.outputs[0], output.inputs["Surface"])
-        if not emission and not args.full_gi:
-            add_ambient_fill(result, attribute.outputs["Color"])
         return result
 
     # The teapot is opt-in now. It was a stand-in subject before the cafe had a
@@ -532,7 +503,6 @@ def create_scene(bpy, args, plan):
     # shader. The OpenGL pass keeps a single mesh and branches on a per-vertex
     # emission attribute instead; the geometry itself is identical because both
     # come out of the same builder.
-    loader, shared_scene, geometry = load_shared_scene()
     shaded, emissive = loader.split_by_emission(geometry)
 
     def build_part(name, part, material):
@@ -551,6 +521,10 @@ def create_scene(bpy, args, plan):
         colors = mesh.color_attributes.new(name="Col", type="FLOAT_COLOR", domain="POINT")
         for index, color in enumerate(part["colors"]):
             colors.data[index].color = (color[0], color[1], color[2], 1.0)
+
+        for attribute_name, values in (("Roughness", part["roughness"]), ("Specular", part["specular"])):
+            attribute = mesh.attributes.new(name=attribute_name, type="FLOAT", domain="POINT")
+            attribute.data.foreach_set("value", values)
 
         # Custom split normals taken from the builder's own analytic normals, so
         # Cycles shades from exactly the normals basic.frag gets rather than
@@ -682,7 +656,9 @@ def create_scene(bpy, args, plan):
     # quantity uLightEnergy carries into basic.frag.
     light_data.energy = shared_scene.sun.energy
     light_data.color = shared_scene.sun.color
-    light_data.angle = math.radians(shared_scene.sun.angular_diameter_degrees)
+    # OpenGL evaluates ONE light direction. Finite disc integration changes a
+    # narrow GGX highlight, even when the underlying BRDF is identical.
+    light_data.angle = math.radians(shared_scene.sun.angular_diameter_degrees) if args.full_gi else 0.0
     light = bpy.data.objects.new("directional_light", light_data)
     scene.collection.objects.link(light)
     light.rotation_euler = (-Vector(gl_to_blender(shared_scene.sun.direction))).to_track_quat("-Z", "Y").to_euler()

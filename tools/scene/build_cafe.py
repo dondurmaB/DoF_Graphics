@@ -61,7 +61,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import scene_loader  # noqa: E402  (path set above so this also runs from the repo root)
 from authoring import (Group, Rng, SceneWriter, dome, leaf, rotate_y, segment,  # noqa: E402
-                       tube)
+                       tube, SurfaceColor, recolor)
 
 # ---------------------------------------------------------------------------
 # Room dimensions, meters. The camera at y = 0 is a seated eye height of 1.2 m.
@@ -84,39 +84,39 @@ HERO_TABLE_X = 0.06
 # dusk alley (oak at 0.128, a dark stain) and with a diffuse-only, direct-lit
 # shading model that made every render murky regardless of the light level.
 # ---------------------------------------------------------------------------
-OAK = (0.235, 0.140, 0.068)
-OAK_PALE = (0.340, 0.228, 0.120)
-OAK_DARK = (0.150, 0.088, 0.044)
-WALNUT = (0.105, 0.060, 0.036)
-TILE_GREEN = (0.085, 0.205, 0.162)
-TILE_GREEN_2 = (0.108, 0.245, 0.194)
-TILE_CREAM = (0.660, 0.618, 0.540)
+OAK = SurfaceColor((0.235, 0.140, 0.068), 0.38, 0.04)
+OAK_PALE = SurfaceColor((0.340, 0.228, 0.120), 0.38, 0.04)
+OAK_DARK = SurfaceColor((0.150, 0.088, 0.044), 0.42, 0.04)
+WALNUT = SurfaceColor((0.105, 0.060, 0.036), 0.36, 0.04)
+TILE_GREEN = SurfaceColor((0.085, 0.205, 0.162), 0.27, 0.04)
+TILE_GREEN_2 = SurfaceColor((0.108, 0.245, 0.194), 0.27, 0.04)
+TILE_CREAM = SurfaceColor((0.660, 0.618, 0.540), 0.24, 0.04)
 GROUT = (0.300, 0.288, 0.265)
-FLOOR_TILE_A = (0.180, 0.172, 0.164)
-FLOOR_TILE_B = (0.420, 0.400, 0.368)
+FLOOR_TILE_A = SurfaceColor((0.180, 0.172, 0.164), 0.32, 0.04)
+FLOOR_TILE_B = SurfaceColor((0.420, 0.400, 0.368), 0.32, 0.04)
 PLASTER = (0.630, 0.600, 0.545)
 PLASTER_WARM = (0.675, 0.615, 0.525)
-BRASS = (0.430, 0.305, 0.125)
-STEEL = (0.300, 0.312, 0.330)
-CHROME = (0.530, 0.545, 0.562)
-STEEL_DARK = (0.105, 0.110, 0.122)
+BRASS = SurfaceColor((0.430, 0.305, 0.125), 0.3, 0.55)
+STEEL = SurfaceColor((0.300, 0.312, 0.330), 0.36, 0.6)
+CHROME = SurfaceColor((0.530, 0.545, 0.562), 0.2, 0.7)
+STEEL_DARK = SurfaceColor((0.105, 0.110, 0.122), 0.4, 0.045)
 BLACKBOARD = (0.038, 0.044, 0.040)
 CHALK = (0.730, 0.715, 0.670)
 PAPER = (0.705, 0.685, 0.635)
-CERAMIC = (0.775, 0.760, 0.725)
-CERAMIC_WARM = (0.720, 0.640, 0.555)
+CERAMIC = SurfaceColor((0.775, 0.760, 0.725), 0.16, 0.04)
+CERAMIC_WARM = SurfaceColor((0.720, 0.640, 0.555), 0.2, 0.04)
 COFFEE = (0.048, 0.024, 0.013)
 CREMA = (0.245, 0.142, 0.068)
 MILK = (0.790, 0.775, 0.745)
-# Frosted, not clear: both renderers are diffuse-only so that they agree
-# exactly, and a dark 'clear glass' albedo just renders as a black cylinder.
-GLASS_CLEAR = (0.480, 0.510, 0.530)
-GLASS_GREEN = (0.115, 0.270, 0.180)
-GLASS_AMBER = (0.340, 0.190, 0.058)
+# Opaque frosted-glass approximation: matched reflection, without transmission.
+# Clear refraction would require another verified term in both renderers.
+GLASS_CLEAR = SurfaceColor((0.480, 0.510, 0.530), 0.34, 0.04)
+GLASS_GREEN = SurfaceColor((0.115, 0.270, 0.180), 0.3, 0.04)
+GLASS_AMBER = SurfaceColor((0.340, 0.190, 0.058), 0.3, 0.04)
 LEAF = (0.068, 0.165, 0.058)
 LEAF_PALE = (0.115, 0.250, 0.090)
-TERRACOTTA = (0.270, 0.122, 0.078)
-LEATHER = (0.125, 0.075, 0.050)
+TERRACOTTA = SurfaceColor((0.270, 0.122, 0.078), 0.85, 0.008)
+LEATHER = SurfaceColor((0.125, 0.075, 0.050), 0.55, 0.025)
 CAKE = (0.395, 0.280, 0.160)
 CAKE_PINK = (0.440, 0.235, 0.240)
 
@@ -162,7 +162,7 @@ def cup_and_saucer(writer, center, rng, yaw=0.0, filled=True, color=CERAMIC,
     heavily defocused, so their facets can never be seen.
     """
     group = Group(writer, center, yaw)
-    interior = tuple(channel * 0.78 for channel in color)
+    interior = recolor(color, (channel * 0.78 for channel in color))
 
     # --- Saucer: foot ring, concave well, raised rim.
     group.cyl((0.0, 0.004, 0.0), (0.082, 0.008, 0.082), color, seg=detail // 2)
@@ -223,7 +223,7 @@ def tumbler(writer, center, height, rng, color=GLASS_CLEAR, water=True, detail=3
     group.cyl((0.0, 0.009, 0.0), (0.064, 0.018, 0.064), color, seg=detail, taper=1.01)
     group.cyl((0.0, height - 0.005, 0.0), (0.077, 0.010, 0.077), color, seg=detail, taper=0.995)
     group.cyl((0.0, height - 0.012, 0.0), (0.068, 0.012, 0.068),
-              tuple(channel * 0.82 for channel in color), seg=detail, taper=0.99)
+              recolor(color, (channel * 0.82 for channel in color)), seg=detail, taper=0.99)
     if water:
         group.cyl((0.0, height * 0.30, 0.0), (0.064, height * 0.60, 0.064),
                   rng.jitter((0.260, 0.330, 0.360)), seg=detail)
@@ -369,8 +369,13 @@ def hero_table(writer, rng):
     stopping at 1.9 m occupies the bottom third and leaves the cafe visible.
     """
     radius = 0.44
-    writer.cyl((HERO_TABLE_X, TABLE_TOP_Y - 0.020, HERO_TABLE_Z),
-               (radius * 2, 0.040, radius * 2), rng.jitter(OAK), seg=34)
+    top_color = rng.jitter(OAK)
+    writer.cyl((HERO_TABLE_X, TABLE_TOP_Y - 0.004, HERO_TABLE_Z),
+               (radius * 2, 0.008, radius * 2), top_color, seg=64, taper=(radius-0.008)/radius)
+    writer.cyl((HERO_TABLE_X, TABLE_TOP_Y - 0.022, HERO_TABLE_Z),
+               (radius * 2, 0.028, radius * 2), top_color, seg=64)
+    writer.cyl((HERO_TABLE_X, TABLE_TOP_Y - 0.038, HERO_TABLE_Z),
+               ((radius-0.008)*2, 0.004, (radius-0.008)*2), OAK_DARK, seg=64, taper=radius/(radius-0.008))
     # Chamfered edge and a darker underside, so the rim is not one hard line.
     writer.cyl((HERO_TABLE_X, TABLE_TOP_Y - 0.048, HERO_TABLE_Z),
                (radius * 1.96, 0.024, radius * 1.96), OAK_DARK, seg=32)
@@ -490,13 +495,13 @@ def bentwood_chair(writer, x, z, yaw, rng):
 def espresso_machine(writer, x, y, z, rng):
     """Two-group machine: body, group heads, wands, portafilters, cup warmer."""
     group = Group(writer, (x, y, z), 180.0)
-    group.box((0.0, 0.230, 0.0), (0.860, 0.460, 0.520), rng.jitter(CHROME, 0.04))
+    group.box((0.0, 0.230, 0.0), (0.860, 0.460, 0.520), rng.jitter(STEEL, 0.04), bevel=0.025)
     group.box((0.0, 0.470, 0.0), (0.820, 0.030, 0.480), STEEL)
     # Painted steel front panel, plus one small lit indicator. The first version
     # made the whole panel a pink emitter at 2.2 radiance, which turned the
     # machine into a glowing slab and was the most obviously wrong thing in the
     # frame.
-    group.box((0.0, 0.130, -0.270), (0.880, 0.230, 0.030), rng.jitter(STEEL_DARK, 0.08))
+    group.box((0.0, 0.130, -0.270), (0.880, 0.120, 0.030), rng.jitter(STEEL_DARK, 0.08), bevel=0.006)
     group.box((0.0, 0.205, -0.286), (0.210, 0.026, 0.010), rng.jitter(BRASS, 0.05))
     group.cyl((-0.330, 0.130, -0.286), (0.026, 0.012, 0.026), (1.0, 0.42, 0.22),
               emit=3.0, rot=(90.0, 0.0, 0.0), seg=12)
@@ -504,11 +509,11 @@ def espresso_machine(writer, x, y, z, rng):
     for index in range(9):  # Drip tray grate.
         group.box((-0.250 + index * 0.062, 0.070, -0.285), (0.020, 0.014, 0.046), STEEL)
     for side in (-1.0, 1.0):
-        group.cyl((side * 0.215, 0.300, -0.250), (0.150, 0.130, 0.150), CHROME, seg=16)
-        group.cyl((side * 0.215, 0.215, -0.250), (0.096, 0.070, 0.096), CHROME, seg=14)
-        group.cyl((side * 0.215, 0.168, -0.250), (0.130, 0.032, 0.130), STEEL_DARK, seg=16)
-        group.box((side * 0.215, 0.170, -0.330), (0.042, 0.036, 0.130), STEEL_DARK)
-        group.cyl((side * 0.375, 0.250, -0.230), (0.026, 0.240, 0.026), CHROME,
+        group.cyl((side * 0.215, 0.300, -0.345), (0.150, 0.130, 0.150), CHROME, seg=16)
+        group.cyl((side * 0.215, 0.215, -0.345), (0.096, 0.070, 0.096), CHROME, seg=14)
+        group.cyl((side * 0.215, 0.168, -0.345), (0.130, 0.032, 0.130), STEEL_DARK, seg=16)
+        group.box((side * 0.215, 0.170, -0.435), (0.042, 0.036, 0.130), STEEL_DARK)
+        group.cyl((side * 0.375, 0.250, -0.355), (0.026, 0.240, 0.026), CHROME,
                   rot=(24.0, 0.0, 0.0), seg=10)
         group.cyl((side * 0.310, 0.400, -0.240), (0.070, 0.026, 0.070), STEEL_DARK,
                   rot=(0.0, 0.0, 90.0), seg=12)
@@ -552,20 +557,23 @@ def back_bar(writer, rng):
     top_y = FLOOR_Y + 0.92
     writer.box((2.16, (FLOOR_Y + top_y) * 0.5, -1.40), (1.42, top_y - FLOOR_Y, 7.20),
                rng.jitter(TILE_GREEN, 0.05))
-    writer.box((2.16, top_y + 0.025, -1.40), (1.49, 0.050, 7.28), WALNUT)
-    writer.box((1.47, top_y - 0.10, -1.40), (0.030, 0.220, 7.20), OAK_DARK)
+    writer.box((2.16, top_y + 0.025, -1.40), (1.49, 0.050, 7.28), WALNUT, bevel=0.009)
+    writer.box((1.47, top_y - 0.10, -1.40), (0.030, 0.220, 7.20), OAK_DARK, bevel=0.006)
     # Cabinet doors, so the front is not one flat panel.
     for index in range(7):
         z = 1.55 - index * 0.96
         writer.box((1.46, FLOOR_Y + 0.42, z), (0.026, 0.640, 0.860),
-                   rng.jitter(TILE_GREEN_2, 0.06))
+                   rng.jitter(TILE_GREEN_2, 0.06), bevel=0.005)
         writer.cyl((1.44, FLOOR_Y + 0.42, z), (0.030, 0.140, 0.030), BRASS,
                    rot=(90.0, 0.0, 0.0), seg=10)
 
-    espresso_machine(writer, 2.08, top_y + 0.05, 1.05, rng)
+    # Original z=1.05 put the entire machine outside the fixed 50 mm frame.
+    # Move along the same counter, without moving the research camera.
+    espresso_machine(writer, 1.88, top_y + 0.05, -4.62, rng)
     grinder(writer, 2.05, top_y + 0.05, 0.05, rng)
     grinder(writer, 2.35, top_y + 0.05, -0.32, rng)
-    pastry_case(writer, 2.08, top_y + 0.05, 2.35, rng)
+    # Keep the entire 0.52 m tray on the counter (front edge z=2.24).
+    pastry_case(writer, 2.08, top_y + 0.05, 1.85, rng)
     plate_stack(writer, (2.50, top_y + 0.05, -1.20), 7, rng)
     cup_stack(writer, (1.95, top_y + 0.05, -1.05), 5, rng)
     cup_stack(writer, (2.18, top_y + 0.05, -1.35), 4, rng)
@@ -576,13 +584,17 @@ def back_bar(writer, rng):
     # Open shelving on the tiled wall: rows of bottles and jars, the main
     # background bokeh source on the right side of the frame.
     for level, shelf_y in enumerate((FLOOR_Y + 1.42, FLOOR_Y + 1.80, FLOOR_Y + 2.18)):
-        writer.box((2.46, shelf_y, -1.40), (0.860, 0.042, 7.00), rng.jitter(OAK, 0.06))
+        # Leave an alcove above the machine instead of intersecting its body.
+        shelf_z, shelf_length = (-0.90, 6.00) if level == 0 else (-1.40, 7.00)
+        writer.box((2.46, shelf_y, shelf_z), (0.860, 0.042, shelf_length), rng.jitter(OAK, 0.06), bevel=0.006)
         for index in range(9):
             z = 1.70 - index * 0.80
             writer.box((2.84, shelf_y - 0.13, z), (0.040, 0.220, 0.040), STEEL_DARK)
         count = 26 - level * 4
         for index in range(count):
             z = 1.85 - index * (6.9 / count)
+            if level == 0 and z < -3.8:
+                continue  # Machine alcove, not bottles inside its casing.
             if rng.chance(0.30):
                 jar(writer, (rng.range(2.24, 2.66), shelf_y + 0.021, z),
                     rng.range(0.16, 0.24), rng.range(0.050, 0.070),
@@ -594,7 +606,7 @@ def back_bar(writer, rng):
                                  rng.jitter(PAPER, 0.2, hue=True))), rng)
         # Warm strip light under each shelf: a long thin emitter, the kind of
         # shape that shows a gather's square sampling footprint most clearly.
-        writer.box((2.46, shelf_y - 0.030, -1.40), (0.620, 0.016, 6.60),
+        writer.box((2.46, shelf_y - 0.030, shelf_z), (0.620, 0.016, shelf_length-0.4),
                    STRIP, emit=STRIP_EMIT * 0.45)
 
 

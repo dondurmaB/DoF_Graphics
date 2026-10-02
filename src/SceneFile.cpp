@@ -40,7 +40,7 @@ const std::map<std::string, int>& keyArity() {
         {"seg", 1},  {"smooth", 1},  {"taper", 1}, {"yaw", 1},   {"pitch", 1}, {"focus", 1},
         {"fnumber", 1}, {"lens", 1}, {"sensor", 1}, {"dir", 3},  {"color", 3},
         {"energy", 1}, {"angle", 1}, {"strength", 1}, {"value", 1},
-        {"lo", 3},   {"hi", 3},
+        {"lo", 3},   {"hi", 3}, {"rough", 1}, {"spec", 1}, {"bevel", 1},
     };
     return table;
 }
@@ -183,6 +183,7 @@ struct Primitive {
     // what a turned object (a cup, a pot, a lampshade) needs so that it does
     // not show stacked-ring banding.
     double taper = 1.0;
+    double rough = 0.5, spec = 0.0, bevel = 0.0;
 };
 
 // Unit cube: 6 faces x 4 corners, wound counter-clockwise seen from outside.
@@ -241,6 +242,8 @@ private:
         vertex.normal[1] = static_cast<float>(normal.y);
         vertex.normal[2] = static_cast<float>(normal.z);
         vertex.emission = static_cast<float>(current_->emit);
+        vertex.roughness = static_cast<float>(current_->rough);
+        vertex.specular = static_cast<float>(current_->spec);
 
         for (int axis = 0; axis < 3; ++axis) {
             float& low = axis == 0 ? scene_.boundsMin.x : (axis == 1 ? scene_.boundsMin.y : scene_.boundsMin.z);
@@ -269,7 +272,54 @@ private:
         }
     }
 
+    void emitBeveledBox() {
+        Vec3d half, inner;
+        for (int k=0;k<3;++k) {
+            half[k]=std::fabs(current_->size[k])*0.5;
+            inner[k]=half[k]-current_->bevel;
+        }
+        auto polygon = [&](std::vector<Vec3d> points, Vec3d normal) {
+            Vec3d u, v;
+            for(int k=0;k<3;++k) {u[k]=points[1][k]-points[0][k];v[k]=points[2][k]-points[0][k];}
+            Vec3d cross{u.y*v.z-u.z*v.y,u.z*v.x-u.x*v.z,u.x*v.y-u.y*v.x};
+            if(cross.x*normal.x+cross.y*normal.y+cross.z*normal.z<0) std::reverse(points.begin(),points.end());
+            std::vector<unsigned int> ids;
+            for(auto point:points) {
+                Vec3d n;
+                for(int k=0;k<3;++k) {point[k]/=current_->size[k];n[k]=normal[k]*current_->size[k];}
+                ids.push_back(place(point,n));
+            }
+            for(std::size_t i=1;i+1<ids.size();++i) addTriangle(ids[0],ids[i],ids[i+1],false);
+        };
+        for(int axis=0;axis<3;++axis) {
+            int j=(axis+1)%3,k=(axis+2)%3;
+            for(int sign:{-1,1}) {
+                std::vector<Vec3d> points;
+                const int pairs[4][2]={{-1,-1},{1,-1},{1,1},{-1,1}};
+                for(auto& pair:pairs) {Vec3d p;p[axis]=sign*half[axis];p[j]=pair[0]*inner[j];p[k]=pair[1]*inner[k];points.push_back(p);}
+                Vec3d n;n[axis]=sign;polygon(points,n);
+            }
+        }
+        for(int i=0;i<3;++i) for(int j=i+1;j<3;++j) {
+            int k=3-i-j;
+            for(int si:{-1,1}) for(int sj:{-1,1}) {
+                std::vector<Vec3d> points;
+                const int pairs[4][2]={{1,-1},{0,-1},{0,1},{1,1}};
+                for(auto& pair:pairs) {Vec3d p;p[i]=si*(pair[0]?half[i]:inner[i]);p[j]=sj*(pair[0]?inner[j]:half[j]);p[k]=pair[1]*inner[k];points.push_back(p);}
+                Vec3d n;n[i]=si;n[j]=sj;polygon(points,n);
+            }
+        }
+        for(int sx:{-1,1}) for(int sy:{-1,1}) for(int sz:{-1,1}) {
+            Vec3d signs{double(sx),double(sy),double(sz)};
+            std::vector<Vec3d> points;
+            for(int axis=0;axis<3;++axis) {Vec3d p;for(int k=0;k<3;++k) p[k]=signs[k]*(k==axis?half[k]:inner[k]);points.push_back(p);}
+            polygon(points,signs);
+        }
+    }
+
     void emitBox() {
+        if(current_->bevel>0) {emitBeveledBox();return;}
+
         for (const BoxFace& face : kBoxFaces) {
             const Vec3d normal{face.normal[0], face.normal[1], face.normal[2]};
             unsigned int corner[4];
@@ -494,10 +544,10 @@ void parseShadow(const std::vector<std::string>& tokens, std::size_t lineNumber,
 
 Primitive parsePrimitive(const std::string& kind, const std::vector<std::string>& tokens,
                          std::size_t lineNumber) {
-    static const std::set<std::string> boxKeys = {"pos", "size", "rot", "rgb", "emit"};
+    static const std::set<std::string> boxKeys = {"pos", "size", "rot", "rgb", "emit", "rough", "spec", "bevel"};
     static const std::set<std::string> cylinderKeys = {"pos", "size", "rot", "rgb", "emit", "seg",
-                                                      "smooth", "taper"};
-    static const std::set<std::string> sphereKeys = {"pos", "size", "rot", "rgb", "emit", "seg"};
+                                                      "smooth", "taper", "rough", "spec"};
+    static const std::set<std::string> sphereKeys = {"pos", "size", "rot", "rgb", "emit", "seg", "rough", "spec"};
 
     Primitive primitive;
     primitive.kind = kind;
@@ -517,6 +567,16 @@ Primitive parsePrimitive(const std::string& kind, const std::vector<std::string>
     if (has(found, "seg")) primitive.segments = static_cast<int>(scalarOf(found, "seg"));
     if (has(found, "smooth")) primitive.smooth = scalarOf(found, "smooth") != 0.0;
     if (has(found, "taper")) primitive.taper = scalarOf(found, "taper");
+    if (has(found, "rough")) primitive.rough = scalarOf(found, "rough");
+    if (has(found, "spec")) primitive.spec = scalarOf(found, "spec");
+    if (has(found, "bevel")) primitive.bevel = scalarOf(found, "bevel");
+    if (primitive.rough < 0.05 || primitive.rough > 1.0)
+        throw SceneParseError(lineTag(lineNumber) + "rough must be between 0.05 and 1");
+    if (primitive.spec < 0.0 || primitive.spec > 1.0)
+        throw SceneParseError(lineTag(lineNumber) + "spec must be between 0 and 1");
+    if (primitive.bevel != 0.0 && (primitive.bevel < 0.0 || primitive.bevel >= 0.5 * std::min({std::fabs(primitive.size.x), std::fabs(primitive.size.y), std::fabs(primitive.size.z)})))
+        throw SceneParseError(lineTag(lineNumber) + "bevel must be nonnegative and below half the smallest size");
+
     if (!(primitive.taper >= 0.0 && primitive.taper <= 8.0)) {
         throw SceneParseError(lineTag(lineNumber) + "taper must be between 0 and 8");
     }

@@ -22,13 +22,15 @@ struct SceneVec3 {
 };
 
 // One GPU vertex, uploaded interleaved exactly in this order:
-// attribute 0 = position, 1 = albedo, 2 = normal, 4 = emission.
+// attribute 0 = position, 1 = albedo, 2 = normal, 4 = emission, 5 = perceptual roughness, 6 = scalar F0.
 // Attribute 3 is left to Mesh.cpp's imported-mesh UVs so both VAOs can feed the
 // same shader program.
 struct SceneVertex {
     float position[3]{};
     float albedo[3]{};  // Linear, not sRGB.
     float normal[3]{};
+    float roughness = 0.5f; // alpha = roughness^2, range [0.05, 1].
+    float specular = 0.0f; // Scalar F0; zero disables the entire specular lobe.
     float emission = 0.0f;  // > 0 means the surface emits albedo * emission and is not shaded.
 };
 

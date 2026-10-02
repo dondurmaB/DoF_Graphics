@@ -33,12 +33,12 @@ KEY_ARITY = {
     "pos": 3, "size": 3, "rot": 3, "rgb": 3, "emit": 1, "seg": 1, "smooth": 1, "taper": 1,
     "yaw": 1, "pitch": 1, "focus": 1, "fnumber": 1, "lens": 1, "sensor": 1,
     "dir": 3, "color": 3, "energy": 1, "angle": 1, "strength": 1, "value": 1,
-    "lo": 3, "hi": 3,
+    "lo": 3, "hi": 3, "rough": 1, "spec": 1, "bevel": 1,
 }
 PRIMITIVE_KEYS = {
-    "box": ("pos", "size", "rot", "rgb", "emit"),
-    "cyl": ("pos", "size", "rot", "rgb", "emit", "seg", "smooth", "taper"),
-    "sph": ("pos", "size", "rot", "rgb", "emit", "seg"),
+    "box": ("pos", "size", "rot", "rgb", "emit", "rough", "spec", "bevel"),
+    "cyl": ("pos", "size", "rot", "rgb", "emit", "seg", "smooth", "taper", "rough", "spec"),
+    "sph": ("pos", "size", "rot", "rgb", "emit", "seg", "rough", "spec"),
 }
 DEFAULT_SEGMENTS = {"cyl": 16, "sph": 12}
 
@@ -60,7 +60,7 @@ class SceneError(ValueError):
 
 class Primitive:
     __slots__ = ("kind", "pos", "size", "rot", "rgb", "emit", "segments", "smooth",
-                 "taper", "line")
+                 "taper", "line", "rough", "spec", "bevel")
 
     def __init__(self, kind, line):
         self.kind = kind
@@ -74,6 +74,7 @@ class Primitive:
         self.smooth = True
         # Top radius as a fraction of the bottom one. 1.0 is a plain cylinder.
         self.taper = 1.0
+        self.rough, self.spec, self.bevel = 0.5, 0.0, 0.0
 
 
 class Camera:
@@ -235,6 +236,15 @@ def parse_scene(text):
                 primitive.smooth = found["smooth"][0] != 0.0
             if "taper" in found:
                 primitive.taper = found["taper"][0]
+            for key in ("rough", "spec", "bevel"):
+                if key in found:
+                    setattr(primitive, key, found[key][0])
+            if not 0.05 <= primitive.rough <= 1.0:
+                raise SceneError(f"line {line_number}: rough must be between 0.05 and 1")
+            if not 0.0 <= primitive.spec <= 1.0:
+                raise SceneError(f"line {line_number}: spec must be between 0 and 1")
+            if primitive.bevel != 0 and (primitive.bevel < 0 or primitive.bevel >= 0.5 * min(abs(v) for v in primitive.size)):
+                raise SceneError(f"line {line_number}: bevel must be nonnegative and below half the smallest size")
             if not 0.0 <= primitive.taper <= 8.0:
                 raise SceneError(f"line {line_number}: taper must be between 0 and 8")
             if any(abs(value) < 1e-9 for value in primitive.size):
@@ -293,14 +303,18 @@ class Geometry:
         self.normals = []
         self.colors = []
         self.emissions = []
+        self.roughness = []
+        self.specular = []
         self.triangles = []
         self.triangle_smooth = []
 
-    def add_vertex(self, position, normal, color, emission):
+    def add_vertex(self, position, normal, color, emission, rough=0.5, spec=0.0):
         self.positions.append(position)
         self.normals.append(normal)
         self.colors.append(color)
         self.emissions.append(emission)
+        self.roughness.append(rough)
+        self.specular.append(spec)
         return len(self.positions) - 1
 
     def add_triangle(self, i0, i1, i2, smooth):
@@ -336,7 +350,58 @@ def _emit_primitive(geometry, primitive):
         # Inverse transpose of R*S for a diagonal S: divide by the scale, then rotate.
         unscaled = tuple(local_normal[k] / size[k] for k in range(3))
         normal = _normalize(_apply3(rotation, unscaled))
-        return geometry.add_vertex(world, normal, primitive.rgb, primitive.emit)
+        return geometry.add_vertex(world, normal, primitive.rgb, primitive.emit, primitive.rough, primitive.spec)
+
+    if primitive.kind == "box" and primitive.bevel > 0:
+        # 6 inset faces + 12 edge strips + 8 corner triangles = 44 triangles.
+        # Build in metres so bevel width is invariant under nonuniform size.
+        half = [abs(v) * 0.5 for v in size]
+        inner = [v - primitive.bevel for v in half]
+
+        def polygon(points, normal):
+            u = [points[1][k] - points[0][k] for k in range(3)]
+            v = [points[2][k] - points[0][k] for k in range(3)]
+            cross = (u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0])
+            if sum(cross[k]*normal[k] for k in range(3)) < 0:
+                points.reverse()
+            ids = [place(tuple(p[k]/size[k] for k in range(3)),
+                         tuple(normal[k]*size[k] for k in range(3))) for p in points]
+            for i in range(1, len(ids)-1):
+                geometry.add_triangle(ids[0], ids[i], ids[i+1], False)
+
+        for axis in range(3):
+            j, k = (axis+1)%3, (axis+2)%3
+            for sign in (-1, 1):
+                points = []
+                for sj, sk in ((-1,-1), (1,-1), (1,1), (-1,1)):
+                    p = [0.0]*3
+                    p[axis], p[j], p[k] = sign*half[axis], sj*inner[j], sk*inner[k]
+                    points.append(p)
+                n = [0.0]*3
+                n[axis] = sign
+                polygon(points, n)
+        for i in range(3):
+            for j in range(i+1,3):
+                k = 3-i-j
+                for si in (-1,1):
+                    for sj in (-1,1):
+                        points = []
+                        for outer_i, sk in ((True,-1),(False,-1),(False,1),(True,1)):
+                            p = [0.0]*3
+                            p[i] = si*(half[i] if outer_i else inner[i])
+                            p[j] = sj*(inner[j] if outer_i else half[j])
+                            p[k] = sk*inner[k]
+                            points.append(p)
+                        n = [0.0]*3
+                        n[i], n[j] = si, sj
+                        polygon(points,n)
+        for sx in (-1,1):
+            for sy in (-1,1):
+                for sz in (-1,1):
+                    signs = (sx,sy,sz)
+                    points = [[signs[k]*(half[k] if k==axis else inner[k]) for k in range(3)] for axis in range(3)]
+                    polygon(points,signs)
+        return
 
     if primitive.kind == "box":
         for corners, normal in BOX_FACES:
@@ -448,6 +513,7 @@ def split_by_emission(geometry):
     for emissive in (False, True):
         remap = {}
         positions, normals, colors, triangles, smooth = [], [], [], [], []
+        roughness, specular = [], []
         for index, (i0, i1, i2) in enumerate(geometry.triangles):
             is_emissive = geometry.emissions[i0] > 0.0
             if is_emissive != emissive:
@@ -458,6 +524,8 @@ def split_by_emission(geometry):
                     remap[source] = len(positions)
                     positions.append(geometry.positions[source])
                     normals.append(geometry.normals[source])
+                    roughness.append(geometry.roughness[source])
+                    specular.append(geometry.specular[source])
                     # Emitters carry radiance (albedo * emit); surfaces carry albedo.
                     scale = geometry.emissions[source] if emissive else 1.0
                     colors.append(tuple(channel * scale for channel in geometry.colors[source]))
@@ -467,7 +535,7 @@ def split_by_emission(geometry):
             triangles.append(tuple(mapped))
             smooth.append(geometry.triangle_smooth[index])
         parts.append({"positions": positions, "normals": normals, "colors": colors,
-                      "triangles": triangles, "smooth": smooth})
+                      "triangles": triangles, "smooth": smooth, "roughness": roughness, "specular": specular})
     return parts[0], parts[1]
 
 

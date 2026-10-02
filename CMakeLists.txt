@@ -88,6 +88,9 @@ target_link_libraries(DepthResearch
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(brdf_gpu_probe tests/brdf_gpu.cpp)
+    target_link_libraries(brdf_gpu_probe PRIVATE glfw ${MACOS_OPENGL_FRAMEWORK})
+    target_compile_definitions(brdf_gpu_probe PRIVATE PROJECT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_executable(mesh_loading_tests tests/mesh_loading.cpp)
     target_link_libraries(mesh_loading_tests PRIVATE scene_mesh)
     add_test(NAME mesh_loading COMMAND mesh_loading_tests)
@@ -111,6 +114,7 @@ if(BUILD_TESTING)
         # Pins the filename conventions of the Cycles script, the OpenGL batch
         # mode and the comparison orchestrator together. They pair by name, and
         # a disagreement there fails silently rather than loudly.
+        add_test(NAME brdf_oracle COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_brdf.py)
         add_test(NAME pipeline COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_pipeline.py)
     endif()
 endif()

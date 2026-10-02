@@ -1,6 +1,7 @@
 #include "SceneFile.h"
 
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -32,15 +33,15 @@ void requireClose(double actual, double expected, double tolerance, const std::s
 // file rather than a fixture: a regenerated scene must update the numbers here.
 // scene/alley.scene is still a valid input to both renderers, just not the one
 // stage 2 compares on.
-const std::size_t kPrimitives = 2692;
-const std::size_t kVertices = 135050;
-const std::size_t kTriangles = 115864;
+const std::size_t kPrimitives = 2678;
+const std::size_t kVertices = 134957;
+const std::size_t kTriangles = 115240;
 const std::size_t kEmissiveTriangles = 5820;
-const std::size_t kSmoothTriangles = 50996;
+const std::size_t kSmoothTriangles = 50480;
 const double kBoundsMin[3] = {-3.6, -1.32, -10.2};
 const double kBoundsMax[3] = {3.6, 1.795, 6.2};
-const double kPositionSum[3] = {78741.4137314, -24332.7662, -272601.4688};
-const double kAreaSum = 1353.70549005;
+const double kPositionSum[3] = {76694.3756314, -25110.0486, -276524.7532};
+const double kAreaSum = 1351.86003672;
 
 bool rejects(const std::string& text, const std::string& expectedFragment) {
     SceneDescription scene;
@@ -118,6 +119,8 @@ int main() {
                     plain.indices == explicitTaper.indices,
                     "taper 1.0 must build the same mesh as a plain cylinder");
             for (std::size_t index = 0; index < plain.vertices.size(); ++index) {
+                require(std::memcmp(&plain.vertices[index], &explicitTaper.vertices[index], sizeof(SceneVertex)) == 0,
+                        "taper 1.0 must be byte-identical");
                 for (int axis = 0; axis < 3; ++axis) {
                     requireClose(explicitTaper.vertices[index].position[axis],
                                  plain.vertices[index].position[axis], 1e-9, "taper 1.0 position");
@@ -147,6 +150,31 @@ int main() {
                 }
             }
         }
+
+        // Material defaults and the opt-in chamfer keep old geometry unchanged.
+        for (const std::string kind : {"box", "cyl", "sph"}) {
+            SceneDescription defaults, material;
+            std::string error;
+            require(parseSceneText("version 1\n" + kind + "\n", defaults, error), error);
+            require(parseSceneText("version 1\n" + kind + " rough 0.2 spec 0.7\n", material, error), error);
+            require(defaults.indices == material.indices, "Materials must not change topology");
+            for (const auto& v : defaults.vertices)
+                require(v.roughness == 0.5f && v.specular == 0.0f, "Legacy material defaults");
+            for (const auto& v : material.vertices)
+                require(v.roughness == 0.2f && v.specular == 0.7f, "Material attributes must propagate");
+        }
+        {
+            SceneDescription bevel;
+            std::string error;
+            require(parseSceneText("version 1\nbox size 4 2 1 bevel 0.1 rough 0.2 spec 0.7\n", bevel, error), error);
+            require(bevel.triangleCount() == 44, "Chamfered box has 44 triangles");
+            requireClose(bevel.boundsMin.x, -2, 1e-6, "Chamfer preserves bounds");
+            requireClose(bevel.boundsMax.z, 0.5, 1e-6, "Chamfer preserves bounds");
+        }
+        require(rejects("version 1\nbox rough 0\n", "rough must"), "Reject singular roughness");
+        require(rejects("version 1\ncyl spec 1.1\n", "spec must"), "Reject invalid F0");
+        require(rejects("version 1\nsph bevel 0.1\n", "not valid here"), "Only boxes take bevel");
+        require(rejects("version 1\nbox bevel 0.5\n", "bevel must"), "Reject collapsed bevel");
 
         // --- Transform order: world = pos + Ry*Rx*Rz * (size * local), normals by inverse transpose.
         {

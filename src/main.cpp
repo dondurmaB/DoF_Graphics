@@ -1251,6 +1251,7 @@ int main(int argc, char** argv) {
         cout << "Warning: could not find uniform uLightSpaceMatrix" << endl;
     }
 
+    int cameraPositionLocation = glGetUniformLocation(shaderProgram, "uCameraPosition");
     int lightDirectionLocation = glGetUniformLocation(shaderProgram, "uLightDirection");
     if (lightDirectionLocation == -1) {
         cout << "Warning: could not find uniform uLightDirection" << endl;
@@ -1455,6 +1456,10 @@ int main(int argc, char** argv) {
         glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, stride,
                               (void*)offsetof(SceneVertex, emission));
         glEnableVertexAttribArray(4);
+        glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SceneVertex, roughness));
+        glEnableVertexAttribArray(5);
+        glVertexAttribPointer(6, 1, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SceneVertex, specular));
+        glEnableVertexAttribArray(6);
 
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glBindVertexArray(0);
@@ -2009,6 +2014,9 @@ int main(int argc, char** argv) {
                 }
                 if (lightSpaceMatrixLocation != -1) {
                     glUniformMatrix4fv(lightSpaceMatrixLocation, 1, GL_FALSE, glm::value_ptr(lightSpaceMatrix));
+                }
+                if (cameraPositionLocation != -1) {
+                    extraGl.uniform3fv(cameraPositionLocation, 1, glm::value_ptr(cameraPosition));
                 }
                 if (lightDirectionLocation != -1) {
                     extraGl.uniform3fv(lightDirectionLocation, 1, glm::value_ptr(lightDirection));

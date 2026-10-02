@@ -4,7 +4,7 @@ This separate Blender tool recreates the Experiment 16 reference scene and rende
 
 ## Availability and Evidence
 
-Verified with installed **Blender 5.2.2 LTS**, hash `d13f752e3b9c`, built 2026-09-15. The exact `--preview --sharp` run completed four 1200×1200, 32-sample Cycles renders on **Metal: Apple M4 Max (GPU - 32 cores)** in 8.27 seconds total. All PNGs were inspected for basic scene sanity; paired OpenGL/Cycles comparison remains pending. Older Blender 4.2+ compatibility is retained with a small node-tree version check, but was not exercised in this verification.
+Verified with installed **Blender 5.2.2 LTS**, hash `d13f752e3b9c`, built 2026-09-15. The exact `--preview --sharp` run completed four 1200×1200, 32-sample Cycles renders on **Metal: Apple M4 Max (GPU - 32 cores)** in 8.27 seconds total. All PNGs were inspected for basic scene sanity; paired OpenGL/Cycles comparison remains pending. The current matched specular graph requires the Metallic BSDF node and is verified on Blender 5.2.2; the previous Blender 4.2 compatibility claim no longer applies.
 
 ## Run
 
@@ -122,3 +122,12 @@ Cycles samples real geometry through the lens and can resolve visibility absent 
 Blender 5+ creates material and world node trees automatically; the script directly edits those trees and only sets `use_nodes` on older versions. `scene.render.use_compositing = False` bypasses compositor processing without the deprecated scene property. No warnings are suppressed. The verified render log had no missing-MTL errors or deprecation warnings. The preceding sandbox probe crashed and the version command emitted a USD cache-line warning; approved unsandboxed rendering completed cleanly. See the Experiment 16 notes/archive for per-image sizes and timings.
 
 Implementation references: [Blender sensor-fit API](https://docs.blender.org/api/3.6/bpy.types.Camera.html), [Blender OBJ coordinate conversion](https://github.com/blender/blender/blob/v4.5.0/source/blender/io/wavefront_obj/importer/importer_mesh_utils.cc), [Cycles device enumeration](https://github.com/blender/blender/blob/v4.5.0/intern/cycles/blender/addon/properties.py).
+
+## Current matched materials
+
+See [matched specular and geometry verification](../../notes/graphics/matched_specular_and_geometry.md) for the exact GGX formulation, scene keys, measured agreement, commands, and remaining differences. The historical Experiment 16 results above describe that earlier configuration. Run the actual production GLSL/Cycles check with:
+
+    cmake --build build --target brdf_gpu_probe
+    /Applications/Blender.app/Contents/MacOS/Blender --background --python-exit-code 1 --python tools/raytraced_reference/verify_brdf.py
+
+This graphics check is separate from CPU-only CTest because it needs an OpenGL context and Blender. It fails on a failed probe or an out-of-tolerance comparison; unavailable window services are not counted as a pass. The detailed result is written to output/brdf/agreement.json.

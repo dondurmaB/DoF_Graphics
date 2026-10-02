@@ -29,15 +29,15 @@ CPP_HEADER_PATH = ROOT / "include/SceneFile.h"
 
 # The numbers both builders must agree on. Regenerate with --print-expected.
 EXPECTED = {
-    "primitives": 2692,
-    "vertices": 135050,
-    "triangles": 115864,
+    "primitives": 2678,
+    "vertices": 134957,
+    "triangles": 115240,
     "emissive_triangles": 5820,
-    "smooth_triangles": 50996,
+    "smooth_triangles": 50480,
     "bounds_min": (-3.6, -1.32, -10.2),
     "bounds_max": (3.6, 1.795, 6.2),
-    "position_sum": (78741.4137314, -24332.7662, -272601.4688),
-    "area_sum": 1353.70549005,
+    "position_sum": (76694.3756314, -25110.0486, -276524.7532),
+    "area_sum": 1351.86003672,
 }
 
 
@@ -200,6 +200,46 @@ class SceneGrammarTests(unittest.TestCase):
                                0.0, places=9)
         self.rejects("version 1\ncyl taper 9\n", "taper must be between 0 and 8")
         self.rejects("version 1\nbox taper 0.5\n", "not valid here")
+
+    def test_materials_and_chamfers(self):
+        for kind in ('box', 'cyl', 'sph'):
+            old = scene_loader.build_geometry(scene_loader.parse_scene(f"version 1\n{kind}\n"))
+            explicit = scene_loader.build_geometry(scene_loader.parse_scene(
+                f"version 1\n{kind} rough 0.5 spec 0\n"))
+            self.assertEqual(vars(old), vars(explicit))
+            material = scene_loader.build_geometry(scene_loader.parse_scene(
+                f"version 1\n{kind} rough 0.2 spec 0.7\n"))
+            self.assertEqual(set(material.roughness), {0.2})
+            self.assertEqual(set(material.specular), {0.7})
+            part, _ = scene_loader.split_by_emission(material)
+            self.assertEqual(set(part['specular']), {0.7})
+        bevel = scene_loader.build_geometry(scene_loader.parse_scene(
+            "version 1\nbox size 4 2 1 bevel 0.1 rough 0.2 spec 0.7\n"))
+        self.assertEqual(len(bevel.triangles), 44)
+        self.assertEqual(bevel.bounds(), ((-2., -1., -.5), (2., 1., .5)))
+        self.assertAlmostEqual(sum(bevel.roughness), 0.2 * len(bevel.positions))
+        for line, message in [('box rough 0', 'rough must'), ('cyl spec 1.1', 'spec must'),
+                              ('sph bevel 0.1', 'not valid here'), ('box bevel 0.5', 'bevel must')]:
+            self.rejects('version 1\n' + line + '\n', message)
+
+    def test_alley_still_loads(self):
+        scene = scene_loader.load_scene(ROOT / 'scene/alley.scene')
+        self.assertGreater(len(scene_loader.build_geometry(scene).triangles), 0)
+
+    def test_dome_rings_meet_without_ledges(self):
+        sys.path.insert(0, str(ROOT / 'tools/scene'))
+        from authoring import SceneWriter, dome
+        writer = SceneWriter()
+        writer.raw('version 1')
+        dome(writer, (0, 0, 0), 1, 0.5, (1, 1, 1), rings=16)
+        scene = scene_loader.parse_scene(writer.text())
+        rings = scene.primitives
+        self.assertEqual(len(rings), 16)
+        for lower, upper in zip(rings, rings[1:]):
+            self.assertAlmostEqual(lower.size[0] * lower.taper, upper.size[0], delta=2e-5)
+            self.assertAlmostEqual(lower.pos[1] + lower.size[1]/2,
+                                   upper.pos[1] - upper.size[1]/2, delta=2e-5)
+        self.assertEqual(rings[-1].taper, 0)
 
     def test_emitters_are_split_out_with_premultiplied_radiance(self):
         scene = scene_loader.parse_scene(

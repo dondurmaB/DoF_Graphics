@@ -12,12 +12,16 @@ layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aAlbedo;
 layout(location = 2) in vec3 aNormal;
 layout(location = 4) in float aEmission;
+layout(location = 5) in float aRoughness;
+layout(location = 6) in float aSpecular;
 
 out vec3 interpolatedAlbedo;
 out vec3 worldPosition;
 out vec3 worldNormal;
 out vec4 fragPosLightSpace;
 out float interpolatedEmission;
+out float interpolatedRoughness;
+out float interpolatedSpecular;
 
 uniform mat4 uModel;
 uniform mat4 uView;
@@ -38,6 +42,8 @@ void main()
     // Vertex shader outputs are interpolated during rasterization.
     interpolatedAlbedo = aAlbedo;
     interpolatedEmission = aEmission;
+    interpolatedRoughness = aRoughness;
+    interpolatedSpecular = aSpecular;
 
     // Inverse-transpose keeps normals perpendicular to the surface under
     // non-uniform model scale. The scene mesh is already baked into world space

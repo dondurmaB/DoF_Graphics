@@ -11,6 +11,18 @@ parse, so its output is the single description both renderers load.
 import math
 
 
+class SurfaceColor(tuple):
+    """Linear albedo with authoring-only material metadata; serialized explicitly."""
+    def __new__(cls, rgb, rough=0.5, spec=0.0):
+        result = super().__new__(cls, rgb)
+        result.rough, result.spec = rough, spec
+        return result
+
+
+def recolor(source, rgb):
+    return SurfaceColor(rgb, source.rough, source.spec) if isinstance(source, SurfaceColor) else tuple(rgb)
+
+
 class Rng:
     """Own LCG so a generated scene file does not depend on a Python version.
 
@@ -48,15 +60,15 @@ class Rng:
         Pass hue=True where real colour variety is wanted (bottle glass, leaves).
         """
         if hue:
-            return tuple(max(0.0, min(1.0, channel * (1.0 + self.range(-amount, amount))))
-                         for channel in color)
+            return recolor(color, (max(0.0, min(1.0, channel * (1.0 + self.range(-amount, amount))))
+                         for channel in color))
         factor = 1.0 + self.range(-amount, amount)
-        return tuple(max(0.0, min(1.0, channel * factor)) for channel in color)
+        return recolor(color, (max(0.0, min(1.0, channel * factor)) for channel in color))
 
 
-def number(value):
+def number(value, precision=4):
     """Trim a float for the scene file: 4 decimals, no trailing zeros, no '-0'."""
-    text = f"{value:.4f}".rstrip("0").rstrip(".")
+    text = f"{value:.{precision}f}".rstrip("0").rstrip(".")
     return "0" if text in ("", "-0") else text
 
 
@@ -75,32 +87,38 @@ class SceneWriter:
     def raw(self, line):
         self.lines.append(line)
 
-    def _primitive(self, kind, pos, size, rot, rgb, emit, extra=""):
-        parts = [kind, "pos", *(number(v) for v in pos), "size", *(number(v) for v in size)]
+    def _primitive(self, kind, pos, size, rot, rgb, emit, extra="", rough=None, spec=None, precision=4):
+        fmt = lambda value: number(value, precision)
+        parts = [kind, "pos", *(fmt(v) for v in pos), "size", *(fmt(v) for v in size)]
         # Defaults are omitted to keep the file readable; the loaders supply them.
         if any(abs(value) > 1e-9 for value in rot):
-            parts += ["rot", *(number(v) for v in rot)]
-        parts += ["rgb", *(number(v) for v in rgb)]
+            parts += ["rot", *(fmt(v) for v in rot)]
+        parts += ["rgb", *(fmt(v) for v in rgb)]
         if emit > 0.0:
-            parts += ["emit", number(emit)]
+            parts += ["emit", fmt(emit)]
+        rough = getattr(rgb, "rough", 0.5) if rough is None else rough
+        spec = getattr(rgb, "spec", 0.0) if spec is None else spec
+        if spec != 0.0 or rough != 0.5:
+            parts += ["rough", fmt(rough), "spec", fmt(spec)]
         if extra:
             parts.append(extra)
         self.lines.append(" ".join(parts))
         self.count += 1
 
-    def box(self, pos, size, rgb, rot=(0.0, 0.0, 0.0), emit=0.0):
-        self._primitive("box", pos, size, rot, rgb, emit)
+    def box(self, pos, size, rgb, rot=(0.0, 0.0, 0.0), emit=0.0, bevel=0.0, rough=None, spec=None):
+        self._primitive("box", pos, size, rot, rgb, emit,
+                        "bevel " + number(bevel) if bevel else "", rough, spec)
 
     def cyl(self, pos, size, rgb, rot=(0.0, 0.0, 0.0), emit=0.0, seg=16, smooth=True,
-            taper=1.0):
+            taper=1.0, rough=None, spec=None, precision=4):
         extra = f"seg {seg}" + ("" if smooth else " smooth 0")
         # Omitted at the default so existing scene files are unchanged.
         if abs(taper - 1.0) > 1e-9:
-            extra += f" taper {number(taper)}"
-        self._primitive("cyl", pos, size, rot, rgb, emit, extra)
+            extra += f" taper {number(taper, precision)}"
+        self._primitive("cyl", pos, size, rot, rgb, emit, extra, rough, spec, precision)
 
-    def sph(self, pos, size, rgb, rot=(0.0, 0.0, 0.0), emit=0.0, seg=12):
-        self._primitive("sph", pos, size, rot, rgb, emit, f"seg {seg}")
+    def sph(self, pos, size, rgb, rot=(0.0, 0.0, 0.0), emit=0.0, seg=12, rough=None, spec=None):
+        self._primitive("sph", pos, size, rot, rgb, emit, f"seg {seg}", rough, spec)
 
     def text(self):
         return "\n".join(self.lines) + "\n"
@@ -130,9 +148,9 @@ class Group:
         turned = rotate_y(offset, self.yaw)
         return tuple(self.origin[k] + turned[k] for k in range(3))
 
-    def box(self, offset, size, rgb, emit=0.0, extra_yaw=0.0):
+    def box(self, offset, size, rgb, emit=0.0, extra_yaw=0.0, bevel=0.0):
         self.writer.box(self._world(offset), size, rgb,
-                        rot=(0.0, self.yaw + extra_yaw, 0.0), emit=emit)
+                        rot=(0.0, self.yaw + extra_yaw, 0.0), emit=emit, bevel=bevel)
 
     def cyl(self, offset, size, rgb, emit=0.0, rot=None, seg=16, smooth=True, taper=1.0):
         self.writer.cyl(self._world(offset), size, rgb, rot=rot or (0.0, self.yaw, 0.0),
@@ -196,11 +214,14 @@ def dome(writer, center, radius, height, color, rings=14, seg=32, emit=0.0):
         lower = ring / rings
         upper = (ring + 1) / rings
         middle = 0.5 * (lower + upper)
-        # Circular profile: diameter falls off as sqrt(1 - t^2).
-        diameter = 2.0 * radius * math.sqrt(max(0.0, 1.0 - middle * middle))
+        # Adjacent frusta share the same radius at their common height.
+        # No overlap: the old extra 2 mm made closed rings leave visible ledges.
+        bottom_radius = radius * math.sqrt(max(0.0, 1.0 - lower * lower))
+        top_radius = radius * math.sqrt(max(0.0, 1.0 - upper * upper))
+        diameter = 2.0 * bottom_radius
         writer.cyl((center[0], center[1] + height * middle, center[2]),
-                   (diameter, height / rings + 0.002, diameter), color,
-                   emit=emit, seg=seg)
+                   (diameter, height / rings, diameter), color,
+                   emit=emit, seg=seg, taper=top_radius / bottom_radius, precision=9)
 
 
 def leaf(writer, center, length, width, color, rot, seg=10):

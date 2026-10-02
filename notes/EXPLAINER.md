@@ -5,6 +5,8 @@ physically, how each of the two renderers produces it, why they can be compared 
 what changed in experiment 18. Where a claim is checkable, the file or test that checks it is
 named.
 
+Current material model: [matched specular and café geometry](graphics/matched_specular_and_geometry.md). This adds verified direct GGX to both renderers; historical Lambert-only descriptions below precede that change. Matching the BRDF does not remove differences in shadow visibility or lens-dependent shading.
+
 Companion documents:
 - [`notes/graphics/19_cafe_inventory.md`](graphics/19_cafe_inventory.md) - object sizes and depths, generated from the scene
 - [`notes/graphics/20_matched_lighting_and_pipeline.md`](graphics/20_matched_lighting_and_pipeline.md) - the change log for experiment 20

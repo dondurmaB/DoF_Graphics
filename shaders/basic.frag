@@ -5,6 +5,9 @@ in vec3 worldPosition;
 in vec3 worldNormal;
 in vec4 fragPosLightSpace;
 in float interpolatedEmission;
+in float interpolatedRoughness;
+in float interpolatedSpecular;
+uniform vec3 uCameraPosition;
 
 // Linear radiance, written into an RGBA16F attachment. Exposure and the sRGB
 // transfer function are applied once at the very end of screen.frag, so the
@@ -66,6 +69,30 @@ float sampleShadow(vec4 lightSpacePos, float nDotL)
     return shadow / 9.0;
 }
 
+// BEGIN MATCHED_SPECULAR -- also compiled verbatim by tests/brdf_gpu.cpp.
+// Isotropic single-scatter GGX: alpha=rough^2, D=alpha^2/[pi*(Nh^2*(alpha^2-1)+1)^2].
+// Height-correlated Smith G2=1/(1+Lambda(Nl)+Lambda(Nv)); not Schlick-GGX G1*G1.
+// F=F0+(1-F0)*(1-Vh)^5; f_spec=D*G2*F/(4*Nl*Nv).
+// Cycles Metallic BSDF: GGX, F82, Edge Tint white (B=0 => exactly Schlick),
+// anisotropy=0, thin-film=0. No multiscattering compensation or extra lobes.
+float matchedSpecular(vec3 N, vec3 L, vec3 V, float rough, float F0)
+{
+    float nl = dot(N,L), nv = dot(N,V);
+    if (F0 <= 0.0 || nl <= 0.0 || nv <= 0.0) return 0.0;
+    vec3 H = normalize(L+V);
+    float nh = max(dot(N,H),0.0), vh = clamp(dot(V,H),0.0,1.0);
+    float alpha = rough*rough;
+    float a2 = alpha*alpha;
+    // Algebraically equivalent form avoids cancellation near nh=1 on smooth surfaces.
+    float d = (1.0-nh*nh)+nh*nh*a2;
+    float D = a2/(3.141592653589793*d*d);
+    float lambdaL = 0.5*(sqrt(1.0+a2*(1.0-nl*nl)/(nl*nl))-1.0);
+    float lambdaV = 0.5*(sqrt(1.0+a2*(1.0-nv*nv)/(nv*nv))-1.0);
+    float F = F0+(1.0-F0)*pow(1.0-vh,5.0);
+    return D*F/(4.0*nl*nv*(1.0+lambdaL+lambdaV));
+}
+// END MATCHED_SPECULAR
+
 void main()
 {
     vec3 albedo = uImportedMesh ? uOverrideAlbedo : interpolatedAlbedo;
@@ -85,18 +112,15 @@ void main()
 
     float shadow = (uUseShadows) ? sampleShadow(fragPosLightSpace, nDotL) : 0.0;
 
-    // Outgoing radiance of a Lambertian surface: albedo/pi times the incoming
-    // irradiance. The 1/pi is what makes this agree with a Cycles Diffuse BSDF
-    // lit by a sun of the same strength, instead of being an arbitrary "looks
-    // about right" constant. The sky term is already a radiance, so a uniform
-    // hemisphere of it reflects back as albedo * skyRadiance with no 1/pi.
-    //
-    // Known and deliberate difference from the reference: this sky term has no
-    // occlusion, while Cycles darkens creases and undersides because the sky is
-    // actually blocked there. It shows up as slightly flatter ambient in the
-    // raster image and is documented in notes/graphics/18_alley_scene_and_ui.md.
+    float spec = uImportedMesh ? 0.0 : interpolatedSpecular;
+    vec3 viewDir = normalize(uCameraPosition - worldPosition);
     vec3 sunIrradiance = uLightColor * uLightEnergy * nDotL * (1.0 - shadow);
-    vec3 radiance = albedo * (uSkyRadiance + sunIrradiance / PI);
+    // Constant (1-F0) diffuse allocation on BOTH sides, including ambient fill.
+    // This is a controlled direct-only model, not a layered dielectric or full metal.
+    // spec == 0 is exactly the legacy Lambert+fill expression (no grazing lobe).
+    vec3 radiance = albedo * (1.0 - spec) * (uSkyRadiance + sunIrradiance / PI);
+    radiance += sunIrradiance * matchedSpecular(normal, lightDir, viewDir,
+                                               interpolatedRoughness, spec);
 
     fragColor = vec4(radiance * uIntensity, 1.0);
 }

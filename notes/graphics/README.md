@@ -24,3 +24,5 @@
 | 19 | [Cafe Scene, Ground-Truth References, Full Aperture Ladder](19_cafe_and_ground_truth.md) | Replace the alley with a cafe interior; make the Cycles references converged, undenoised and linear, with a measured error bar; widen the aperture range. |
 | 19b | [Cafe Scene Inventory](19_cafe_inventory.md) | Generated object sizes, depths and per-section blur for `scene/cafe.scene`. |
 | 20 | [Matched Interior Lighting, Object Realism, Gather Quality, One-Command Pipeline](20_matched_lighting_and_pipeline.md) | Fix the black Cycles interior by giving it the same unoccluded fill; rebuild the hero props as turned profiles; add a CoC-weighted gather and spiral jitter; add renderer batch mode and a single-command comparison. |
+
+Current follow-up: [Matched specular and café geometry](matched_specular_and_geometry.md) — shared GGX, dome/chamfers, numerical evidence and limitations.
