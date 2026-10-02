@@ -1,0 +1,61 @@
+.DS_Store
+
+# Build outputs
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+*.o
+*.obj
+# Wavefront OBJ assets are geometry, not compiler object files.
+!assets/models/**/*.obj
+*.a
+*.dylib
+*.so
+*.dll
+*.exe
+DepthResearch
+
+# Conda / Python
+.conda/
+.mamba/
+conda-meta/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# VS Code local settings
+.vscode/
+.idea/
+
+# Generated ML artifacts and datasets
+*.ckpt
+*.pt
+*.pth
+*.onnx
+checkpoints/
+runs/
+wandb/
+dataset/generated/
+dataset/cache/
+
+# Generated screenshots
+output/*
+!output/.gitkeep
+
+# Generated Cycles references, metadata and Blender caches; retain output documentation.
+reports/raytraced_dof/*
+!reports/raytraced_dof/README.md
+*.blend1
+*.blend2
+
+# Local environment/secrets
+.env
+.env.*
+.venv/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
