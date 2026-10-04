@@ -1,5 +1,9 @@
 # Matched specular and café geometry — dof-research 6
 
+Follow-up: [expanded validation, numerical limits, and roughness authoring floor](ggx_validation_limits.md)
+records the October 4 revalidation, the five low-roughness oracle failures,
+and the conservative authoring rule `roughness >= 0.12`.
+
 This follow-up fixes the dome profile, adds a numerically verified direct-sun
 specular term to both renderers, and improves visible edges and machine hardware.
 It does not change the research camera, focus, lens, f-stop ladder, or DoF gather.
