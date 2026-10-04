@@ -18,3 +18,6 @@
 | 14 | [Basic Depth of Field](14_basic_dof.md) | Render the first DoF blur with a 17-tap disk gather driven by CoC magnitude. |
 | 15 | [Complex Scene Loading](15_complex_scene.md) | Load indexed OBJ geometry with explicit physical scale into the existing DoF pipeline; preserve a missing-asset fallback. |
 | 16 | [Ray-Traced DoF Reference](16_raytraced_dof_reference.md) | Match physical projection and prepare a Cycles lens-sampled reference with the same scene and camera. |
+| 17 | [Shading, Shadows, and Live UI](17_shading_shadows_and_ui.md) | Add per-object normals, a PCF shadow map, a 100-tap Vogel gather, and a Dear ImGui parameter panel. |
+| 18 | [Shared Scene File, Alley Scene, HDR Gather, Compact UI](18_alley_scene_and_ui.md) | Author the environment once and load it in both renderers; gather in linear HDR; fix the CoC diameter/radius error. |
+| 18b | [Scene Inventory](18_scene_inventory.md) | Generated table of object sizes, depths and the blur each depth produces. Regenerate with `tools/scene/scene_report.py`. |

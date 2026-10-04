@@ -1,0 +1,77 @@
+[
+  {
+    "tag": "focus5m_f1.4",
+    "settings": "focus 5 m, f/1.4",
+    "whole_frame": {
+      "mae": 9.184065968043857,
+      "rmse": 14.176305724217983,
+      "psnr_db": 25.099542197123842,
+      "p95": 20.0,
+      "pixels": 3988800
+    },
+    "edge_band": {
+      "mae": 16.770081911849587,
+      "rmse": 38.182776602189534,
+      "psnr_db": 16.493453477885552,
+      "p95": 71.0,
+      "pixels": 244287
+    },
+    "opengl": "output/gl_focus5m_f1.4.png",
+    "reference": "reports/raytraced_dof/rt_focus5m_f1.4.png",
+    "scene_sha256": "99a26723d93a8ac71c90b24876e94f1ff95929b0e64a7afd4315a6edc32bbe79",
+    "images": [
+      "side_focus5m_f1.4.png",
+      "diff_focus5m_f1.4_x4.png"
+    ]
+  },
+  {
+    "tag": "focus5m_f2.8",
+    "settings": "focus 5 m, f/2.8",
+    "whole_frame": {
+      "mae": 9.118450828987832,
+      "rmse": 13.122953860970888,
+      "psnr_db": 25.770171570797046,
+      "p95": 22.0,
+      "pixels": 3988800
+    },
+    "edge_band": {
+      "mae": 15.268762259969312,
+      "rmse": 27.01651079941374,
+      "psnr_db": 19.498218431028654,
+      "p95": 50.0,
+      "pixels": 365179
+    },
+    "opengl": "output/gl_focus5m_f2.8.png",
+    "reference": "reports/raytraced_dof/rt_focus5m_f2.8.png",
+    "scene_sha256": "99a26723d93a8ac71c90b24876e94f1ff95929b0e64a7afd4315a6edc32bbe79",
+    "images": [
+      "side_focus5m_f2.8.png",
+      "diff_focus5m_f2.8_x4.png"
+    ]
+  },
+  {
+    "tag": "focus5m_f8",
+    "settings": "focus 5 m, f/8",
+    "whole_frame": {
+      "mae": 9.253911452065784,
+      "rmse": 13.229468738161655,
+      "psnr_db": 25.699955521176136,
+      "p95": 25.0,
+      "pixels": 3988800
+    },
+    "edge_band": {
+      "mae": 12.739251467311055,
+      "rmse": 20.334272313824425,
+      "psnr_db": 21.966230903220602,
+      "p95": 45.0,
+      "pixels": 808622
+    },
+    "opengl": "output/gl_focus5m_f8.png",
+    "reference": "reports/raytraced_dof/rt_focus5m_f8.png",
+    "scene_sha256": "99a26723d93a8ac71c90b24876e94f1ff95929b0e64a7afd4315a6edc32bbe79",
+    "images": [
+      "side_focus5m_f8.png",
+      "diff_focus5m_f8_x4.png"
+    ]
+  }
+]

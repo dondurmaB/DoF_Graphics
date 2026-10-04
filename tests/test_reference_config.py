@@ -1,5 +1,6 @@
 """CPU-only checks; these do not claim Blender/Cycles runtime verification."""
 import contextlib
+import hashlib
 import importlib.util
 import io
 import math
@@ -79,12 +80,64 @@ class ReferenceConfigTests(unittest.TestCase):
                         "nearPlane": reference.NEAR_M, "farPlane": reference.FAR_M}
         for name, expected in scalar_pairs.items():
             self.assertAlmostEqual(float(re.search(r"float " + name + r" = ([-\d.]+)f;", source)[1]), expected)
-        for label, position, rx, ry, scale in reference.BOXES[:3]:
-            letter = label[-1]
-            match = re.search(r"cube" + letter + r"Position = glm::vec3\(([^)]+)\)", source)
-            self.assertEqual(tuple(float(x.strip().rstrip('f')) for x in match[1].split(',')), position)
-            for suffix, value in [("RotationXDegrees", rx), ("RotationYDegrees", ry), ("UniformScale", scale[0])]:
-                self.assertEqual(float(re.search(r"float cube" + letter + suffix + r" = ([-\d.]+)f;", source)[1]), value)
+        vector = lambda name: tuple(
+            float(value.strip().rstrip("f"))
+            for value in re.search(name + r" = glm::vec3\(([^)]+)\)", source)[1].split(","))
+        self.assertEqual(vector("importedScenePosition"), reference.IMPORTED_SCENE_POSITION_GL)
+        self.assertEqual(vector("importedSceneAlbedo"), reference.IMPORTED_ALBEDO)
+        # The seven hand-placed cubes this used to compare are gone; the
+        # environment is checked against the shared scene file instead, below.
+
+    def test_scene_file_agrees_with_both_renderers(self):
+        """The one check that keeps the two renderers drawing the same scene.
+
+        scene/alley.scene is loaded by src/SceneFile.cpp for the raster pass and
+        by tools/scene/scene_loader.py for this Cycles script. The camera and
+        lens are additionally duplicated as argparse defaults here and as
+        fallback literals in src/main.cpp, so all three have to agree.
+        """
+        loader, scene, geometry = reference.load_shared_scene()
+        source = (ROOT / "src/main.cpp").read_text()
+
+        self.assertEqual(scene.camera.position, reference.CAMERA_POSITION_GL)
+        forward = reference.camera_forward_gl(scene.camera.yaw_degrees, scene.camera.pitch_degrees)
+        for actual, expected in zip(forward, reference.CAMERA_FORWARD_GL):
+            self.assertAlmostEqual(actual, expected, places=9)
+        self.assertEqual(scene.camera.focal_length_mm, reference.FOCAL_LENGTH_MM)
+        self.assertEqual(scene.camera.sensor_height_mm, reference.SENSOR_HEIGHT_MM)
+        self.assertIn(scene.camera.focus_distance_m, reference.FOCUS_DISTANCES_M)
+        self.assertIn(scene.camera.f_number, reference.F_STOPS)
+
+        # src/main.cpp keeps the same values as fallbacks for a missing file.
+        def cpp_vector(name):
+            match = re.search(name + r" = glm::vec3\(([^)]+)\)", source)
+            self.assertIsNotNone(match, f"src/main.cpp no longer defines {name}")
+            return tuple(float(value.strip().rstrip("f")) for value in match[1].split(","))
+
+        def cpp_scalar(name):
+            match = re.search(r"float " + name + r" = ([-\d.]+)f;", source)
+            self.assertIsNotNone(match, f"src/main.cpp no longer defines {name}")
+            return float(match[1])
+
+        self.assertEqual(cpp_vector("lightDirection"), scene.sun.direction)
+        self.assertEqual(cpp_vector("lightColor"), scene.sun.color)
+        self.assertEqual(cpp_scalar("lightEnergy"), scene.sun.energy)
+        self.assertEqual(cpp_vector("ambientColor"), scene.ambient.color)
+        self.assertEqual(cpp_scalar("ambientStrength"), scene.ambient.strength)
+        self.assertEqual(cpp_scalar("focusDistanceMeters"), scene.camera.focus_distance_m)
+        self.assertEqual(cpp_scalar("fNumber"), scene.camera.f_number)
+        self.assertIn(f'scenePath = "{reference.SCENE_FILE}"', source)
+
+        # The digest in every sidecar JSON must be of the file actually loaded.
+        plan = reference.make_plan(reference.parse_args([]))
+        digest = hashlib.sha256((ROOT / reference.SCENE_FILE).read_bytes()).hexdigest()
+        self.assertEqual(plan["scene_sha256"], digest)
+        summary = loader.summary(scene, geometry)
+        self.assertEqual(plan["scene_summary"]["triangles"], summary["triangles"])
+        self.assertEqual(plan["scene_summary"]["sky_radiance"], list(scene.sky_radiance))
+        # Emitters have to exist, or the alley has no practical lights at dusk
+        # and the whole point of the HDR gather is lost.
+        self.assertGreater(summary["emissive_triangles"], 0)
 
     def test_controlled_jobs_and_invalid_arguments(self):
         args = reference.parse_args([])

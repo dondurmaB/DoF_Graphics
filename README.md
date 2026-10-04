@@ -68,11 +68,108 @@ Run:
 ./build/DepthResearch
 ```
 
+## Start Here
+
+[`notes/EXPLAINER.md`](notes/EXPLAINER.md) explains the whole project in one read: what depth of
+field is physically, how the OpenGL gather and the Cycles path tracer each produce it, why the two
+can be compared, and everything that changed in experiment 18. Object sizes and depths are in
+[`notes/graphics/18_scene_inventory.md`](notes/graphics/18_scene_inventory.md).
+
+## The Scene
+
+The environment is a dusk back-alley described once in `scene/alley.scene` and loaded by **both**
+renderers: by `src/SceneFile.cpp` for the OpenGL pass and by `tools/scene/scene_loader.py` for the
+Cycles reference in `tools/raytraced_reference/render_dof.py`. Neither one authors geometry, so the
+two cannot drift apart and end up comparing different scenes.
+
+There are no image textures. Every surface detail is real geometry (mortar courses, protruding
+bricks, crate panels, railings), which keeps the two renderers matching exactly and makes every
+shadow a real shadow.
+
+```sh
+python3 tools/scene/build_alley.py      # regenerate scene/alley.scene
+python3 tools/scene/preview_scene.py    # CPU preview PNG; needs no GPU
+```
+
+Single-line tweaks can be made directly in `scene/alley.scene` and reloaded in the running
+renderer with `L`. Larger changes belong in `build_alley.py`, which regenerates the file
+deterministically. After regenerating, refresh the cross-language test numbers:
+
+```sh
+python3 tests/test_scene_file.py --print-expected
+```
+
 ## Expected Result
 
-A window titled `DOF_Research` should open and display the current 3D cube scene through the active rendering path. The current project includes an interactive camera, depth testing, model/view/projection matrices, depth visualization modes, and an off-screen framebuffer presentation pass. The terminal prints framebuffer setup diagnostics such as the completed scene framebuffer size.
+A window titled `DOF_Research` should open and display the alley through the active rendering path.
+The project includes an interactive camera, depth testing, model/view/projection matrices, depth and
+circle-of-confusion visualization modes, a shadow map, an HDR off-screen framebuffer, and a
+defocus-gather presentation pass. The terminal prints setup diagnostics: the loaded scene's
+primitive/triangle counts and bounds, the sun and sky values, the shadow-map resolution in
+centimetres per texel, and the scene framebuffer size.
 
 Press Escape or close the window to exit.
+
+## Controls
+
+The cursor is free on launch so the panel is immediately clickable. The button at the top of the
+panel switches between "pointer for the panel" and "camera follows the mouse"; `Tab` does the same
+from the keyboard. While the camera has the mouse the panel cannot be clicked, so `Tab` is the way
+back, and the panel says so in that mode. Holding the right mouse button is still available as a
+quick look-around without toggling.
+
+| Key | Action |
+|---|---|
+| `1`-`6` | Color, raw depth, linear depth, CoC magnitude, CoC signed, basic DoF |
+| `0` | Split view: sharp on the left of the divider, defocused on the right |
+| `7` `8` `9` | Focus 2 m / 5 m / 15 m |
+| `F` `B` | Toggle f/1.4 and f/8 / set f/2.8 |
+| `T` | Reference preset: 50 mm f/1.4 focused 5 m, matching the Cycles jobs |
+| `K` | Strong-DoF preset: 85 mm f/1.4 focused 1.6 m, an unmistakable blur |
+| `L` | Reload `scene/alley.scene` |
+| `R` | Reset the camera to the scene file's pose |
+| `[` `]` | Focal length -/+5 mm |
+| `,` `.` | Sensor height -/+2 mm |
+| `V` | Physical / legacy projection |
+| `WASD` | Move |
+| `G` | Cycle the panel: compact -> full -> hidden |
+| `Tab` | Free / capture the mouse |
+| `P` | Screenshot: `output/latest.png` plus a settings-named copy such as `output/gl_focus5m_f1.4.png` |
+| `H` | Print the key list |
+
+The panel reports the circle-of-confusion radius the current lens settings actually reach next to
+the configured ceiling. That readout matters: at 50 mm f/1.4 focused 5 m the background CoC radius
+is only about 9 px, so the 120 px ceiling does nothing and the panel says "lens-limited". Press `K`
+for settings that produce a large blur. See
+[notes/graphics/18_alley_scene_and_ui.md](notes/graphics/18_alley_scene_and_ui.md) for the numbers.
+
+## Comparing the Two Renderers
+
+```sh
+# 1. Cycles references -> reports/raytraced_dof/rt_*.png (+ sidecar JSON)
+/Applications/Blender.app/Contents/MacOS/Blender --background --python-exit-code 1 \
+  --python tools/raytraced_reference/render_dof.py
+
+# 2. OpenGL captures: run the renderer, press T then 6, then P. Repeat for F and B.
+#    Writes output/gl_focus5m_f1.4.png, matching the reference's name.
+
+# 3. Pair, check and measure
+python3 tools/compare/compare_renders.py --write-images
+```
+
+Step 3 writes side-by-side and 4x difference images plus a metrics table to
+`reports/comparison/`. It refuses to compare a reference whose recorded scene sha256 does not
+match the scene file on disk, so a stale reference cannot silently produce plausible numbers.
+
+## Tests
+
+```sh
+cmake --build build && ctest --test-dir build
+```
+
+`scene_file` and `scene_file_python` are two halves of one check: the C++ and Python scene loaders
+are compared against the same expected geometry numbers, so changing one without the other fails
+with the exact number that moved.
 
 ## Development Workflow
 

@@ -12,8 +12,8 @@ import time
 
 PREVIEW_SAMPLES = 32
 FINAL_SAMPLES = 128
-REFERENCE_WIDTH = 1200  # Framebuffer pixels, not the 600-point macOS window size.
-REFERENCE_HEIGHT = 1200
+REFERENCE_WIDTH = 2400  # Framebuffer pixels, not the 600-point macOS window size.
+REFERENCE_HEIGHT = 1662
 FOCAL_LENGTH_MM = 50.0
 SENSOR_HEIGHT_MM = 24.0
 FOCUS_DISTANCES_M = (5.0,)
@@ -22,26 +22,43 @@ IMPORTED_SCENE_SCALE = 0.1
 IMPORTED_SCENE_POSITION_GL = (0.0, -0.75, 0.0)
 IMPORTED_ROTATION_X_DEG = -90.0
 IMPORTED_ROTATION_Y_DEG = 0.0
+# Linear albedo for the imported mesh, matching importedSceneAlbedo in src/main.cpp.
+# The OBJ carries no usable material, so both renderers assign one explicitly.
+IMPORTED_ALBEDO = (0.62, 0.44, 0.20)
 CAMERA_POSITION_GL = (0.0, 0.0, 5.0)
 CAMERA_FORWARD_GL = (0.0, 0.0, -1.0)
 CAMERA_UP_GL = (0.0, 1.0, 0.0)
-LIGHT_DIRECTION_GL = (-0.4, 0.8, 0.6)  # Surface toward light, as in basic.frag.
 NEAR_M, FAR_M = 0.1, 100.0
 
 # One proper rotation for every world-space object: (x,y,z) -> (x,-z,y).
 WORLD_CONVERSION = ((1, 0, 0, 0), (0, 0, -1, 0), (0, 1, 0, 0), (0, 0, 0, 1))
-# name, position, X rotation, Y rotation, scale; B/C are fallback-only and excluded.
-BOXES = (
-    ("foreground_A", (-0.55, -0.35, 3.0), 50.0, 70.0, (0.5, 0.5, 0.5)),
-    ("background_D", (1.6, 0.4, -10.0), 35.0, -20.0, (2.0, 2.0, 2.0)),
-    ("background_E", (-3.8, 0.4, -20.0), -15.0, 60.0, (2.0, 2.0, 2.0)),
-    ("floor", (0.0, -0.85, -7.5), 0.0, 0.0, (12.0, 0.1, 25.0)),
-    ("wall", (0.0, 1.2, -22.0), 0.0, 0.0, (14.0, 4.0, 0.1)),
-    # Experiment 17 additions; mirror cubeF/cubeG in src/main.cpp. Appended after the
-    # first three so tests/test_reference_config.py's BOXES[:3] check is unaffected.
-    ("midground_F", (2.4, -0.3, -2.0), 10.0, -25.0, (0.35, 0.35, 0.35)),
-    ("background_G", (-2.2, 0.2, -13.0), 0.0, 40.0, (1.2, 1.2, 1.2)),
-)
+
+# The environment is no longer written out here. It comes from the same file the
+# OpenGL renderer loads, so the two cannot describe different scenes:
+#   scene/alley.scene  ->  tools/scene/scene_loader.py  (this script)
+#                      ->  src/SceneFile.cpp            (src/main.cpp)
+# The camera and lens literals above stay because argparse needs defaults;
+# tests/test_reference_config.py checks they still agree with the scene file
+# and with the fallbacks in src/main.cpp.
+SCENE_FILE = "scene/alley.scene"
+
+
+def load_shared_scene():
+    """Parse scene/alley.scene with the shared loader. Needs no Blender."""
+    root = project_root()
+    loader_directory = str(root / "tools/scene")
+    if loader_directory not in sys.path:
+        sys.path.insert(0, loader_directory)
+    import scene_loader
+
+    scene = scene_loader.load_scene(root / SCENE_FILE)
+    return scene_loader, scene, scene_loader.build_geometry(scene)
+
+
+def camera_forward_gl(yaw_degrees, pitch_degrees):
+    """Same yaw/pitch convention as updateCameraFront() in src/main.cpp."""
+    yaw, pitch = math.radians(yaw_degrees), math.radians(pitch_degrees)
+    return (math.cos(yaw) * math.cos(pitch), math.sin(pitch), math.sin(yaw) * math.cos(pitch))
 
 
 def project_root():
@@ -140,6 +157,20 @@ def render_jobs(args):
 
 def make_plan(args):
     root = project_root()
+    loader, scene, geometry = load_shared_scene()
+    summary = loader.summary(scene, geometry)
+    scene_summary = {
+        "primitives": summary["primitives"],
+        "vertices": summary["vertices"],
+        "triangles": summary["triangles"],
+        "emissive_triangles": summary["emissive_triangles"],
+        "bounds_min": list(summary["bounds_min"]),
+        "bounds_max": list(summary["bounds_max"]),
+        "sun_direction_gl": list(scene.sun.direction),
+        "sun_energy_w_per_m2": scene.sun.energy,
+        "sun_angular_diameter_degrees": scene.sun.angular_diameter_degrees,
+        "sky_radiance": list(scene.sky_radiance),
+    }
     return {
         "asset": "assets/models/scene.obj",
         "asset_sha256": hashlib.sha256((root / "assets/models/scene.obj").read_bytes()).hexdigest(),
@@ -155,8 +186,13 @@ def make_plan(args):
         "world_conversion": WORLD_CONVERSION, "import_scale": IMPORTED_SCENE_SCALE,
         "import_matrix_gl": model_matrix(IMPORTED_SCENE_POSITION_GL, IMPORTED_ROTATION_X_DEG,
                                          IMPORTED_ROTATION_Y_DEG, (IMPORTED_SCENE_SCALE,) * 3, imported=True),
-        "supporting_boxes": BOXES,
         "outputs": [job[0] for job in render_jobs(args)],
+        # The scene digest goes in every sidecar JSON. Without it a reference PNG
+        # cannot be tied to the geometry it was rendered from, which is the one
+        # thing that would quietly invalidate a comparison months later.
+        "scene_file": SCENE_FILE,
+        "scene_sha256": hashlib.sha256((root / SCENE_FILE).read_bytes()).hexdigest(),
+        "scene_summary": scene_summary,
     }
 
 
@@ -205,17 +241,43 @@ def create_scene(bpy, args, plan):
     scene.view_settings.gamma = 1.0
     conversion = Matrix(WORLD_CONVERSION)
 
-    def material(name, color):
+    def new_material(name):
         result = bpy.data.materials.new(name)
-        result.diffuse_color = (*color, 1.0)
         if bpy.app.version < (5, 0, 0):
             result.use_nodes = True  # Blender 5+ creates the node tree automatically.
+        result.node_tree.nodes.clear()
+        return result
+
+    def flat_material(name, color):
+        """One albedo for the whole object; used for the imported mesh."""
+        result = new_material(name)
+        result.diffuse_color = (*color, 1.0)
         nodes = result.node_tree.nodes
-        nodes.clear()
         diffuse = nodes.new("ShaderNodeBsdfDiffuse")
         diffuse.inputs["Color"].default_value = (*color, 1.0)
         output = nodes.new("ShaderNodeOutputMaterial")
         result.node_tree.links.new(diffuse.outputs[0], output.inputs["Surface"])
+        return result
+
+    def vertex_color_material(name, emission):
+        """Reads the per-vertex colour the scene file supplies.
+
+        A Diffuse BSDF for surfaces, matching basic.frag's albedo/pi Lambert
+        term; an Emission shader at strength 1.0 for emitters, whose colour the
+        builder has already premultiplied by `emit` so both renderers emit the
+        same radiance.
+        """
+        result = new_material(name)
+        nodes = result.node_tree.nodes
+        attribute = nodes.new("ShaderNodeVertexColor")
+        attribute.layer_name = "Col"
+        shader = nodes.new("ShaderNodeEmission" if emission else "ShaderNodeBsdfDiffuse")
+        if emission:
+            shader.inputs["Strength"].default_value = 1.0
+        output = nodes.new("ShaderNodeOutputMaterial")
+        links = result.node_tree.links
+        links.new(attribute.outputs["Color"], shader.inputs["Color"])
+        links.new(shader.outputs[0], output.inputs["Surface"])
         return result
 
     # Identity importer axis conversion. Apply the same C*M transform used for all objects once.
@@ -225,7 +287,7 @@ def create_scene(bpy, args, plan):
     imported = [obj for obj in bpy.context.selected_objects if obj.type == "MESH"]
     if not imported:
         raise RuntimeError("OBJ import produced no mesh; no fallback is allowed for reference renders.")
-    teapot_material = material("teapot_warm", (0.85, 0.65, 0.35))
+    teapot_material = flat_material("teapot_warm", IMPORTED_ALBEDO)
     for obj in imported:
         obj.matrix_world = conversion @ Matrix(plan["import_matrix_gl"]) @ obj.matrix_world
         obj.data.materials.clear()
@@ -235,20 +297,92 @@ def create_scene(bpy, args, plan):
         obj.data.calc_loop_triangles()
         print(f"Imported {obj.name}: {len(obj.data.vertices)} positions, {len(obj.data.loop_triangles)} triangles", flush=True)
 
-    face_colors = {(2, 1): (1, 0, 0), (2, -1): (0, 1, 0), (0, -1): (0, 0, 1),
-                   (0, 1): (1, 1, 0), (1, 1): (0, 1, 1), (1, -1): (1, 0, 1)}
-    colors = {key: material(f"cube_face_{key}", color) for key, color in face_colors.items()}
-    for name, position, rx, ry, scale in BOXES:
-        bpy.ops.mesh.primitive_cube_add(size=1.0)
-        obj = bpy.context.object
-        obj.name = name
-        keys = list(colors)
-        for key in keys:
-            obj.data.materials.append(colors[key])
-        for face in obj.data.polygons:
-            axis = max(range(3), key=lambda i: abs(face.normal[i]))
-            face.material_index = keys.index((axis, 1 if face.normal[axis] > 0 else -1))
-        obj.matrix_world = conversion @ Matrix(model_matrix(position, rx, ry, scale))
+    # ---- The alley, from the shared scene file ----
+    # Two objects, because one carries a Diffuse BSDF and the other an Emission
+    # shader. The OpenGL pass keeps a single mesh and branches on a per-vertex
+    # emission attribute instead; the geometry itself is identical because both
+    # come out of the same builder.
+    loader, shared_scene, geometry = load_shared_scene()
+    shaded, emissive = loader.split_by_emission(geometry)
+
+    def build_part(name, part, material):
+        if not part["triangles"]:
+            return None
+        mesh = bpy.data.meshes.new(name)
+        # Already in OpenGL world space, so the one conversion matrix below is
+        # the only transform applied, exactly as for the boxes it replaced.
+        mesh.from_pydata(part["positions"], [], part["triangles"])
+        mesh.validate(verbose=False)
+
+        # Linear albedo per vertex (or premultiplied radiance for emitters),
+        # read by a ShaderNodeVertexColor. FLOAT_COLOR rather than BYTE_COLOR:
+        # byte colours are sRGB-encoded on write, which would silently gamma
+        # the albedo and break the comparison with the raster pass.
+        colors = mesh.color_attributes.new(name="Col", type="FLOAT_COLOR", domain="POINT")
+        for index, color in enumerate(part["colors"]):
+            colors.data[index].color = (color[0], color[1], color[2], 1.0)
+
+        # Custom split normals taken from the builder's own analytic normals, so
+        # Cycles shades from exactly the normals basic.frag gets rather than
+        # from Blender's averaging. Every polygon is marked smooth first: with
+        # custom normals supplied this reproduces hard edges too, because the
+        # builder already duplicates vertices per face wherever a flat face is
+        # wanted.
+        for polygon in mesh.polygons:
+            polygon.use_smooth = True
+        if hasattr(mesh, "normals_split_custom_set_from_vertices"):
+            mesh.normals_split_custom_set_from_vertices(part["normals"])
+        else:
+            # Older or newer Blender without the custom-normals API: fall back to
+            # the per-triangle smooth flags from the scene file. Flat faces then
+            # match exactly and smooth ones (cylinders, spheres) are averaged by
+            # Blender instead, which differs very slightly at their seams.
+            print("normals_split_custom_set_from_vertices unavailable; "
+                  "using per-face smooth flags instead.", flush=True)
+            for polygon, smooth in zip(mesh.polygons, part["smooth"]):
+                polygon.use_smooth = bool(smooth)
+
+        obj = bpy.data.objects.new(name, mesh)
+        obj.data.materials.append(material)
+        scene.collection.objects.link(obj)
+        obj.matrix_world = conversion
+        return obj
+
+    alley = build_part("alley_surfaces", shaded, vertex_color_material("alley_diffuse", emission=False))
+    lights = build_part("alley_emitters", emissive, vertex_color_material("alley_emission", emission=True))
+    if alley is None:
+        raise RuntimeError(f"{SCENE_FILE} produced no shaded geometry.")
+    if lights is not None:
+        # The raster pass draws emitters as self-lit patches of colour and they
+        # illuminate nothing. Matching that here is what keeps the two images
+        # comparable: otherwise Cycles would bounce light off every window and
+        # bulb and come out far brighter than the OpenGL render.
+        #
+        # Switching the emitters off for diffuse (and glossy/transmission/volume)
+        # rays is what actually does it: a diffuse ray that cannot see the
+        # emitter collects no light from it, while camera rays still do, so the
+        # bulbs stay visibly bright. `visible_shadow` is deliberately left on,
+        # because the emitter geometry is in the OpenGL shadow pass too and does
+        # block the sun there.
+        for attribute in ("visible_diffuse", "visible_glossy", "visible_transmission",
+                          "visible_volume_scatter"):
+            if hasattr(lights, attribute):
+                setattr(lights, attribute, False)
+            else:
+                # Blender 2.9x and earlier kept these under object.cycles_visibility.
+                legacy = getattr(lights, "cycles_visibility", None)
+                legacy_name = attribute.replace("visible_", "")
+                if legacy is not None and hasattr(legacy, legacy_name):
+                    setattr(legacy, legacy_name, False)
+        # Some Blender versions also expose a per-object bounce limit. It is a
+        # belt-and-braces extra, not the mechanism above, so it is only set when
+        # the build actually has it: Blender 5.x does not, and assuming it did
+        # is what used to abort this script.
+        object_cycles = getattr(lights, "cycles", None)
+        if object_cycles is not None and hasattr(object_cycles, "max_bounces"):
+            object_cycles.max_bounces = 0
+    print(f"Built {SCENE_FILE}: {len(shaded['triangles'])} shaded and "
+          f"{len(emissive['triangles'])} emissive triangles", flush=True)
 
     data = bpy.data.cameras.new("reference_camera")
     camera = bpy.data.objects.new("reference_camera", data)
@@ -275,18 +409,30 @@ def create_scene(bpy, args, plan):
     if not math.isclose(actual_fov, plan["vertical_fov_degrees"], abs_tol=0.001):
         raise RuntimeError(f"Blender vertical FOV mismatch: {actual_fov} versus {plan['vertical_fov_degrees']}")
 
+    # World and sun both come from the scene file, so this is the same light
+    # that basic.frag uses. The background colour and strength multiply to the
+    # sky radiance the raster pass clears to and adds as its ambient term.
     scene.world = bpy.data.worlds.new("reference_world")
     if bpy.app.version < (5, 0, 0):
         scene.world.use_nodes = True
     background = scene.world.node_tree.nodes.get("Background")
-    background.inputs["Color"].default_value = (0.2, 0.3, 0.3, 1.0)
-    background.inputs["Strength"].default_value = 0.4
+    if background is None:
+        # Not every Blender version seeds a new world with a Background node.
+        nodes = scene.world.node_tree.nodes
+        background = nodes.new("ShaderNodeBackground")
+        world_output = (nodes.get("World Output") or nodes.new("ShaderNodeOutputWorld"))
+        scene.world.node_tree.links.new(background.outputs[0], world_output.inputs["Surface"])
+    background.inputs["Color"].default_value = (*shared_scene.ambient.color, 1.0)
+    background.inputs["Strength"].default_value = shared_scene.ambient.strength
     light_data = bpy.data.lights.new("directional_light", "SUN")
-    light_data.energy = 2.0
-    light_data.angle = math.radians(0.5)
+    # energy is irradiance in W/m^2 on a surface facing the sun, the same
+    # quantity uLightEnergy carries into basic.frag.
+    light_data.energy = shared_scene.sun.energy
+    light_data.color = shared_scene.sun.color
+    light_data.angle = math.radians(shared_scene.sun.angular_diameter_degrees)
     light = bpy.data.objects.new("directional_light", light_data)
     scene.collection.objects.link(light)
-    light.rotation_euler = (-Vector(gl_to_blender(LIGHT_DIRECTION_GL))).to_track_quat("-Z", "Y").to_euler()
+    light.rotation_euler = (-Vector(gl_to_blender(shared_scene.sun.direction))).to_track_quat("-Z", "Y").to_euler()
     return scene, data
 
 

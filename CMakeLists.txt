@@ -63,6 +63,12 @@ target_include_directories(imgui_lib PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_D
 # ImGui's OpenGL3 backend loads its own GL entry points, so it does not use the project's minimal glad stub.
 target_link_libraries(imgui_lib PUBLIC glfw ${MACOS_OPENGL_FRAMEWORK})
 
+# The shared scene format. Deliberately free of glad, glm and OpenGL so the
+# geometry builder can be tested without a GL context, and so it stays a
+# line-for-line twin of tools/scene/scene_loader.py.
+add_library(scene_file STATIC src/SceneFile.cpp)
+target_include_directories(scene_file PUBLIC include)
+
 # CPU OBJ loading and one-time GPU upload stay in one small module.
 add_library(scene_mesh STATIC src/Mesh.cpp)
 target_include_directories(scene_mesh PUBLIC include)
@@ -73,6 +79,7 @@ add_executable(DepthResearch src/main.cpp)
 target_link_libraries(DepthResearch
     PRIVATE
         scene_mesh
+        scene_file
         imgui_lib
         glfw
         glm::glm
@@ -88,9 +95,19 @@ if(BUILD_TESTING)
     target_include_directories(physical_camera_tests PRIVATE include)
     target_link_libraries(physical_camera_tests PRIVATE glm::glm)
     add_test(NAME physical_camera COMMAND physical_camera_tests)
+    # Reads scene/alley.scene from the source tree and checks the geometry it
+    # builds against numbers produced by the Python builder. Needs no GL context.
+    add_executable(scene_file_tests tests/scene_file.cpp)
+    target_link_libraries(scene_file_tests PRIVATE scene_file)
+    target_compile_definitions(scene_file_tests
+        PRIVATE PROJECT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME scene_file COMMAND scene_file_tests)
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
         add_test(NAME reference_config COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_reference_config.py)
+        # The Python half of the same cross-language check: it also verifies that
+        # the expected numbers written into tests/scene_file.cpp still match.
+        add_test(NAME scene_file_python COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scene_file.py)
     endif()
 endif()
 

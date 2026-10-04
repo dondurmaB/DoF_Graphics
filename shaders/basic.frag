@@ -1,25 +1,37 @@
 #version 330 core
 
-in vec3 interpolatedColor;
+in vec3 interpolatedAlbedo;
 in vec3 worldPosition;
 in vec3 worldNormal;
 in vec4 fragPosLightSpace;
+in float interpolatedEmission;
 
+// Linear radiance, written into an RGBA16F attachment. Exposure and the sRGB
+// transfer function are applied once at the very end of screen.frag, so the
+// defocus gather in between averages light the way a lens does. Averaging
+// display-encoded values instead is what makes naive DoF look grey and flat.
 out vec4 fragColor;
 
 uniform float uIntensity;
 uniform bool uImportedMesh;
+// The imported mesh has no per-vertex albedo, so it gets a flat one.
+uniform vec3 uOverrideAlbedo;
 
-// Directional light, matching tools/raytraced_reference/render_dof.py's LIGHT_DIRECTION_GL
-// so the OpenGL raster pass and the Cycles ground truth are lit the same way.
+// Directional light read from scene/alley.scene, the same file
+// tools/raytraced_reference/render_dof.py configures the Cycles sun from.
 uniform vec3 uLightDirection; // points FROM the surface TOWARD the light, world space
 uniform vec3 uLightColor;
-uniform float uAmbientStrength;
+uniform float uLightEnergy;   // Irradiance in W/m^2, as Blender's sun strength.
+// Uniform sky radiance: ambient colour * strength from the scene file, which is
+// also the OpenGL clear colour and the Cycles world background.
+uniform vec3 uSkyRadiance;
 
 uniform bool uUseShadows;
 uniform sampler2D uShadowMap;
 
-// PCF (percentage-closer filtering): average several neighboring shadow-map
+const float PI = 3.14159265359;
+
+// PCF (percentage-closer filtering): average several neighbouring shadow-map
 // texels instead of one, so shadow edges are soft rather than aliased.
 float sampleShadow(vec4 lightSpacePos, float nDotL)
 {
@@ -32,13 +44,16 @@ float sampleShadow(vec4 lightSpacePos, float nDotL)
     if (projected.z > 1.0 || projected.x < 0.0 || projected.x > 1.0 ||
         projected.y < 0.0 || projected.y > 1.0) {
         // Outside the light's frustum/far plane: treat as unshadowed rather than
-        // guessing, so geometry far from the tracked scene bounds is not clipped dark.
+        // guessing, so geometry beyond the scene file's shadow region is not
+        // clipped dark. That region is chosen in build_alley.py to contain
+        // everything the camera can see.
         return 0.0;
     }
 
-    // Slope-scaled bias fights shadow acne (self-shadowing) without a fixed
-    // constant being too thin on grazing surfaces or too thick on flat ones.
-    float bias = max(0.0025 * (1.0 - nDotL), 0.0006);
+    // Slope-scaled bias fights the last of the shadow acne. Most of the work is
+    // done by the normal offset in basic.vert, so this can stay small and not
+    // detach contact shadows under the crates.
+    float bias = max(0.0012 * (1.0 - nDotL), 0.0003);
 
     float shadow = 0.0;
     vec2 texelSize = 1.0 / vec2(textureSize(uShadowMap, 0));
@@ -53,9 +68,15 @@ float sampleShadow(vec4 lightSpacePos, float nDotL)
 
 void main()
 {
-    vec3 albedo = interpolatedColor;
-    if (uImportedMesh) {
-        albedo = vec3(0.85, 0.65, 0.35);
+    vec3 albedo = uImportedMesh ? uOverrideAlbedo : interpolatedAlbedo;
+
+    // Emitters (window panes, bulbs, the neon sign) are radiance sources, not
+    // surfaces: they are not shaded, and in Cycles they are marked invisible to
+    // diffuse rays with max_bounces 0 so they do not light anything either.
+    // Both renderers therefore show the same self-lit patch of colour.
+    if (!uImportedMesh && interpolatedEmission > 0.0) {
+        fragColor = vec4(albedo * interpolatedEmission * uIntensity, 1.0);
+        return;
     }
 
     vec3 normal = normalize(worldNormal);
@@ -64,10 +85,18 @@ void main()
 
     float shadow = (uUseShadows) ? sampleShadow(fragPosLightSpace, nDotL) : 0.0;
 
-    // Ambient keeps unlit/shadowed faces visible instead of pure black.
-    // Diffuse is attenuated by (1 - shadow) so fully shadowed fragments fall back to ambient only.
-    vec3 lighting = uAmbientStrength + (1.0 - shadow) * (1.0 - uAmbientStrength) * nDotL * uLightColor;
-    vec3 color = albedo * lighting;
+    // Outgoing radiance of a Lambertian surface: albedo/pi times the incoming
+    // irradiance. The 1/pi is what makes this agree with a Cycles Diffuse BSDF
+    // lit by a sun of the same strength, instead of being an arbitrary "looks
+    // about right" constant. The sky term is already a radiance, so a uniform
+    // hemisphere of it reflects back as albedo * skyRadiance with no 1/pi.
+    //
+    // Known and deliberate difference from the reference: this sky term has no
+    // occlusion, while Cycles darkens creases and undersides because the sky is
+    // actually blocked there. It shows up as slightly flatter ambient in the
+    // raster image and is documented in notes/graphics/18_alley_scene_and_ui.md.
+    vec3 sunIrradiance = uLightColor * uLightEnergy * nDotL * (1.0 - shadow);
+    vec3 radiance = albedo * (uSkyRadiance + sunIrradiance / PI);
 
-    fragColor = vec4(color * uIntensity, 1.0);
+    fragColor = vec4(radiance * uIntensity, 1.0);
 }
