@@ -103,6 +103,8 @@ ctest --test-dir build --output-on-failure
 
 `DoFApproaches` renders one shared analytic scene through three different depth-of-field methods so they can be subtracted from each other: a single-layer screen-space gather, multi-view aperture accumulation, and lens-sampled ray tracing. It is the code behind Experiments 15-17.
 
+`renderer/mitsuba/` is the physically based path: a Mitsuba 3 cafe interior with global illumination, sunlight through windows, refraction and metals. It renders pixel-aligned all-in-focus, thin-lens depth-of-field and ground-truth depth, locally on Apple Metal or on the HPC with CUDA. See [renderer/mitsuba/README.md](renderer/mitsuba/README.md).
+
 ## DoFApproaches
 
 A three-way comparison of depth-of-field methods on one scene. All three share the same geometry and the same surface shading, so they differ in exactly one respect: how visibility through the aperture is resolved. That is what makes their difference images meaningful.

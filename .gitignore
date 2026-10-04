@@ -37,6 +37,7 @@ runs/
 wandb/
 dataset/generated/
 dataset/cache/
+renderer/mitsuba/generated/
 
 # Generated screenshots
 output/*
@@ -49,6 +50,7 @@ output/*
 
 # Logs and temporary files
 *.log
+logs/
 *.tmp
 *.swp
 .omx/

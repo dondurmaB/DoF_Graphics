@@ -20,6 +20,7 @@
 | Adversarial DoF comparison scene | Shipped | Exposes every screen-space failure mode in a single frame. | `createHaloScene()` stages a sharp railing on the focus plane, near posts thinner than their own defocus disc, emissive background bokeh, and a receding depth ramp. |
 | Method comparison metrics and diff maps | Shipped | Makes method claims falsifiable instead of visual. | `tools/compare_dof_methods.py` writes per-zone mean absolute error and amplified difference maps to `output/dof3-comparison.json`. |
 | Experiments 15-17 | Shipped | Extends the teaching sequence past basic DoF into why it fails and what fixes it. | Documentation and reproducible commands over the shared `DoFApproaches` target rather than three source snapshots. |
+| Mitsuba 3 physically based cafe | In progress | Gives a realistic scene with global illumination, sun and sky, soft shadows, refraction and metals, plus ground-truth thin-lens DoF. | `renderer/mitsuba/`: procedural, asset-free, about 626k triangles; renders pixel-aligned all-in-focus, thin-lens DoF and a 1-spp G-buffer with planar z-depth. Runs on Apple Metal locally and CUDA on the HPC via `hpc/render_cafe.slurm`. |
 | Shader copy dependency tracking | Shipped | Keeps edited `shaders/dof_scene/*` files synchronized into the app bundle during rebuilds. | Source shader changes now trigger copy/link dependency updates. |
 
 ## Planned

@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mitsuba Cafe Viewer</title>
+<style>
+  :root {
+    --bg: #111214; --panel: #1a1c1f; --line: #2a2d31; --text: #e6e3dc; --muted: #9a968c;
+    --accent: #e0a458; --accent-ink: #1a1206;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .app { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; padding: 16px; min-height: 100vh; }
+  @media (max-width: 900px) { .app { grid-template-columns: 1fr; } }
+  .stage { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .frame { position: relative; background: #000; border-radius: 6px; overflow: hidden; cursor: crosshair;
+           user-select: none; outline: none; }
+  .frame img { display: block; width: 100%; height: auto; image-rendering: auto; }
+  .frame:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+  .hint { position: absolute; left: 10px; bottom: 10px; padding: 4px 8px; border-radius: 4px;
+          background: rgba(0,0,0,.55); color: #ddd; font-size: 12px; pointer-events: none; }
+  .focusmark { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 1.5px solid var(--accent);
+               border-radius: 50%; pointer-events: none; opacity: 0; transition: opacity .6s; }
+  .bar { display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .bar b { color: var(--text); font-weight: 600; }
+  .progress { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .progress > div { height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+  aside { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px;
+          display: flex; flex-direction: column; gap: 16px; align-self: start; }
+  h1 { font-size: 15px; margin: 0; letter-spacing: .01em; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+  .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { background: transparent; color: var(--text); border: 0; padding: 7px 4px; font: inherit; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .row { display: grid; grid-template-columns: 78px 1fr 58px; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .row label { color: var(--muted); }
+  .row output { text-align: right; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  select, .btn { width: 100%; background: #22252a; color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+                 padding: 7px 8px; font: inherit; }
+  .btn { cursor: pointer; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .keys { color: var(--muted); font-size: 12px; line-height: 1.7; }
+  kbd { background: #2a2d31; border-radius: 3px; padding: 0 5px; font: 11px ui-monospace, Menlo, monospace; color: var(--text); }
+  .toast { min-height: 1.4em; color: var(--muted); font-size: 12px; word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="stage">
+    <div class="frame" id="frame" tabindex="0">
+      <img id="img" alt="Path-traced cafe render" draggable="false">
+      <div class="focusmark" id="mark"></div>
+      <div class="hint" id="hint">Click the image, then drag to look · WASD to move · click to focus</div>
+    </div>
+    <div class="progress"><div id="prog"></div></div>
+    <div class="bar">
+      <span>samples <b id="spp">0</b></span>
+      <span><b id="rate">0</b> spp/s</span>
+      <span>focus <b id="focusv">–</b></span>
+      <span>blur at ∞ <b id="cocinf">–</b></span>
+      <span>camera <b id="pos">–</b></span>
+      <span id="status"></span>
+    </div>
+  </div>
+
+  <aside>
+    <h1>Mitsuba Cafe</h1>
+    <section>
+      <h2>View</h2>
+      <div class="seg" id="modes">
+        <button data-mode="dof">DoF</button><button data-mode="sharp">Sharp</button>
+        <button data-mode="depth">Depth</button><button data-mode="coc">CoC</button>
+        <button data-mode="trad" title="Traditional screen-space DoF: sharp render + depth, blurred by CoC">Trad.</button>
+      </div>
+    </section>
+    <section>
+      <h2>Lens</h2>
+      <div class="row"><label for="focus">Focus</label><input id="focus" type="range" min="0" max="1000"><output id="focus_o"></output></div>
+      <div class="row"><label for="fnum">Aperture</label><input id="fnum" type="range" min="0" max="1000"><output id="fnum_o"></output></div>
+      <div class="row"><label for="lens">Focal len.</label><input id="lens" type="range" min="16" max="135" step="1"><output id="lens_o"></output></div>
+      <div class="row"><label for="exp">Exposure</label><input id="exp" type="range" min="-4" max="4" step="0.1"><output id="exp_o"></output></div>
+      <select id="target" aria-label="Focus on a named object"><option value="">Focus on…</option></select>
+    </section>
+    <section>
+      <h2>Camera</h2>
+      <div class="two">
+        <select id="view" aria-label="Camera preset"></select>
+        <select id="res" aria-label="Resolution"></select>
+      </div>
+    </section>
+    <section class="two">
+      <button class="btn" id="restart">Restart</button>
+      <button class="btn primary" id="snap">Save snapshot</button>
+    </section>
+    <div class="toast" id="toast"></div>
+    <section class="keys">
+      <kbd>drag</kbd> look &nbsp; <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; <kbd>Q</kbd><kbd>E</kbd> down/up<br>
+      <kbd>Shift</kbd> faster &nbsp; <kbd>click</kbd> focus there &nbsp; <kbd>scroll</kbd> focus distance<br>
+      <kbd>1</kbd>–<kbd>5</kbd> DoF / sharp / depth / CoC / traditional &nbsp; <kbd>[</kbd> <kbd>]</kbd> aperture
+    </section>
+  </aside>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let S = null;                       // last server state
+const post = (path, body) => fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                          body: JSON.stringify(body || {})}).then(r => r.json());
+
+// Log-scale slider mappings.
+const FOCUS = [0.3, 20], FNUM = [1.0, 22];
+const toLog = (v, [a, b]) => Math.round(1000 * Math.log(v / a) / Math.log(b / a));
+const fromLog = (t, [a, b]) => a * Math.pow(b / a, t / 1000);
+
+function sync(s) {
+  const first = !S; S = s;
+  if (first) {
+    for (const t of s.targets) $('target').add(new Option(t, t));
+    for (const v of s.views) $('view').add(new Option(v + ' view', v));
+    for (const r of s.resolutions) $('res').add(new Option(r, r));
+  }
+  document.querySelectorAll('#modes button').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === s.mode));
+  if (document.activeElement !== $('focus')) $('focus').value = toLog(s.focus_m, FOCUS);
+  if (document.activeElement !== $('fnum')) $('fnum').value = toLog(s.f_number, FNUM);
+  if (document.activeElement !== $('lens')) $('lens').value = s.lens_mm;
+  if (document.activeElement !== $('exp')) $('exp').value = s.exposure;
+  $('focus_o').textContent = s.focus_m.toFixed(2) + ' m';
+  $('fnum_o').textContent = 'f/' + s.f_number.toFixed(1);
+  $('lens_o').textContent = Math.round(s.lens_mm) + ' mm';
+  $('exp_o').textContent = (s.exposure > 0 ? '+' : '') + s.exposure.toFixed(1) + ' EV';
+  $('res').value = s.res;
+  $('spp').textContent = s.spp;
+  $('rate').textContent = s.spp_per_s;
+  $('focusv').textContent = s.focus_m.toFixed(2) + ' m';
+  $('cocinf').textContent = s.mode === 'sharp' ? 'none' : s.coc_inf_px.toFixed(1) + ' px';
+  $('pos').textContent = s.position.map(v => v.toFixed(2)).join(', ');
+  $('status').textContent = s.status;
+  const pct = (s.mode === 'depth' || s.mode === 'coc') ? 100 : Math.min(100, 100 * s.spp / s.max_spp);
+  $('prog').style.width = pct + '%';
+}
+
+// Frame loop: fetch a new JPEG whenever the server has produced one.
+let shownFrame = -1, lastState = 0;
+async function loop() {
+  try {
+    const now = performance.now();
+    if (now - lastState > 150) { sync(await (await fetch('/state')).json()); lastState = now; }
+    if (S && S.frame_id !== shownFrame) {
+      const r = await fetch('/frame?' + S.frame_id);
+      shownFrame = +r.headers.get('X-Frame-Id');
+      const url = URL.createObjectURL(await r.blob());
+      const old = $('img').src; $('img').src = url; if (old.startsWith('blob:')) URL.revokeObjectURL(old);
+    }
+  } catch (e) { $('status').textContent = 'viewer offline'; }
+  setTimeout(loop, 60);
+}
+loop();
+
+// Parameter controls.
+let pending = {}, timer = null;
+function set(obj) { Object.assign(pending, obj); clearTimeout(timer);
+  timer = setTimeout(() => { post('/set', pending); pending = {}; }, 40); }
+$('focus').oninput = e => { const v = fromLog(+e.target.value, FOCUS); $('focus_o').textContent = v.toFixed(2) + ' m'; set({focus_m: v}); };
+$('fnum').oninput = e => { const v = fromLog(+e.target.value, FNUM); $('fnum_o').textContent = 'f/' + v.toFixed(1); set({f_number: v}); };
+$('lens').oninput = e => { $('lens_o').textContent = e.target.value + ' mm'; set({lens_mm: +e.target.value}); };
+$('exp').oninput = e => set({exposure: +e.target.value});
+$('target').onchange = e => { if (e.target.value) post('/set', {target: e.target.value}); e.target.value = ''; };
+$('view').onchange = e => post('/set', {view: e.target.value});
+$('res').onchange = e => post('/set', {res: e.target.value});
+document.querySelectorAll('#modes button').forEach(b => b.onclick = () => post('/set', {mode: b.dataset.mode}));
+$('restart').onclick = () => post('/set', {max_spp: S ? S.max_spp : 4096});
+$('snap').onclick = async () => { $('toast').textContent = 'saving…';
+  const r = await post('/snapshot'); $('toast').textContent = r.saved ? 'saved to ' + r.saved : (r.error || 'failed'); };
+
+// Mouse: drag to look, click (no drag) to focus, wheel to change focus distance.
+const frame = $('frame');
+let drag = null;
+frame.addEventListener('mousedown', e => { drag = {x: e.clientX, y: e.clientY, moved: 0}; frame.focus(); e.preventDefault(); });
+window.addEventListener('mousemove', e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  drag.moved += Math.abs(dx) + Math.abs(dy); drag.x = e.clientX; drag.y = e.clientY;
+  if (drag.moved > 4) queueMove({dyaw: dx * 0.004, dpitch: -dy * 0.004});
+});
+window.addEventListener('mouseup', async e => {
+  if (!drag) return;
+  const wasClick = drag.moved <= 4; drag = null;
+  if (!wasClick) return;
+  const r = $('img').getBoundingClientRect();
+  const u = (e.clientX - r.left) / r.width, v = (e.clientY - r.top) / r.height;
+  if (u < 0 || u > 1 || v < 0 || v > 1) return;
+  const m = $('mark'); m.style.left = (u * 100) + '%'; m.style.top = (v * 100) + '%'; m.style.opacity = 1;
+  setTimeout(() => m.style.opacity = 0, 700);
+  const res = await post('/pick', {u, v});
+  $('toast').textContent = res.depth ? `focused at ${res.depth.toFixed(2)} m` : 'nothing there (sky)';
+});
+frame.addEventListener('wheel', e => { e.preventDefault(); if (!S) return;
+  const f = S.focus_m * Math.exp(-e.deltaY * 0.0015); S.focus_m = f; set({focus_m: f}); }, {passive: false});
+
+// Keyboard movement, sent at a fixed rate while keys are held.
+const held = new Set();
+let move = {dyaw: 0, dpitch: 0};
+function queueMove(d) { move.dyaw += d.dyaw || 0; move.dpitch += d.dpitch || 0; }
+frame.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if ('wasdqe'.includes(k) && k.length === 1) { held.add(k); e.preventDefault(); }
+  if (e.key === 'Shift') held.add('shift');
+  if ('12345'.includes(e.key) && e.key.length === 1) post('/set', {mode: ['dof', 'sharp', 'depth', 'coc', 'trad'][+e.key - 1]});
+  if (e.key === '[' && S) set({f_number: Math.max(1, S.f_number / 1.19)});
+  if (e.key === ']' && S) set({f_number: Math.min(22, S.f_number * 1.19)});
+});
+window.addEventListener('keyup', e => { held.delete(e.key.toLowerCase()); if (e.key === 'Shift') held.delete('shift'); });
+frame.addEventListener('blur', () => held.clear());
+setInterval(() => {
+  const sp = (held.has('shift') ? 0.09 : 0.03);
+  const body = {forward: 0, right: 0, up: 0, dyaw: move.dyaw, dpitch: move.dpitch};
+  if (held.has('w')) body.forward += sp; if (held.has('s')) body.forward -= sp;
+  if (held.has('d')) body.right += sp;   if (held.has('a')) body.right -= sp;
+  if (held.has('e')) body.up += sp;      if (held.has('q')) body.up -= sp;
+  if (body.forward || body.right || body.up || body.dyaw || body.dpitch) {
+    post('/move', body); move = {dyaw: 0, dpitch: 0};
+  }
+}, 50);
+</script>
+</body>
+</html>
