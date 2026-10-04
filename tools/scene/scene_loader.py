@@ -10,7 +10,8 @@ Conventions, identical on both sides:
   * Right-handed OpenGL world space, 1 unit = 1 meter, +Y up, camera looks down -Z.
   * Primitives are authored as unit shapes and scaled by `size`:
       box: axis-aligned cube, corners at +/-0.5
-      cyl: Y-axis cylinder, radius 0.5 in X/Z, height 1, closed with two caps
+      cyl: Y-axis frustum, bottom radius 0.5, top radius 0.5*taper, height 1;
+           taper defaults to 1 (the original closed cylinder)
       sph: sphere of radius 0.5
   * world = pos + Ry(rot.y) * Rx(rot.x) * Rz(rot.z) * (size * local)
   * normals use the inverse transpose of that matrix, which for a diagonal
@@ -26,14 +27,35 @@ VERSION = 1
 
 # Every key takes a fixed number of floats, so parsing needs no lookahead.
 KEY_ARITY = {
-    "pos": 3, "size": 3, "rot": 3, "rgb": 3, "emit": 1, "seg": 1, "smooth": 1,
-    "yaw": 1, "pitch": 1, "focus": 1, "fnumber": 1, "lens": 1, "sensor": 1,
-    "dir": 3, "color": 3, "energy": 1, "angle": 1, "strength": 1, "value": 1,
-    "lo": 3, "hi": 3,
+    "pos": 3,
+    "size": 3,
+    "rot": 3,
+    "rgb": 3,
+    "emit": 1,
+    "seg": 1,
+    "smooth": 1,
+    "yaw": 1,
+    "pitch": 1,
+    "focus": 1,
+    "fnumber": 1,
+    "lens": 1,
+    "sensor": 1,
+    "dir": 3,
+    "color": 3,
+    "energy": 1,
+    "angle": 1,
+    "strength": 1,
+    "value": 1,
+    "lo": 3,
+    "hi": 3,
+    "taper": 1,
+    "bevel": 1,
+    "width": 1,
+    "height": 1,
 }
 PRIMITIVE_KEYS = {
-    "box": ("pos", "size", "rot", "rgb", "emit"),
-    "cyl": ("pos", "size", "rot", "rgb", "emit", "seg", "smooth"),
+    "box": ("pos", "size", "rot", "rgb", "emit", "bevel"),
+    "cyl": ("pos", "size", "rot", "rgb", "emit", "seg", "smooth", "taper"),
     "sph": ("pos", "size", "rot", "rgb", "emit", "seg"),
 }
 DEFAULT_SEGMENTS = {"cyl": 16, "sph": 12}
@@ -55,7 +77,19 @@ class SceneError(ValueError):
 
 
 class Primitive:
-    __slots__ = ("kind", "pos", "size", "rot", "rgb", "emit", "segments", "smooth", "line")
+    __slots__ = (
+        "kind",
+        "pos",
+        "size",
+        "rot",
+        "rgb",
+        "emit",
+        "segments",
+        "smooth",
+        "line",
+        "taper",
+        "bevel",
+    )
 
     def __init__(self, kind, line):
         self.kind = kind
@@ -67,6 +101,8 @@ class Primitive:
         self.emit = 0.0
         self.segments = DEFAULT_SEGMENTS.get(kind, 0)
         self.smooth = True
+        self.taper = 1.0
+        self.bevel = 0.0
 
 
 class Camera:
@@ -101,6 +137,11 @@ class Scene:
         self.sun = Sun()
         self.ambient = Ambient()
         self.primitives = []
+        self.capture_width = self.capture_height = 1200
+        self.import_position = (0.0, -0.75, 0.0)
+        self.import_rotation = (-90.0, 0.0, 0.0)
+        self.import_scale = (0.1, 0.1, 0.1)
+        self.import_albedo = (0.62, 0.44, 0.20)
         # Region the shadow map must cover. None means "use the geometry bounds",
         # which is wrong when the scene also holds distant filler geometry.
         self.shadow_low = None
@@ -155,8 +196,10 @@ def parse_scene(text):
         tokens = line.split()
         kind, rest = tokens[0], tokens[1:]
         if kind == "version":
+            if len(rest) != 1:
+                raise SceneError(f"line {line_number}: key 'version' needs 1 number(s)")
             values = _floats(rest, 0, 1, line_number, "version")
-            if int(values[0]) != VERSION:
+            if values[0] != VERSION:
                 raise SceneError(f"line {line_number}: scene version {values[0]:g} is not {VERSION}")
             seen_version = True
         elif kind == "camera":
@@ -181,6 +224,27 @@ def parse_scene(text):
                 raise SceneError(f"line {line_number}: lens and sensor must be positive")
             if camera.f_number <= 0.0 or camera.focus_distance_m <= camera.focal_length_mm * 0.001:
                 raise SceneError(f"line {line_number}: f-number must be positive and focus must exceed the focal length")
+        elif kind == "capture":
+            found = _key_values(rest, line_number, ("width", "height"))
+            for key in ("width", "height"):
+                value = found.get(key, [getattr(scene, "capture_" + key)])[0]
+                if value != int(value) or not 16 <= value <= 8192:
+                    raise SceneError(
+                        f"line {line_number}: capture dimensions must be integers in [16,8192]"
+                    )
+                setattr(scene, "capture_" + key, int(value))
+        elif kind == "imported":
+            found = _key_values(rest, line_number, ("pos", "rot", "size", "rgb"))
+            for key, attr in (
+                ("pos", "import_position"),
+                ("rot", "import_rotation"),
+                ("size", "import_scale"),
+                ("rgb", "import_albedo"),
+            ):
+                if key in found:
+                    setattr(scene, attr, tuple(found[key]))
+            if any(v <= 0 for v in scene.import_scale):
+                raise SceneError(f"line {line_number}: imported size must be positive")
         elif kind == "sun":
             found = _key_values(rest, line_number, ("dir", "color", "energy", "angle"))
             if "dir" in found:
@@ -224,6 +288,18 @@ def parse_scene(text):
                 primitive.emit = found["emit"][0]
             if "seg" in found:
                 primitive.segments = int(found["seg"][0])
+            if "bevel" in found:
+                primitive.bevel = found["bevel"][0]
+            if primitive.bevel < 0 or (
+                primitive.bevel > 0 and primitive.bevel >= min(primitive.size) * 0.5
+            ):
+                raise SceneError(
+                    f"line {line_number}: bevel must be nonnegative and less than half each positive size"
+                )
+            if "taper" in found:
+                primitive.taper = found["taper"][0]
+            if not 0 <= primitive.taper <= 8:
+                raise SceneError(f"line {line_number}: taper must be between 0 and 8")
             if "smooth" in found:
                 primitive.smooth = found["smooth"][0] != 0.0
             if any(abs(value) < 1e-9 for value in primitive.size):
@@ -237,6 +313,8 @@ def parse_scene(text):
             raise SceneError(f"line {line_number}: unknown entry '{kind}'")
     if not seen_version:
         raise SceneError("missing 'version' line; refusing to guess the scene format")
+    if not scene.primitives:
+        raise SceneError("scene file contains no geometry")
     return scene
 
 
@@ -327,6 +405,72 @@ def _emit_primitive(geometry, primitive):
         normal = _normalize(_apply3(rotation, unscaled))
         return geometry.add_vertex(world, normal, primitive.rgb, primitive.emit)
 
+    if primitive.kind == "box" and primitive.bevel > 0:
+        # Chamfer in metres BEFORE rotation, even for nonuniform boxes. Each
+        # polygon is oriented from its analytic outward normal, not a guessed
+        # sign table. 6 faces + 12 edge quads + 8 corner triangles = 44 triangles.
+        h = [v * 0.5 for v in size]
+        b = primitive.bevel
+
+        def polygon(points, normal):
+            u = [points[1][k] - points[0][k] for k in range(3)]
+            v = [points[2][k] - points[0][k] for k in range(3)]
+            cross = (
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            )
+            if sum(cross[k] * normal[k] for k in range(3)) < 0:
+                points.reverse()
+            ids = [
+                place(
+                    tuple(p[k] / size[k] for k in range(3)),
+                    tuple(normal[k] * size[k] for k in range(3)),
+                )
+                for p in points
+            ]
+            for i in range(1, len(ids) - 1):
+                geometry.add_triangle(ids[0], ids[i], ids[i + 1], False)
+
+        for a in range(3):
+            j, k = (a + 1) % 3, (a + 2) % 3
+            for sign in (-1.0, 1.0):
+                points = []
+                for sj, sk in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+                    p = [0.0, 0.0, 0.0]
+                    p[a] = sign * h[a]
+                    p[j] = sj * (h[j] - b)
+                    p[k] = sk * (h[k] - b)
+                    points.append(p)
+                n = [0.0, 0.0, 0.0]
+                n[a] = sign
+                polygon(points, n)
+        for a, j in ((0, 1), (0, 2), (1, 2)):
+            k = 3 - a - j
+            for sa in (-1.0, 1.0):
+                for sj in (-1.0, 1.0):
+                    points = []
+                    for end, inset in ((-1, 0), (-1, 1), (1, 1), (1, 0)):
+                        p = [0.0, 0.0, 0.0]
+                        p[a] = sa * (h[a] - b * inset)
+                        p[j] = sj * (h[j] - b * (1 - inset))
+                        p[k] = end * (h[k] - b)
+                        points.append(p)
+                    n = [0.0, 0.0, 0.0]
+                    n[a] = sa
+                    n[j] = sj
+                    polygon(points, n)
+        for sx in (-1.0, 1.0):
+            for sy in (-1.0, 1.0):
+                for sz in (-1.0, 1.0):
+                    signs = (sx, sy, sz)
+                    points = [
+                        [signs[k] * (h[k] - (0 if k == a else b)) for k in range(3)]
+                        for a in range(3)
+                    ]
+                    polygon(points, signs)
+        return
+
     if primitive.kind == "box":
         for corners, normal in BOX_FACES:
             base = [place(corner, normal) for corner in corners]
@@ -336,35 +480,46 @@ def _emit_primitive(geometry, primitive):
 
     if primitive.kind == "cyl":
         segments = primitive.segments
+        top_radius = 0.5 * primitive.taper
+        slope = 0.5 - top_radius
         angles = [2.0 * math.pi * index / segments for index in range(segments)]
         if primitive.smooth:
             bottom, top = [], []
             for angle in angles:
-                direction = (math.cos(angle), 0.0, math.sin(angle))
+                direction = (math.cos(angle), slope, math.sin(angle))
                 bottom.append(place((0.5 * direction[0], -0.5, 0.5 * direction[2]), direction))
-                top.append(place((0.5 * direction[0], 0.5, 0.5 * direction[2]), direction))
+                top.append(
+                    place((top_radius * direction[0], 0.5, top_radius * direction[2]), direction)
+                )
             for index in range(segments):
                 nxt = (index + 1) % segments
-                geometry.add_triangle(bottom[index], top[index], top[nxt], True)
+                if top_radius > 0:
+                    geometry.add_triangle(bottom[index], top[index], top[nxt], True)
                 geometry.add_triangle(bottom[index], top[nxt], bottom[nxt], True)
         else:
             for index in range(segments):
                 a, b = angles[index], angles[(index + 1) % segments]
                 mid = 0.5 * (a + b) if index + 1 < segments else 0.5 * (a + b + 2.0 * math.pi)
-                face_normal = (math.cos(mid), 0.0, math.sin(mid))
+                face_normal = (math.cos(mid), slope * math.cos(math.pi / segments), math.sin(mid))
                 quad = [
                     place((0.5 * math.cos(a), -0.5, 0.5 * math.sin(a)), face_normal),
-                    place((0.5 * math.cos(a), 0.5, 0.5 * math.sin(a)), face_normal),
-                    place((0.5 * math.cos(b), 0.5, 0.5 * math.sin(b)), face_normal),
+                    place((top_radius * math.cos(a), 0.5, top_radius * math.sin(a)), face_normal),
+                    place((top_radius * math.cos(b), 0.5, top_radius * math.sin(b)), face_normal),
                     place((0.5 * math.cos(b), -0.5, 0.5 * math.sin(b)), face_normal),
                 ]
-                geometry.add_triangle(quad[0], quad[1], quad[2], False)
+                if top_radius > 0:
+                    geometry.add_triangle(quad[0], quad[1], quad[2], False)
                 geometry.add_triangle(quad[0], quad[2], quad[3], False)
         for sign in (1.0, -1.0):
+            radius = top_radius if sign > 0 else 0.5
+            if radius == 0:
+                continue
             normal = (0.0, sign, 0.0)
             center = place((0.0, 0.5 * sign, 0.0), normal)
-            ring = [place((0.5 * math.cos(angle), 0.5 * sign, 0.5 * math.sin(angle)), normal)
-                    for angle in angles]
+            ring = [
+                place((radius * math.cos(angle), 0.5 * sign, radius * math.sin(angle)), normal)
+                for angle in angles
+            ]
             for index in range(segments):
                 nxt = (index + 1) % segments
                 if sign > 0.0:

@@ -17,7 +17,7 @@ uniform bool uImportedMesh;
 // The imported mesh has no per-vertex albedo, so it gets a flat one.
 uniform vec3 uOverrideAlbedo;
 
-// Directional light read from scene/alley.scene, the same file
+// Directional light read from the selected scene file, the same file
 // tools/raytraced_reference/render_dof.py configures the Cycles sun from.
 uniform vec3 uLightDirection; // points FROM the surface TOWARD the light, world space
 uniform vec3 uLightColor;
@@ -91,10 +91,10 @@ void main()
     // about right" constant. The sky term is already a radiance, so a uniform
     // hemisphere of it reflects back as albedo * skyRadiance with no 1/pi.
     //
-    // Known and deliberate difference from the reference: this sky term has no
-    // occlusion, while Cycles darkens creases and undersides because the sky is
-    // actually blocked there. It shows up as slightly flatter ambient in the
-    // raster image and is documented in notes/graphics/18_alley_scene_and_ui.md.
+    // Cycles matched mode adds this same non-physical, unoccluded fill as
+    // primary-camera-only emission. It is never allowed to illuminate another
+    // surface. Direct sunlight shares this Lambert equation; visibility still
+    // differs (biased PCF shadow map versus Cycles ray intersections).
     vec3 sunIrradiance = uLightColor * uLightEnergy * nDotL * (1.0 - shadow);
     vec3 radiance = albedo * (uSkyRadiance + sunIrradiance / PI);
 

@@ -12,46 +12,23 @@ import time
 
 PREVIEW_SAMPLES = 32
 FINAL_SAMPLES = 128
-REFERENCE_WIDTH = 2400  # Framebuffer pixels, not the 600-point macOS window size.
-REFERENCE_HEIGHT = 1662
-FOCAL_LENGTH_MM = 50.0
-SENSOR_HEIGHT_MM = 24.0
-FOCUS_DISTANCES_M = (5.0,)
-F_STOPS = (1.4, 2.8, 8.0)
-IMPORTED_SCENE_SCALE = 0.1
-IMPORTED_SCENE_POSITION_GL = (0.0, -0.75, 0.0)
-IMPORTED_ROTATION_X_DEG = -90.0
-IMPORTED_ROTATION_Y_DEG = 0.0
-# Linear albedo for the imported mesh, matching importedSceneAlbedo in src/main.cpp.
-# The OBJ carries no usable material, so both renderers assign one explicitly.
-IMPORTED_ALBEDO = (0.62, 0.44, 0.20)
-CAMERA_POSITION_GL = (0.0, 0.0, 5.0)
-CAMERA_FORWARD_GL = (0.0, 0.0, -1.0)
-CAMERA_UP_GL = (0.0, 1.0, 0.0)
+F_STOPS = (1.2, 1.4, 2.0, 2.8, 4.0, 5.6, 8.0, 11.0, 16.0, 22.0)
 NEAR_M, FAR_M = 0.1, 100.0
 
 # One proper rotation for every world-space object: (x,y,z) -> (x,-z,y).
 WORLD_CONVERSION = ((1, 0, 0, 0), (0, 0, -1, 0), (0, 1, 0, 0), (0, 0, 0, 1))
 
-# The environment is no longer written out here. It comes from the same file the
-# OpenGL renderer loads, so the two cannot describe different scenes:
-#   scene/alley.scene  ->  tools/scene/scene_loader.py  (this script)
-#                      ->  src/SceneFile.cpp            (src/main.cpp)
-# The camera and lens literals above stay because argparse needs defaults;
-# tests/test_reference_config.py checks they still agree with the scene file
-# and with the fallbacks in src/main.cpp.
-SCENE_FILE = "scene/alley.scene"
+# Scene data, including capture size and import transform, is read on each run.
+SCENE_FILE = "scene/cafe.scene"
 
 
-def load_shared_scene():
-    """Parse scene/alley.scene with the shared loader. Needs no Blender."""
+def load_shared_scene(path=SCENE_FILE):
     root = project_root()
     loader_directory = str(root / "tools/scene")
     if loader_directory not in sys.path:
         sys.path.insert(0, loader_directory)
     import scene_loader
-
-    scene = scene_loader.load_scene(root / SCENE_FILE)
+    scene = scene_loader.load_scene(root / path)
     return scene_loader, scene, scene_loader.build_geometry(scene)
 
 
@@ -117,21 +94,68 @@ def vertical_fov_degrees(lens, sensor_height):
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--width", type=int, default=REFERENCE_WIDTH)
-    parser.add_argument("--height", type=int, default=REFERENCE_HEIGHT)
-    parser.add_argument("--lens", type=float, default=FOCAL_LENGTH_MM)
-    parser.add_argument("--sensor-height", type=float, default=SENSOR_HEIGHT_MM)
-    parser.add_argument("--focus", type=float, nargs="+", default=list(FOCUS_DISTANCES_M))
+    parser.add_argument("--width", type=int, default=None)
+    parser.add_argument("--height", type=int, default=None)
+    parser.add_argument("--lens", type=float, default=None)
+    parser.add_argument("--sensor-height", type=float, default=None)
+    parser.add_argument("--focus", type=float, nargs="+", default=None)
     parser.add_argument("--fstops", type=float, nargs="+", default=list(F_STOPS))
     parser.add_argument("--preview", action="store_true")
     parser.add_argument("--samples", type=int, help="Override preview/final sample count")
     parser.add_argument("--device", choices=("auto", "cpu"), default="auto")
-    parser.add_argument("--sharp", action="store_true", help="Also render rt_sharp.png with lens DoF disabled")
+    parser.add_argument(
+        "--sharp",
+        action="store_true",
+        help="Also render a settings-tagged sharp control with lens DoF disabled",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print validated settings; no Blender import or output files")
+    parser.add_argument("--scene", default=SCENE_FILE)
+    parser.add_argument("--position", type=float, nargs=3)
+    parser.add_argument("--yaw", type=float)
+    parser.add_argument("--pitch", type=float)
+    parser.add_argument("--import-mesh", action="store_true")
+    parser.add_argument(
+        "--full-gi",
+        action="store_true",
+        help="Physical indirect illumination; NOT comparable to OpenGL",
+    )
+    parser.add_argument("--output", type=Path, default=Path("reports/raytraced_dof"))
+    parser.add_argument(
+        "--no-denoise",
+        action="store_true",
+        help="Inspection renders; does not certify ground truth",
+    )
     args = parser.parse_args(argv)
+    _, shared, _ = load_shared_scene(args.scene)
+    camera = shared.camera
+    for key, value in (
+        ("width", shared.capture_width),
+        ("height", shared.capture_height),
+        ("lens", camera.focal_length_mm),
+        ("sensor_height", camera.sensor_height_mm),
+        ("focus", [camera.focus_distance_m]),
+        ("position", camera.position),
+        ("yaw", camera.yaw_degrees),
+        ("pitch", camera.pitch_degrees),
+    ):
+        if getattr(args, key) is None:
+            setattr(args, key, value)
+    if abs(args.pitch) >= 89.9:
+        parser.error("Pitch must be within (-89.9,89.9)")
     if not (16 <= args.width <= 8192 and 16 <= args.height <= 8192):
         parser.error("Width and height must be between 16 and 8192 framebuffer pixels.")
-    if not all(math.isfinite(v) for v in (args.lens, args.sensor_height, *args.focus, *args.fstops)):
+    if not all(
+        math.isfinite(v)
+        for v in (
+            args.lens,
+            args.sensor_height,
+            *args.focus,
+            *args.fstops,
+            *args.position,
+            args.yaw,
+            args.pitch,
+        )
+    ):
         parser.error("Camera settings must be finite.")
     if not (1 <= args.lens <= 500 and 1 <= args.sensor_height <= 100):
         parser.error("Lens must be 1–500 mm and sensor height 1–100 mm.")
@@ -145,11 +169,30 @@ def parse_args(argv):
     return args
 
 
+def capture_tag(focus, fstop, lens, sharp=False):
+    tag = f"focus{focus:g}m_f{fstop:g}"
+    if abs(lens - 50) > 0.01:
+        tag += f"_{lens:g}mm"
+    if sharp:
+        tag += "_sharp"
+    return tag
+
+
 def render_jobs(args):
-    jobs = [(f"rt_focus{focus:g}m_f{fstop:g}.png", focus, fstop, True)
-            for focus in args.focus for fstop in args.fstops]
+    jobs = [
+        (f"rt_{capture_tag(focus,fstop,args.lens)}.png", focus, fstop, True)
+        for focus in args.focus
+        for fstop in args.fstops
+    ]
     if args.sharp:
-        jobs.append(("rt_sharp.png", args.focus[0], args.fstops[0], False))
+        jobs.append(
+            (
+                f"rt_{capture_tag(args.focus[0],args.fstops[0],args.lens,True)}.png",
+                args.focus[0],
+                args.fstops[0],
+                False,
+            )
+        )
     if len({job[0] for job in jobs}) != len(jobs):
         raise ValueError("Duplicate output names; choose distinct focus distances and f-stops.")
     return jobs
@@ -157,7 +200,18 @@ def render_jobs(args):
 
 def make_plan(args):
     root = project_root()
-    loader, scene, geometry = load_shared_scene()
+    loader, scene, geometry = load_shared_scene(args.scene)
+    forward = camera_forward_gl(args.yaw, args.pitch)
+    yaw, pitch = math.radians(args.yaw), math.radians(args.pitch)
+    up = (-math.cos(yaw) * math.sin(pitch), math.cos(pitch), -math.sin(yaw) * math.sin(pitch))
+    rotation = loader.rotation_matrix(*scene.import_rotation)
+    import_matrix = tuple(
+        tuple(rotation[i][j] * scene.import_scale[j] for j in range(3))
+        + (scene.import_position[i],)
+        for i in range(3)
+    ) + (
+        (0, 0, 0, 1),
+    )
     summary = loader.summary(scene, geometry)
     scene_summary = {
         "primitives": summary["primitives"],
@@ -172,26 +226,47 @@ def make_plan(args):
         "sky_radiance": list(scene.sky_radiance),
     }
     return {
-        "asset": "assets/models/scene.obj",
-        "asset_sha256": hashlib.sha256((root / "assets/models/scene.obj").read_bytes()).hexdigest(),
-        "output_directory": "reports/raytraced_dof",
-        "resolution_pixels": [args.width, args.height], "samples": args.samples,
-        "requested_device": args.device, "engine": "CYCLES",
-        "focal_length_mm": args.lens, "sensor_height_mm": args.sensor_height,
-        "sensor_fit": "VERTICAL", "effective_sensor_width_mm": args.sensor_height * args.width / args.height,
+        "asset": "assets/models/scene.obj" if args.import_mesh else None,
+        "asset_sha256": (
+            hashlib.sha256((root / "assets/models/scene.obj").read_bytes()).hexdigest()
+            if args.import_mesh
+            else None
+        ),
+        "output_directory": str(args.output),
+        "lighting_mode": "full_gi_not_comparable" if args.full_gi else "matched_fill_direct",
+        "ground_truth": False,
+        "fill_visibility": "world_transport" if args.full_gi else "primary_camera_only",
+        "max_bounces": 12,
+        "diffuse_bounces": 4 if args.full_gi else 0,
+        "adaptive_sampling": False,
+        "clamp_direct": 0,
+        "clamp_indirect": 0,
+        "seed": 16,
+        "linear_output": "32-bit RGB EXR",
+        "resolution_pixels": [args.width, args.height],
+        "samples": args.samples,
+        "requested_device": args.device,
+        "engine": "CYCLES",
+        "focal_length_mm": args.lens,
+        "sensor_height_mm": args.sensor_height,
+        "sensor_fit": "VERTICAL",
+        "effective_sensor_width_mm": args.sensor_height * args.width / args.height,
         "vertical_fov_degrees": vertical_fov_degrees(args.lens, args.sensor_height),
-        "camera_position_gl": CAMERA_POSITION_GL, "camera_forward_gl": CAMERA_FORWARD_GL,
-        "camera_up_gl": CAMERA_UP_GL, "camera_position_blender": gl_to_blender(CAMERA_POSITION_GL),
-        "camera_forward_blender": gl_to_blender(CAMERA_FORWARD_GL), "camera_up_blender": gl_to_blender(CAMERA_UP_GL),
-        "world_conversion": WORLD_CONVERSION, "import_scale": IMPORTED_SCENE_SCALE,
-        "import_matrix_gl": model_matrix(IMPORTED_SCENE_POSITION_GL, IMPORTED_ROTATION_X_DEG,
-                                         IMPORTED_ROTATION_Y_DEG, (IMPORTED_SCENE_SCALE,) * 3, imported=True),
+        "camera_position_gl": args.position,
+        "camera_forward_gl": forward,
+        "camera_up_gl": up,
+        "camera_position_blender": gl_to_blender(args.position),
+        "camera_forward_blender": gl_to_blender(forward),
+        "camera_up_blender": gl_to_blender(up),
+        "world_conversion": WORLD_CONVERSION,
+        "import_matrix_gl": import_matrix,
+        "import_albedo": scene.import_albedo,
         "outputs": [job[0] for job in render_jobs(args)],
         # The scene digest goes in every sidecar JSON. Without it a reference PNG
         # cannot be tied to the geometry it was rendered from, which is the one
         # thing that would quietly invalidate a comparison months later.
-        "scene_file": SCENE_FILE,
-        "scene_sha256": hashlib.sha256((root / SCENE_FILE).read_bytes()).hexdigest(),
+        "scene_file": args.scene,
+        "scene_sha256": hashlib.sha256((root / args.scene).read_bytes()).hexdigest(),
         "scene_summary": scene_summary,
     }
 
@@ -225,7 +300,15 @@ def create_scene(bpy, args, plan):
     scene.cycles.samples = args.samples
     scene.cycles.seed = 16
     scene.cycles.use_animated_seed = False
-    scene.cycles.use_denoising = True
+    scene.cycles.use_denoising = not args.no_denoise
+    scene.cycles.use_adaptive_sampling = False
+    scene.cycles.sample_clamp_direct = scene.cycles.sample_clamp_indirect = 0
+    # Matched mode integrates ONLY primary emission and direct sunlight. Zero
+    # diffuse continuation is intentional; fill must never bounce or add twice.
+    scene.cycles.max_bounces = 12
+    scene.cycles.diffuse_bounces = 4 if args.full_gi else 0
+    scene.cycles.glossy_bounces = 4 if args.full_gi else 0
+    scene.cycles.transmission_bounces = 12 if args.full_gi else 0
     scene.cycles.denoiser = "OPENIMAGEDENOISE"
     scene.render.resolution_x, scene.render.resolution_y = args.width, args.height
     scene.render.resolution_percentage = 100
@@ -248,15 +331,49 @@ def create_scene(bpy, args, plan):
         result.node_tree.nodes.clear()
         return result
 
+    _, shared_scene, _ = load_shared_scene(args.scene)
+
+    def matched_surface(result, color_output=None, color=None):
+        nodes, links = result.node_tree.nodes, result.node_tree.links
+        diffuse = nodes.new("ShaderNodeBsdfDiffuse")
+        diffuse.inputs["Roughness"].default_value = 0
+        if color_output is None:
+            diffuse.inputs["Color"].default_value = (*color, 1)
+        else:
+            links.new(color_output, diffuse.inputs["Color"])
+        output = nodes.new("ShaderNodeOutputMaterial")
+        if args.full_gi:
+            links.new(diffuse.outputs[0], output.inputs["Surface"])
+            return
+        # Per-channel multiplication with VectorMath survives Blender 4/5's
+        # MixRGB API changes. The unoccluded term is albedo * sky radiance.
+        multiply_node = nodes.new("ShaderNodeVectorMath")
+        multiply_node.operation = "MULTIPLY"
+        multiply_node.inputs[1].default_value = shared_scene.sky_radiance
+        if color_output is None:
+            multiply_node.inputs[0].default_value = color
+        else:
+            links.new(color_output, multiply_node.inputs[0])
+        fill = nodes.new("ShaderNodeEmission")
+        primary = nodes.new("ShaderNodeLightPath")
+        links.new(primary.outputs["Is Camera Ray"], fill.inputs["Strength"])
+        links.new(multiply_node.outputs["Vector"], fill.inputs["Color"])
+        add = nodes.new("ShaderNodeAddShader")
+        links.new(diffuse.outputs[0], add.inputs[0])
+        links.new(fill.outputs[0], add.inputs[1])
+        links.new(add.outputs[0], output.inputs["Surface"])
+        # This fill must not be sampled as a mesh light. It is a shading term,
+        # not an emitter capable of illuminating another surface.
+        if hasattr(result, "cycles") and hasattr(result.cycles, "emission_sampling"):
+            result.cycles.emission_sampling = "NONE"
+        else:
+            raise RuntimeError("Matched fill requires the material emission_sampling=NONE control")
+
     def flat_material(name, color):
         """One albedo for the whole object; used for the imported mesh."""
         result = new_material(name)
         result.diffuse_color = (*color, 1.0)
-        nodes = result.node_tree.nodes
-        diffuse = nodes.new("ShaderNodeBsdfDiffuse")
-        diffuse.inputs["Color"].default_value = (*color, 1.0)
-        output = nodes.new("ShaderNodeOutputMaterial")
-        result.node_tree.links.new(diffuse.outputs[0], output.inputs["Surface"])
+        matched_surface(result, color=color)
         return result
 
     def vertex_color_material(name, emission):
@@ -271,38 +388,54 @@ def create_scene(bpy, args, plan):
         nodes = result.node_tree.nodes
         attribute = nodes.new("ShaderNodeVertexColor")
         attribute.layer_name = "Col"
-        shader = nodes.new("ShaderNodeEmission" if emission else "ShaderNodeBsdfDiffuse")
         if emission:
+            shader = nodes.new("ShaderNodeEmission")
             shader.inputs["Strength"].default_value = 1.0
-        output = nodes.new("ShaderNodeOutputMaterial")
-        links = result.node_tree.links
-        links.new(attribute.outputs["Color"], shader.inputs["Color"])
-        links.new(shader.outputs[0], output.inputs["Surface"])
+            output = nodes.new("ShaderNodeOutputMaterial")
+            result.node_tree.links.new(attribute.outputs["Color"], shader.inputs["Color"])
+            result.node_tree.links.new(shader.outputs[0], output.inputs["Surface"])
+            if not args.full_gi and hasattr(result.cycles, "emission_sampling"):
+                result.cycles.emission_sampling = "NONE"
+        else:
+            matched_surface(result, color_output=attribute.outputs["Color"])
         return result
 
-    # Identity importer axis conversion. Apply the same C*M transform used for all objects once.
-    with geometry_only_obj(project_root() / plan["asset"]) as obj_path:
-        bpy.ops.wm.obj_import(filepath=str(obj_path), forward_axis="Y", up_axis="Z",
-                              global_scale=1.0, clamp_size=0.0, use_split_objects=False, use_split_groups=False)
-    imported = [obj for obj in bpy.context.selected_objects if obj.type == "MESH"]
-    if not imported:
-        raise RuntimeError("OBJ import produced no mesh; no fallback is allowed for reference renders.")
-    teapot_material = flat_material("teapot_warm", IMPORTED_ALBEDO)
-    for obj in imported:
-        obj.matrix_world = conversion @ Matrix(plan["import_matrix_gl"]) @ obj.matrix_world
-        obj.data.materials.clear()
-        obj.data.materials.append(teapot_material)
-        for face in obj.data.polygons:
-            face.material_index = 0
-        obj.data.calc_loop_triangles()
-        print(f"Imported {obj.name}: {len(obj.data.vertices)} positions, {len(obj.data.loop_triangles)} triangles", flush=True)
+    if args.import_mesh:
+        # Identity importer axis conversion. Apply the same C*M transform used for all objects once.
+        with geometry_only_obj(project_root() / plan["asset"]) as obj_path:
+            bpy.ops.wm.obj_import(
+                filepath=str(obj_path),
+                forward_axis="Y",
+                up_axis="Z",
+                global_scale=1.0,
+                clamp_size=0.0,
+                use_split_objects=False,
+                use_split_groups=False,
+            )
+        imported = [obj for obj in bpy.context.selected_objects if obj.type == "MESH"]
+        if not imported:
+            raise RuntimeError(
+                "OBJ import produced no mesh; no fallback is allowed for reference renders."
+            )
+        teapot_material = flat_material("teapot_warm", plan["import_albedo"])
+        for obj in imported:
+            obj.matrix_world = conversion @ Matrix(plan["import_matrix_gl"]) @ obj.matrix_world
+            obj.data.materials.clear()
+            obj.data.materials.append(teapot_material)
+            for face in obj.data.polygons:
+                face.material_index = 0
+            obj.data.calc_loop_triangles()
+            print(
+                f"Imported {obj.name}: {len(obj.data.vertices)} positions, {len(obj.data.loop_triangles)} triangles",
+                flush=True,
+            )
 
     # ---- The alley, from the shared scene file ----
     # Two objects, because one carries a Diffuse BSDF and the other an Emission
     # shader. The OpenGL pass keeps a single mesh and branches on a per-vertex
     # emission attribute instead; the geometry itself is identical because both
     # come out of the same builder.
-    loader, shared_scene, geometry = load_shared_scene()
+    loader, shared_scene, geometry = load_shared_scene(args.scene)
     shaded, emissive = loader.split_by_emission(geometry)
 
     def build_part(name, part, material):
@@ -352,7 +485,7 @@ def create_scene(bpy, args, plan):
     lights = build_part("alley_emitters", emissive, vertex_color_material("alley_emission", emission=True))
     if alley is None:
         raise RuntimeError(f"{SCENE_FILE} produced no shaded geometry.")
-    if lights is not None:
+    if lights is not None and not args.full_gi:
         # The raster pass draws emitters as self-lit patches of colour and they
         # illuminate nothing. Matching that here is what keeps the two images
         # comparable: otherwise Cycles would bounce light off every window and
@@ -387,11 +520,11 @@ def create_scene(bpy, args, plan):
     data = bpy.data.cameras.new("reference_camera")
     camera = bpy.data.objects.new("reference_camera", data)
     scene.collection.objects.link(camera)
-    forward, up = Vector(CAMERA_FORWARD_GL), Vector(CAMERA_UP_GL)
+    forward, up = Vector(plan["camera_forward_gl"]), Vector(plan["camera_up_gl"])
     right = forward.cross(up).normalized()
     up = right.cross(forward).normalized()
     rotation = Matrix((right, up, -forward)).transposed().to_4x4()
-    camera.matrix_world = conversion @ Matrix.Translation(Vector(CAMERA_POSITION_GL)) @ rotation
+    camera.matrix_world = conversion @ Matrix.Translation(Vector(args.position)) @ rotation
     data.type = "PERSP"
     data.lens = args.lens
     data.sensor_fit = "VERTICAL"
@@ -424,6 +557,16 @@ def create_scene(bpy, args, plan):
         scene.world.node_tree.links.new(background.outputs[0], world_output.inputs["Surface"])
     background.inputs["Color"].default_value = (*shared_scene.ambient.color, 1.0)
     background.inputs["Strength"].default_value = shared_scene.ambient.strength
+    if not args.full_gi:
+        # Visible camera background, zero world illumination. The explicit
+        # material fill above supplies ambient exactly once even inside rooms.
+        nodes, links = scene.world.node_tree.nodes, scene.world.node_tree.links
+        rays = nodes.new("ShaderNodeLightPath")
+        scale = nodes.new("ShaderNodeMath")
+        scale.operation = "MULTIPLY"
+        scale.inputs[1].default_value = shared_scene.ambient.strength
+        links.new(rays.outputs["Is Camera Ray"], scale.inputs[0])
+        links.new(scale.outputs[0], background.inputs["Strength"])
     light_data = bpy.data.lights.new("directional_light", "SUN")
     # energy is irradiance in W/m^2 on a surface facing the sun, the same
     # quantity uLightEnergy carries into basic.frag.
@@ -483,10 +626,39 @@ def main(argv=None):
         if ("FINISHED" not in result or not (output / filename).is_file()
                 or (output / filename).stat().st_size == 0):
             raise RuntimeError(f"Render did not finish: {filename}")
-        record = dict(plan, blender_version=bpy.app.version_string, render_device=device,
-                      focus_distance_m=focus, f_number=fstop, use_dof=use_dof,
-                      render_seconds=time.monotonic() - started, denoising="OPENIMAGEDENOISE",
-                      output=filename, render_completed=True)
+        # Inspection EXR: lossless linear radiance, explicitly NOT yet a
+        # convergence-certified reference. Keep PNG only as a display preview.
+        linear_path = output / Path(filename).with_suffix(".exr")
+        scene.render.image_settings.file_format = "OPEN_EXR"
+        scene.render.image_settings.color_depth = "32"
+        scene.render.image_settings.exr_codec = "ZIP"
+        bpy.data.images["Render Result"].save_render(str(linear_path), scene=scene)
+        scene.render.image_settings.file_format = "PNG"
+        scene.render.image_settings.color_depth = "8"
+        # PFM companion makes the exact same floats inspectable without an
+        # external EXR package. Blender loads EXR scene-linear, without a view.
+        import numpy as np
+
+        linear = bpy.data.images.load(str(linear_path), check_existing=False)
+        pixels = np.empty(args.width * args.height * 4, dtype=np.float32)
+        linear.pixels.foreach_get(pixels)
+        rgb = pixels.reshape(args.height, args.width, 4)[:, :, :3].copy()
+        with linear_path.with_suffix(".pfm").open("wb") as stream:
+            stream.write(f"PF\n{args.width} {args.height}\n-1.0\n".encode())
+            stream.write(rgb.astype("<f4").tobytes())
+        bpy.data.images.remove(linear)
+        record = dict(
+            plan,
+            blender_version=bpy.app.version_string,
+            render_device=device,
+            focus_distance_m=focus,
+            f_number=fstop,
+            use_dof=use_dof,
+            render_seconds=time.monotonic() - started,
+            denoising="OFF" if args.no_denoise else "OPENIMAGEDENOISE",
+            output=filename,
+            render_completed=True,
+        )
         (output / Path(filename).with_suffix(".json")).write_text(json.dumps(record, indent=2) + "\n")
         generated.append(filename)
         print(f"Completed {filename} in {record['render_seconds']:.2f} s using {device}", flush=True)

@@ -58,6 +58,12 @@ struct SceneDescription {
     SceneCamera camera;
     SceneSun sun;
     SceneAmbient ambient;
+    int captureWidth = 1200;
+    int captureHeight = 1200;
+    SceneVec3 importPosition{0.0f, -0.75f, 0.0f};
+    SceneVec3 importRotation{-90.0f, 0.0f, 0.0f};
+    SceneVec3 importScale{0.1f, 0.1f, 0.1f};
+    SceneVec3 importAlbedo{0.62f, 0.44f, 0.20f};
 
     std::vector<SceneVertex> vertices;
     std::vector<unsigned int> indices;

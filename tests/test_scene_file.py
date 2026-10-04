@@ -46,9 +46,18 @@ def load_alley():
     return scene, scene_loader.build_geometry(scene)
 
 
-def cpp_constants():
+def cpp_constants(prefix="k"):
     """The expected values as written in the C++ test, by name."""
     source = CPP_TEST_PATH.read_text()
+    if prefix != "k":
+        source = source.replace("kCafe", "k")
+    # Cafe declarations follow alley declarations; search only their block.
+    if prefix != "k":
+        source = source[
+            source.index(
+                "const std::size_t kPrimitives", source.index("const double kAreaSum") + 1
+            ) :
+        ]
     numbers = r"([-\d.eE+]+)"
     found = {}
     for name in ("kPrimitives", "kVertices", "kTriangles", "kEmissiveTriangles",
@@ -90,6 +99,50 @@ class SceneGrammarTests(unittest.TestCase):
         self.rejects("version 1\ncamera focus 0.01\n", "focus must exceed")
         self.rejects("version 1\nwibble 1 2 3\n", "unknown entry 'wibble'")
         self.rejects("version 1\n\n\nbox pos 0 0\n", "line 4")
+
+    def test_version_and_empty_scene_cases(self):
+        self.rejects("version 1\n", "no geometry")
+        self.rejects("version 1 extra\nbox\n", "needs 1 number(s)")
+        self.rejects("version 1.9\nbox\n", "is not 1")
+
+    def test_taper_default_is_identical_and_cone_normal_is_derived(self):
+        import struct
+
+        plain = scene_loader.build_geometry(
+            scene_loader.parse_scene("version 1\ncyl size 2 3 4 seg 17\n")
+        )
+        tapered = scene_loader.build_geometry(
+            scene_loader.parse_scene("version 1\ncyl size 2 3 4 seg 17 taper 1\n")
+        )
+        for name in ("positions", "normals", "colors"):
+            values = lambda mesh: b"".join(struct.pack("ddd", *v) for v in getattr(mesh, name))
+            self.assertEqual(values(plain), values(tapered))
+        self.assertEqual(vars(plain), vars(tapered))
+        cone = scene_loader.build_geometry(
+            scene_loader.parse_scene("version 1\ncyl seg 17 taper 0\n")
+        )
+        expected = scene_loader._normalize((1, 0.5, 0))
+        self.assertEqual(cone.normals[0], expected)
+        self.assertEqual(len(cone.triangles), 34)
+        self.rejects("version 1\ncyl taper -1\n", "taper must")
+        self.rejects("version 1\nbox taper 1\n", "not valid here")
+
+    def test_flat_frustum_normals_are_perpendicular_and_bevel_retains_bounds(self):
+        geometry = scene_loader.build_geometry(
+            scene_loader.parse_scene("version 1\ncyl seg 7 taper .3 smooth 0 size 2 1 3\n")
+        )
+        for tri in geometry.triangles:
+            a, b, c = [geometry.positions[i] for i in tri]
+            n = geometry.normals[tri[0]]
+            for point in (b, c):
+                self.assertAlmostEqual(
+                    sum((point[k] - a[k]) * n[k] for k in range(3)), 0, places=10
+                )
+        geometry = scene_loader.build_geometry(
+            scene_loader.parse_scene("version 1\nbox size 2 1 3 bevel .1\n")
+        )
+        self.assertEqual(len(geometry.triangles), 44)
+        self.assertEqual(geometry.bounds(), ((-1, -0.5, -1.5), (1, 0.5, 1.5)))
 
     def test_comments_and_blank_lines_are_ignored(self):
         scene = scene_loader.parse_scene("# header\nversion 1  # trailing\n\n   \nbox pos 1 2 3\n")
@@ -183,6 +236,8 @@ class SceneGrammarTests(unittest.TestCase):
 
 
 class AlleySceneTests(unittest.TestCase):
+    expected = EXPECTED
+    prefix = "k"
     @classmethod
     def setUpClass(cls):
         cls.scene, cls.geometry = load_alley()
@@ -190,24 +245,24 @@ class AlleySceneTests(unittest.TestCase):
 
     def test_counts_and_extents_match_the_expected_numbers(self):
         for name in ("primitives", "vertices", "triangles", "emissive_triangles", "smooth_triangles"):
-            self.assertEqual(self.summary[name], EXPECTED[name], msg=name)
+            self.assertEqual(self.summary[name], self.expected[name], msg=name)
         for name in ("bounds_min", "bounds_max", "position_sum"):
-            for axis, expected in enumerate(EXPECTED[name]):
+            for axis, expected in enumerate(self.expected[name]):
                 self.assertAlmostEqual(self.summary[name][axis], expected, places=3,
                                        msg=f"{name}[{axis}]")
-        self.assertAlmostEqual(self.summary["area_sum"], EXPECTED["area_sum"], places=3)
+        self.assertAlmostEqual(self.summary["area_sum"], self.expected["area_sum"], places=3)
 
     def test_cpp_test_pins_the_same_numbers(self):
-        constants = cpp_constants()
-        self.assertEqual(constants["kPrimitives"], EXPECTED["primitives"])
-        self.assertEqual(constants["kVertices"], EXPECTED["vertices"])
-        self.assertEqual(constants["kTriangles"], EXPECTED["triangles"])
-        self.assertEqual(constants["kEmissiveTriangles"], EXPECTED["emissive_triangles"])
-        self.assertEqual(constants["kSmoothTriangles"], EXPECTED["smooth_triangles"])
-        self.assertAlmostEqual(constants["kAreaSum"], EXPECTED["area_sum"], places=6)
+        constants = cpp_constants(self.prefix)
+        self.assertEqual(constants["kPrimitives"], self.expected["primitives"])
+        self.assertEqual(constants["kVertices"], self.expected["vertices"])
+        self.assertEqual(constants["kTriangles"], self.expected["triangles"])
+        self.assertEqual(constants["kEmissiveTriangles"], self.expected["emissive_triangles"])
+        self.assertEqual(constants["kSmoothTriangles"], self.expected["smooth_triangles"])
+        self.assertAlmostEqual(constants["kAreaSum"], self.expected["area_sum"], places=6)
         for name, key in (("kBoundsMin", "bounds_min"), ("kBoundsMax", "bounds_max"),
                           ("kPositionSum", "position_sum")):
-            for axis, expected in enumerate(EXPECTED[key]):
+            for axis, expected in enumerate(self.expected[key]):
                 self.assertAlmostEqual(constants[name][axis], expected, places=4,
                                        msg=f"{name}[{axis}]")
 
@@ -291,9 +346,79 @@ class AlleySceneTests(unittest.TestCase):
         self.assertLess(subject_z, camera.position[2], "The focus plane must be in front of the camera")
 
 
-def print_expected():
+class CafeSceneTests(AlleySceneTests):
+    prefix = "kCafe"
+    expected = {
+        "primitives": 1415,
+        "vertices": 132875,
+        "triangles": 131636,
+        "emissive_triangles": 18384,
+        "smooth_triangles": 79696,
+        "bounds_min": [-3.12, -1.5899999999999999, -10.120000000000001],
+        "bounds_max": [3.12, 1.7, 5.1],
+        "position_sum": [-16080.197417584912, -90379.20840275992, -341348.8104406983],
+        "area_sum": 842.6364489145747,
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        cls.scene = scene_loader.load_scene(ROOT / "scene/cafe.scene")
+        cls.geometry = scene_loader.build_geometry(cls.scene)
+        cls.summary = scene_loader.summary(cls.scene, cls.geometry)
+
+    def test_shadow_region_is_declared_and_covers_what_the_camera_sees(self):
+        for k in range(3):
+            self.assertLessEqual(self.scene.shadow_low[k], self.summary["bounds_min"][k])
+            self.assertGreaterEqual(self.scene.shadow_high[k], self.summary["bounds_max"][k])
+
+    def test_the_scene_fills_the_frame_it_was_composed_for(self):
+        sys.path.insert(0, str(ROOT / "tools/scene"))
+        import build_cafe
+
+        self.assertEqual(build_cafe.build(), (ROOT / "scene/cafe.scene").read_text())
+        cups = [p for p in self.scene.primitives if p.kind == "cyl" and p.taper == 1.35]
+        self.assertEqual(len(cups), 5)
+        pitch = math.radians(8)
+        for cup, depth in zip(cups, (2.5, 4, 6, 9, 12)):
+            actual = (5 - cup.pos[2]) * math.cos(pitch) - cup.pos[1] * math.sin(pitch)
+            self.assertAlmostEqual(actual, depth, places=7)
+            self.assertEqual(cup.size, (0.07, 0.11, 0.07))
+            self.assertEqual(cup.segments, 64)
+        self.assertEqual((self.scene.capture_width, self.scene.capture_height), (1200, 1200))
+        # The front table terminates below the subject; it cannot become a
+        # receding near-eye counter occupying the upper frame.
+        table_y = -0.72
+        near_dz = 2.43 - 0.44
+        ndc = (near_dz * math.sin(pitch) + table_y * math.cos(pitch)) / (
+            0.24 * (near_dz * math.cos(pitch) - table_y * math.sin(pitch))
+        )
+        self.assertGreater(ndc, -1)
+        self.assertLess(ndc, -0.7)
+
+    def test_round_stock_endpoints_and_brightness_jitter(self):
+        sys.path.insert(0, str(ROOT / "tools/scene"))
+        import build_cafe
+
+        builder = build_cafe.Builder()
+        for end in ((1, 2, 3), (0, -3, 0), (-2, 0.5, 0), (0, 2, 0)):
+            start = (0.2, 0.7, -0.8)
+            builder.stock(start, end, 0.02, (0.3, 0.4, 0.5))
+            primitive = scene_loader.parse_scene("version 1\n" + builder.lines[-1]).primitives[0]
+            R = scene_loader.rotation_matrix(*primitive.rot)
+            for sign, expected in ((-1, start), (1, end)):
+                v = scene_loader._apply3(R, (0, sign * primitive.size[1] * 0.5, 0))
+                for a, b in zip((primitive.pos[k] + v[k] for k in range(3)), expected):
+                    self.assertAlmostEqual(a, b, places=7)
+        for _ in range(10):
+            c = builder.jitter((0.2, 0.3, 0.4))
+            self.assertAlmostEqual(c[0] / 0.2, c[1] / 0.3)
+            self.assertAlmostEqual(c[1] / 0.3, c[2] / 0.4)
+
+
+def print_expected(scene_path=SCENE_PATH):
     """Emit the constant block for tests/scene_file.cpp."""
-    scene, geometry = load_alley()
+    scene = scene_loader.load_scene(scene_path)
+    geometry = scene_loader.build_geometry(scene)
     values = scene_loader.summary(scene, geometry)
     print(f'const std::size_t kPrimitives = {values["primitives"]};')
     print(f'const std::size_t kVertices = {values["vertices"]};')
@@ -312,6 +437,7 @@ def print_expected():
 
 if __name__ == "__main__":
     if "--print-expected" in sys.argv:
-        print_expected()
+        scene_path = Path(sys.argv[sys.argv.index("--scene") + 1]) if "--scene" in sys.argv else SCENE_PATH
+        print_expected(scene_path)
     else:
         unittest.main()

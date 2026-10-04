@@ -97,6 +97,10 @@ if(BUILD_TESTING)
     add_test(NAME physical_camera COMMAND physical_camera_tests)
     # Reads scene/alley.scene from the source tree and checks the geometry it
     # builds against numbers produced by the Python builder. Needs no GL context.
+    add_executable(capture_name_dump tests/capture_name.cpp)
+    target_include_directories(capture_name_dump PRIVATE include)
+    add_executable(scene_dump tests/scene_dump.cpp)
+    target_link_libraries(scene_dump PRIVATE scene_file)
     add_executable(scene_file_tests tests/scene_file.cpp)
     target_link_libraries(scene_file_tests PRIVATE scene_file)
     target_compile_definitions(scene_file_tests
@@ -104,6 +108,9 @@ if(BUILD_TESTING)
     add_test(NAME scene_file COMMAND scene_file_tests)
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
+        add_test(NAME comparison_failures COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_comparison.py)
+        add_test(NAME capture_contract COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_capture_contract.py $<TARGET_FILE:capture_name_dump>)
+        add_test(NAME loader_equivalence COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_loader_equivalence.py $<TARGET_FILE:scene_dump>)
         add_test(NAME reference_config COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_reference_config.py)
         # The Python half of the same cross-language check: it also verifies that
         # the expected numbers written into tests/scene_file.cpp still match.

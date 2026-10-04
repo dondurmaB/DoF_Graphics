@@ -14,9 +14,12 @@
 #include "Mesh.h"
 #include "PhysicalCamera.h"
 #include "SceneFile.h"
+#include "CaptureName.h"
 
 #include <algorithm>
 #include <cfloat>
+#include <chrono>
+#include <map>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -124,10 +127,10 @@ ScreenMode screenMode = ScreenMode::BasicDoF;
 bool usePhysicalCameraProjection = true;
 float focusDistanceMeters = 5.0f;
 float focalLengthMillimeters = 50.0f;
-// f/1.4 wide open by default, matching the `camera` line in scene/alley.scene
-// and the first Cycles reference job. The scene file overrides these at startup;
-// the literals stay here so the renderer still runs if the file is missing.
+// Startup values are overwritten from the selected scene before rendering.
+// A missing scene is fatal; no fallback image can masquerade as a capture.
 float fNumber = 1.4f;
+SceneCamera initialLens;
 float sensorHeightMillimeters = 24.0f;
 // Debug visualization scaling only; does not change the rendered blur. In CoC
 // DIAMETER pixels, the same unit the panel reports.
@@ -136,7 +139,7 @@ float cocVisualizationMaxPixels = 20.0f;
 // previous version: screen.frag used to pass the CoC diameter straight in as a
 // radius, which blurred the raster image twice as hard as the Cycles reference
 // at the same f-number. See notes/graphics/18_alley_scene_and_ui.md.
-float maxBlurRadiusPixels = 120.0f;
+float maxBlurRadiusPixels = 0.0f;  // Derived from near/far bounds before each presentation pass.
 // Linear exposure applied when the HDR scene target is encoded for display.
 // 1.0 means "show the radiance as rendered", which is what makes the image
 // comparable to Cycles with Blender's Standard view transform.
@@ -153,15 +156,14 @@ int cocSampleCount = 100;
 // ==============================
 // EXPERIMENT 18: the whole environment comes from one shared scene file
 // ==============================
-// scene/alley.scene is the single description both renderers read: this
-// executable through src/SceneFile.cpp, and the Cycles ground truth through
-// tools/scene/scene_loader.py. Neither one authors geometry any more, so the
-// two cannot drift apart. Regenerate the file with tools/scene/build_alley.py.
-const string scenePath = "scene/alley.scene";
+// Both renderers load the selected scene; neither authors geometry.
+// The tests pin both loaders. Regenerate cafe.scene with tools/scene/build_cafe.py;
+// alley.scene remains loadable for regression coverage.
+string scenePath = "scene/cafe.scene";
 
 // Points FROM a lit surface TOWARD the light. Overwritten by the scene file's
 // `sun` line at startup; the literals match its current contents so the
-// fallback scene is lit the same way.
+// selected scene supplies the actual lighting.
 glm::vec3 lightDirection = glm::vec3(-0.45f, 0.78f, 0.44f);
 glm::vec3 lightColor = glm::vec3(1.0f, 0.88f, 0.72f);
 // Sun irradiance in W/m^2, the same number Blender's sun strength takes.
@@ -202,15 +204,12 @@ PanelMode panelMode = PanelMode::Compact;
 bool cursorToggleRequested = false;
 
 // Set by the L key, serviced by the render loop, which owns the GPU buffers.
-// Editing a line in scene/alley.scene and pressing L is much faster than a
+// Editing the selected scene file and pressing L is much faster than a
 // rebuild when placing props or retuning the light.
 bool sceneReloadRequested = false;
 
 // OBJ units are arbitrary. Choose meters per authored unit explicitly; never auto-normalize.
 const string importedScenePath = "assets/models/scene.obj";
-float importedSceneScale = 0.1f;
-glm::vec3 importedScenePosition = glm::vec3(0.0f, -0.75f, 0.0f);
-float importedSceneRotationYDegrees = 0.0f;
 // The imported mesh has no per-vertex albedo (Mesh.cpp supplies position,
 // normal and UV only), so basic.frag takes this flat linear albedo for it.
 glm::vec3 importedSceneAlbedo = glm::vec3(0.62f, 0.44f, 0.20f);
@@ -218,7 +217,8 @@ glm::vec3 importedSceneAlbedo = glm::vec3(0.62f, 0.44f, 0.20f);
 // quickest way to tell whether a blur artifact comes from the alley geometry
 // or from the subject at the focus plane.
 bool showSceneGeometry = true;
-bool showImportedMesh = true;
+bool showImportedMesh = false;
+glm::mat4 importedModel(1.0f);
 
 float fieldOfViewDegrees = 45.0f; // Retained for legacy/manual projection only.
 // Near and far define the camera-space depth range that can appear after projection.
@@ -389,9 +389,9 @@ void printVerificationHelp() {
          << "  1 Color | 2 RawDepth | 3 LinearDepth | 4 CoCMagnitude | 5 CoCSigned | 6 BasicDoF\n"
          << "  0 split sharp|DoF (drag the divider in the panel)\n"
          << "  7 focus 2 m | 8 focus 5 m | 9 focus 15 m | F toggle f/1.4 and f/8 | B f/2.8\n"
-         << "  K strong-DoF preset (85 mm f/1.4 focused 1.6 m: an obvious, large blur)\n"
-         << "  T reference preset (50 mm f/1.4 focused 5 m, matches the Cycles jobs)\n"
-         << "  L reload scene/alley.scene | R reset camera | V physical/legacy projection\n"
+         << "  K wide-open scene preset (f/1.2, original framing); 1 all-sharp control\n"
+         << "  T reset to scene camera and lens\n"
+         << "  L reload selected scene | R reset camera | V physical/legacy projection\n"
          << "  [ / ] focal length -/+5 mm | , / . sensor height -/+2 mm\n"
          << "  WASD move | Tab or the panel button frees/captures the mouse\n"
          << "  (holding the right mouse button is a quick look without toggling)\n"
@@ -414,10 +414,19 @@ void applySceneSettings(const SceneDescription& scene) {
     initialPitchDegrees = pitchDegrees;
     updateCameraFront();
 
+    initialLens = scene.camera;
     focusDistanceMeters = scene.camera.focusDistanceMeters;
     fNumber = scene.camera.fNumber;
     focalLengthMillimeters = scene.camera.focalLengthMillimeters;
     sensorHeightMillimeters = scene.camera.sensorHeightMillimeters;
+    importedSceneAlbedo = glm::vec3(scene.importAlbedo.x, scene.importAlbedo.y, scene.importAlbedo.z);
+    importedModel = glm::translate(
+        glm::mat4(1), glm::vec3(scene.importPosition.x, scene.importPosition.y, scene.importPosition.z));
+    importedModel = glm::rotate(importedModel, glm::radians(scene.importRotation.y), glm::vec3(0, 1, 0));
+    importedModel = glm::rotate(importedModel, glm::radians(scene.importRotation.x), glm::vec3(1, 0, 0));
+    importedModel = glm::rotate(importedModel, glm::radians(scene.importRotation.z), glm::vec3(0, 0, 1));
+    importedModel =
+        glm::scale(importedModel, glm::vec3(scene.importScale.x, scene.importScale.y, scene.importScale.z));
 
     lightDirection = glm::vec3(scene.sun.direction[0], scene.sun.direction[1], scene.sun.direction[2]);
     lightColor = glm::vec3(scene.sun.color[0], scene.sun.color[1], scene.sun.color[2]);
@@ -521,14 +530,15 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
     } else if (key == GLFW_KEY_0) {
         screenMode = ScreenMode::SplitSharpDoF;
     } else if (key == GLFW_KEY_K) {
-        // An unmistakable depth of field, for when the question is "is the blur
-        // working" rather than "does it match Cycles". A long lens focused close
-        // is what actually produces a large circle of confusion: at 50 mm f/1.4
-        // focused 5 m away the background CoC radius tops out around 9 px, so
-        // the 120 px ceiling never comes into play.
-        focalLengthMillimeters = 85.0f;
-        fNumber = 1.4f;
-        focusDistanceMeters = 1.6f;
+        // Keep the composed scene framing; changing to 85mm hides the cafe.
+        cameraPosition = initialCameraPosition;
+        yawDegrees = initialYawDegrees;
+        pitchDegrees = initialPitchDegrees;
+        updateCameraFront();
+        focalLengthMillimeters = initialLens.focalLengthMillimeters;
+        sensorHeightMillimeters = initialLens.sensorHeightMillimeters;
+        focusDistanceMeters = initialLens.focusDistanceMeters;
+        fNumber = 1.2f;
         usePhysicalCameraProjection = true;
         usePerspectiveProjection = true;
         screenMode = ScreenMode::BasicDoF;
@@ -554,10 +564,10 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         yawDegrees = initialYawDegrees;
         pitchDegrees = initialPitchDegrees;
         updateCameraFront();
-        focusDistanceMeters = 5.0f;
-        focalLengthMillimeters = 50.0f;
-        sensorHeightMillimeters = 24.0f;
-        fNumber = 1.4f;
+        focusDistanceMeters = initialLens.focusDistanceMeters;
+        focalLengthMillimeters = initialLens.focalLengthMillimeters;
+        sensorHeightMillimeters = initialLens.sensorHeightMillimeters;
+        fNumber = initialLens.fNumber;
         usePhysicalCameraProjection = true;
         usePerspectiveProjection = true;
         screenMode = ScreenMode::BasicDoF;
@@ -818,7 +828,8 @@ bool saveScreenshot(const string& path, int width, int height) {
         copy(source, source + rowSize, destination);
     }
 
-    filesystem::create_directories(filesystem::path(path).parent_path());
+    if (!filesystem::path(path).parent_path().empty())
+        filesystem::create_directories(filesystem::path(path).parent_path());
 
     if (writePng(path, width, height, flippedPixels)) {
         cout << "Saved screenshot: " << path << endl;
@@ -843,6 +854,7 @@ struct ExtraGlFunctions {
     void (*uniform1i)(GLint, GLint) = nullptr;
     void (*uniform3fv)(GLint, GLsizei, const GLfloat*) = nullptr;
     // A depth-only FBO (the shadow map) needs both set to GL_NONE to be complete on strict drivers.
+    void (*finish)() = nullptr;
     void (*drawBuffer)(GLenum) = nullptr;
     void (*readBuffer)(GLenum) = nullptr;
 };
@@ -872,21 +884,51 @@ bool loadExtraGlFunctions(ExtraGlFunctions& functions) {
            loadGlFunction(functions.uniform1i, "glUniform1i") &&
            loadGlFunction(functions.uniform3fv, "glUniform3fv") &&
            loadGlFunction(functions.drawBuffer, "glDrawBuffer") &&
-           loadGlFunction(functions.readBuffer, "glReadBuffer");
+           loadGlFunction(functions.readBuffer, "glReadBuffer") &&
+           loadGlFunction(functions.finish, "glFinish");
 }
 
-int main() {
+int main(int argc, char** argv) {
+    // Batch still executes the production scene/shadow/postprocess passes.
+    // Its presentation FBO is allocated in PIXELS, independent of window/Retina
+    // scaling. Texture dimensions are queried and mismatches are fatal.
+    map<string, string> options;
+    bool batch = false, dryRun = false;
+    try {
+        for (int i = 1; i < argc; ++i) {
+            const string key = argv[i];
+            if (key == "--batch")
+                batch = true;
+            else if (key == "--dry-run")
+                dryRun = true;
+            else if (key == "--import-mesh")
+                showImportedMesh = true;
+            else if (key == "--sharp")
+                screenMode = ScreenMode::Color;
+            else if (key == "--scene" || key == "--output" || key == "--width" || key == "--height" ||
+                     key == "--lens" || key == "--sensor-height" || key == "--focus" || key == "--fstop" ||
+                     key == "--x" || key == "--y" || key == "--z" || key == "--yaw" || key == "--pitch") {
+                if (++i >= argc) throw invalid_argument("Missing value for " + key);
+                if (!options.emplace(key, argv[i]).second) throw invalid_argument("Repeated argument " + key);
+            } else
+                throw invalid_argument("Unknown argument " + key);
+        }
+        if (options.count("--scene")) scenePath = options.at("--scene");
+    } catch (const exception& e) {
+        cerr << e.what() << endl;
+        return 1;
+    }
     // The shared scene file is read first because it supplies the camera and
     // lens the FOV report below prints. Everything about the environment comes
-    // from here; if it fails to load the renderer still starts, with the
-    // literals at the top of this file and the imported mesh alone.
+    // from here. A failed load is fatal so an inspection never silently renders
+    // a fallback scene under the requested scene name.
     const filesystem::path sceneFilePath = filesystem::path(PROJECT_SOURCE_DIR) / scenePath;
     SceneDescription sceneDescription;
     string sceneError;
     bool hasSceneGeometry = loadSceneFile(sceneFilePath, sceneDescription, sceneError);
     if (!hasSceneGeometry) {
-        cout << "Failed to load " << scenePath << ": " << sceneError
-             << "\nFalling back to the imported mesh and the built-in camera settings." << endl;
+        cout << "Failed to load " << scenePath << ": " << sceneError << endl;
+        return 1;
     } else {
         applySceneSettings(sceneDescription);
         cout << "Loaded " << scenePath << ": " << sceneDescription.primitiveCount
@@ -899,6 +941,50 @@ int main() {
         cout << "Sun: energy " << lightEnergy << " W/m^2 | sky radiance "
              << skyRadiance().x << ", " << skyRadiance().y << ", " << skyRadiance().z << endl;
     }
+
+    int captureWidth = sceneDescription.captureWidth, captureHeight = sceneDescription.captureHeight;
+    string batchOutput = options.count("--output") ? options.at("--output") : "output/gl_capture.png";
+    try {
+        auto number = [&](const char* key, float fallback) {
+            if (!options.count(key)) return fallback;
+            size_t used = 0;
+            const float value = stof(options.at(key), &used);
+            if (used != options.at(key).size() || !isfinite(value))
+                throw invalid_argument(string("Invalid number for ") + key);
+            return value;
+        };
+        const float width = number("--width", captureWidth), height = number("--height", captureHeight);
+        if (width != floor(width) || height != floor(height) || width < 16 || height < 16 || width > 8192 ||
+            height > 8192)
+            throw invalid_argument("Capture dimensions must be integers in [16,8192]");
+        captureWidth = static_cast<int>(width);
+        captureHeight = static_cast<int>(height);
+        focalLengthMillimeters = number("--lens", focalLengthMillimeters);
+        sensorHeightMillimeters = number("--sensor-height", sensorHeightMillimeters);
+        focusDistanceMeters = number("--focus", focusDistanceMeters);
+        fNumber = number("--fstop", fNumber);
+        if (focalLengthMillimeters < 1 || focalLengthMillimeters > 500 || sensorHeightMillimeters < 1 ||
+            sensorHeightMillimeters > 100 || focusDistanceMeters <= focalLengthMillimeters * .001f ||
+            fNumber < .1f)
+            throw invalid_argument("Invalid lens/focus/aperture");
+        cameraPosition.x = number("--x", cameraPosition.x);
+        cameraPosition.y = number("--y", cameraPosition.y);
+        cameraPosition.z = number("--z", cameraPosition.z);
+        yawDegrees = number("--yaw", yawDegrees);
+        pitchDegrees = number("--pitch", pitchDegrees);
+        if (abs(pitchDegrees) >= 89.9f) throw invalid_argument("Pitch must be within (-89.9,89.9)");
+        updateCameraFront();
+    } catch (const exception& e) {
+        cerr << e.what() << endl;
+        return 1;
+    }
+    cout << "Capture pixels: " << captureWidth << " x " << captureHeight << " | imported mesh "
+         << showImportedMesh << endl;
+    if (dryRun) {
+        cout << "Dry run: no OpenGL context or visual verification." << endl;
+        return 0;
+    }
+    if (batch) panelMode = PanelMode::Hidden;
 
     try {
         cout << "Physical vertical FOV: "
@@ -914,19 +1000,15 @@ int main() {
     string meshError;
     string meshWarning;
     const filesystem::path modelPath = filesystem::path(PROJECT_SOURCE_DIR) / importedScenePath;
-    cout << "OBJ loader: tinyobjloader | model: " << importedScenePath
-         << " | importedSceneScale: " << importedSceneScale << " meters/unit" << endl;
+    cout << "OBJ loader: tinyobjloader | model: " << importedScenePath << " | opt-in: " << showImportedMesh
+         << endl;
     bool hasImportedMesh = false;
-    if (!std::isfinite(importedSceneScale) || importedSceneScale <= 0.0f) {
-        meshError = "importedSceneScale must be finite and positive.";
-    } else {
-        hasImportedMesh = loadObjMesh(modelPath, importedData, meshError, meshWarning);
-    }
+    if (showImportedMesh) hasImportedMesh = loadObjMesh(modelPath, importedData, meshError, meshWarning);
     if (!meshWarning.empty()) cout << "OBJ warning: " << meshWarning << endl;
-    if (!hasImportedMesh) {
-        cout << "Failed to load " << importedScenePath << ": " << meshError
-             << "\nUsing fallback scene." << endl;
-    } else {
+    if (showImportedMesh && !hasImportedMesh) {
+        cout << "Failed to load " << importedScenePath << ": " << meshError << endl;
+        return 1;
+    } else if (hasImportedMesh) {
         cout << "Loaded " << importedScenePath << ": " << importedData.vertices.size()
              << " vertices, " << importedData.indices.size() << " indices, "
              << importedData.indices.size() / 3 << " triangles"
@@ -948,7 +1030,9 @@ int main() {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
-    GLFWwindow* window = glfwCreateWindow(windowWidth, windowHeight, "DOF_Research", NULL, NULL);
+    if (batch) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    GLFWwindow* window =
+        glfwCreateWindow(batch ? 64 : windowWidth, batch ? 64 : windowHeight, "DOF_Research", NULL, NULL);
     if (window == NULL) {
         cout << "Failed to create GLFW window" << endl;
         glfwTerminate();
@@ -1254,8 +1338,8 @@ int main() {
 
     Mesh importedMesh;
     if (hasImportedMesh && !uploadMesh(importedData, importedMesh, meshError)) {
-        cout << "Failed to upload " << importedScenePath << ": " << meshError
-             << "\nUsing fallback scene." << endl;
+        cout << "Failed to upload " << importedScenePath << ": " << meshError << endl;
+        return 1;
         hasImportedMesh = false;
     }
     importedData = {}; // GPU buffers retain the uploaded data for every subsequent frame.
@@ -1464,7 +1548,37 @@ int main() {
     printVerificationHelp();
     showVerificationStatus(window);
 
+    GLuint captureFBO = 0, captureTexture = 0;
+    if (batch) {
+        extraGl.genFramebuffers(1, &captureFBO);
+        extraGl.bindFramebuffer(GL_FRAMEBUFFER, captureFBO);
+        extraGl.genTextures(1, &captureTexture);
+        extraGl.bindTexture(GL_TEXTURE_2D, captureTexture);
+        extraGl.texImage2D(GL_TEXTURE_2D, 0, 0x8058, captureWidth, captureHeight, 0, GL_RGBA,
+                           GL_UNSIGNED_BYTE, nullptr);
+        extraGl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        extraGl.texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        extraGl.framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, captureTexture, 0);
+        extraGl.drawBuffer(GL_COLOR_ATTACHMENT0);
+        extraGl.readBuffer(GL_COLOR_ATTACHMENT0);
+        void (*getLevel)(GLenum, GLint, GLenum, GLint*) = nullptr;
+        if (!loadGlFunction(getLevel, "glGetTexLevelParameteriv")) return 1;
+        GLint actualWidth = 0, actualHeight = 0;
+        getLevel(GL_TEXTURE_2D, 0, 0x1000, &actualWidth);
+        getLevel(GL_TEXTURE_2D, 0, 0x1001, &actualHeight);
+        if (actualWidth != captureWidth || actualHeight != captureHeight ||
+            extraGl.checkFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            cerr << "Capture FBO failed exact pixel-size verification: requested " << captureWidth << "x"
+                 << captureHeight << ", got " << actualWidth << "x" << actualHeight << endl;
+            return 1;
+        }
+        cout << "Capture FBO verified: " << actualWidth << " x " << actualHeight << endl;
+        extraGl.bindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+    int batchFrames = 0;
+    double batchSeconds = 0;
     while (!glfwWindowShouldClose(window)) {
+        const auto frameStart = chrono::steady_clock::now();
         float currentFrameTime = static_cast<float>(glfwGetTime());
         deltaTime = currentFrameTime - lastFrameTime;
         lastFrameTime = currentFrameTime;
@@ -1523,7 +1637,11 @@ int main() {
             ? 0.6f + 0.4f * sin(currentFrameTime * intensitySpeed)
             : staticIntensity;
 
-        glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
+        if (batch) {
+            framebufferWidth = captureWidth;
+            framebufferHeight = captureHeight;
+        } else
+            glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
         if (framebufferWidth <= 0 || framebufferHeight <= 0) {
             glfwSwapBuffers(window);
             glfwPollEvents();
@@ -1593,23 +1711,22 @@ int main() {
             // rather than sliders: a slider cannot be set to exactly f/1.4
             // twice in a row, and the Cycles reference renders at fixed stops.
             ImGui::TextUnformatted("Aperture");
-            const struct { const char* label; float value; } apertures[] = {
-                {"f/1.4", 1.4f}, {"f/2.8", 2.8f}, {"f/8", 8.0f}
-            };
-            for (int index = 0; index < 3; ++index) {
-                if (index > 0) ImGui::SameLine();
+            const struct { const char* label; float value;
+            } apertures[] = {{"1.2", 1.2f}, {"1.4", 1.4f}, {"2", 2.f},   {"2.8", 2.8f}, {"4", 4.f},
+                             {"5.6", 5.6f}, {"8", 8.f},    {"11", 11.f}, {"16", 16.f},  {"22", 22.f}};
+            for (int index = 0; index < 10; ++index) {
+                if (index % 5 != 0) ImGui::SameLine();
                 const bool active = std::abs(fNumber - apertures[index].value) < 0.01f;
                 if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.30f, 0.50f, 0.75f, 1.0f));
-                if (ImGui::Button(apertures[index].label, ImVec2(66.0f, 0.0f))) {
+                if (ImGui::Button(apertures[index].label, ImVec2(42.0f, 0.0f))) {
                     fNumber = apertures[index].value;
                 }
                 if (active) ImGui::PopStyleColor();
             }
 
             ImGui::TextUnformatted("Focus");
-            const struct { const char* label; float value; } focusPresets[] = {
-                {"1.6 m", 1.6f}, {"5 m", 5.0f}, {"15 m", 15.0f}
-            };
+            const struct { const char* label; float value;
+            } focusPresets[] = {{"2.5 m", 2.5f}, {"5 m", 5.0f}, {"15 m", 15.0f}};
             for (int index = 0; index < 3; ++index) {
                 if (index > 0) ImGui::SameLine();
                 const bool active = std::abs(focusDistanceMeters - focusPresets[index].value) < 0.01f;
@@ -1622,7 +1739,7 @@ int main() {
 
             ImGui::SliderFloat("##focus", &focusDistanceMeters, 0.4f, 40.0f, "focus %.2f m",
                                ImGuiSliderFlags_Logarithmic);
-            ImGui::SliderFloat("##fnumber", &fNumber, 1.0f, 22.0f, "f/%.1f");
+
             ImGui::SliderFloat("##lens", &focalLengthMillimeters, 18.0f, 200.0f, "lens %.0f mm");
 
             const char* screenModeNames[] = {
@@ -1645,14 +1762,12 @@ int main() {
             // side by side is the quickest way to see that.
             const float farCoCRadius =
                 0.5f * signedCoCDiameterPixels(farPlane, framebufferHeight);
-            const float nearCoCRadius =
-                0.5f * signedCoCDiameterPixels(nearPlane + 0.2f, framebufferHeight);
-            const float reachedRadius = min(max(std::abs(farCoCRadius), std::abs(nearCoCRadius)),
-                                            maxBlurRadiusPixels);
+            const float nearCoCRadius = 0.5f * signedCoCDiameterPixels(nearPlane, framebufferHeight);
+            const float reachedRadius = max(std::abs(farCoCRadius), std::abs(nearCoCRadius));
             ImGui::Separator();
             ImGui::Text("CoC radius: bg %.1f px, fg %.1f px", std::abs(farCoCRadius),
                         std::abs(nearCoCRadius));
-            ImGui::Text("gather uses %.0f px of %.0f max", reachedRadius, maxBlurRadiusPixels);
+            ImGui::Text("Near/far plane bound: %.0f px", reachedRadius);
             if (reachedRadius < maxBlurRadiusPixels * 0.25f) {
                 ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.25f, 1.0f),
                                    "lens-limited: press K for a strong blur");
@@ -1662,7 +1777,7 @@ int main() {
             if (full) {
                 ImGui::Separator();
                 if (ImGui::CollapsingHeader("Blur gather")) {
-                    ImGui::SliderFloat("Max radius (px)", &maxBlurRadiusPixels, 0.0f, 300.0f);
+                    ImGui::Text("Auto radius ceiling: %.1f px", maxBlurRadiusPixels);
                     ImGui::SliderInt("CoC samples", &cocSampleCount, 4, 256);
                     ImGui::SliderFloat("CoC debug max (px)", &cocVisualizationMaxPixels, 1.0f, 200.0f);
                     ImGui::SliderFloat("Depth view max (m)", &depthVisualizationMax, 1.0f, 100.0f);
@@ -1687,7 +1802,9 @@ int main() {
                 }
                 if (ImGui::CollapsingHeader("Scene")) {
                     ImGui::Checkbox("Alley geometry", &showSceneGeometry);
+                    ImGui::BeginDisabled(!hasImportedMesh);
                     ImGui::Checkbox("Imported mesh", &showImportedMesh);
+                    ImGui::EndDisabled();
                     ImGui::ColorEdit3("Mesh albedo", glm::value_ptr(importedSceneAlbedo));
                     if (ImGui::Button("Reload scene file (L)")) {
                         sceneReloadRequested = true;
@@ -1777,14 +1894,7 @@ int main() {
             // disabled, so basic.frag takes uOverrideAlbedo and sees no
             // emission for it.
             if (hasImportedMesh && showImportedMesh) {
-                glm::mat4 model = glm::translate(glm::mat4(1.0f), importedScenePosition);
-                model = glm::rotate(
-                    model,
-                    glm::radians(-90.0f),
-                    glm::vec3(1.0f, 0.0f, 0.0f)
-                );
-                model = glm::rotate(model, glm::radians(importedSceneRotationYDegrees), glm::vec3(0.0f, 1.0f, 0.0f));
-                model = glm::scale(model, glm::vec3(importedSceneScale));
+                const glm::mat4 model = importedModel;
                 if (activeModelLocation != -1) {
                     glUniformMatrix4fv(activeModelLocation, 1, GL_FALSE, glm::value_ptr(model));
                 }
@@ -1823,6 +1933,10 @@ int main() {
 
         if (renderThroughFramebuffer) {
             if (!resizeSceneFramebuffer(framebufferWidth, framebufferHeight)) {
+                if (batch) {
+                    cerr << "Batch scene FBO allocation failed" << endl;
+                    return 1;
+                }
                 glfwSwapBuffers(window);
                 glfwPollEvents();
                 continue;
@@ -1837,8 +1951,26 @@ int main() {
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
             renderScene(false);
 
+            if (batch && batchFrames == 24) {
+                // Linear pre-lens buffer for brightness calibration, not a DoF
+                // output or ground truth. PFM stores float32 with bottom-up rows.
+                vector<float> pixels(static_cast<size_t>(framebufferWidth) * framebufferHeight * 3);
+                glReadPixels(0, 0, framebufferWidth, framebufferHeight, GL_RGB, GL_FLOAT, pixels.data());
+                filesystem::path path(batchOutput);
+                path.replace_extension("linear.pfm");
+                if (!path.parent_path().empty()) filesystem::create_directories(path.parent_path());
+                ofstream file(path, ios::binary);
+                file << "PF\n" << framebufferWidth << " " << framebufferHeight << "\n-1.0\n";
+                file.write(reinterpret_cast<const char*>(pixels.data()),
+                           static_cast<streamsize>(pixels.size() * sizeof(float)));
+                if (!file) {
+                    cerr << "Failed linear capture" << endl;
+                    return 1;
+                }
+            }
+
             // Pass 2: present color, depth/CoC diagnostics, BasicDoF or the split view through a screen quad.
-            extraGl.bindFramebuffer(GL_FRAMEBUFFER, 0);
+            extraGl.bindFramebuffer(GL_FRAMEBUFFER, batch ? captureFBO : 0);
             glViewport(0, 0, framebufferWidth, framebufferHeight);
             glDisable(GL_DEPTH_TEST); // The quad covers the screen and only presents an already-rendered image.
             glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -1885,6 +2017,12 @@ int main() {
             if (framebufferWidthLocation != -1) {
                 glUniform1f(framebufferWidthLocation, static_cast<float>(framebufferWidth));
             }
+            // CoC is monotonic in 1/depth; its absolute maximum on a finite
+            // depth interval occurs at one endpoint. Size for f/1.2 (or wider
+            // CLI aperture) at THIS resolution and lens, not a guessed 120px.
+            maxBlurRadiusPixels = max(abs(.5f * signedCoCDiameterPixels(nearPlane, framebufferHeight)),
+                                      abs(.5f * signedCoCDiameterPixels(farPlane, framebufferHeight))) *
+                                  fNumber / min(fNumber, 1.2f);
             if (maxBlurRadiusLocation != -1) {
                 glUniform1f(maxBlurRadiusLocation, maxBlurRadiusPixels);
             }
@@ -1906,7 +2044,7 @@ int main() {
             glDrawArrays(GL_TRIANGLES, 0, 6);
             glBindVertexArray(0);
         } else {
-            extraGl.bindFramebuffer(GL_FRAMEBUFFER, 0);
+            extraGl.bindFramebuffer(GL_FRAMEBUFFER, batch ? captureFBO : 0);
             glViewport(0, 0, framebufferWidth, framebufferHeight);
             glEnable(GL_DEPTH_TEST);
             glDepthFunc(GL_LESS);
@@ -1919,6 +2057,20 @@ int main() {
             renderScene(false);
         }
 
+        if (batch) {
+            // Finish all GPU work (not just one tile) before stopping the clock.
+            // Four warm-up frames and the final image-writing frame are excluded.
+            extraGl.finish();
+            const double seconds = chrono::duration<double>(chrono::steady_clock::now() - frameStart).count();
+            if (batchFrames >= 4 && batchFrames < 24) batchSeconds += seconds;
+            if (++batchFrames == 25) {
+                if (!saveScreenshot(batchOutput, framebufferWidth, framebufferHeight)) return 1;
+                cout << "Batch mean of 20 warm frames (includes synchronization, excludes image IO): "
+                     << 1000 * batchSeconds / 20 << " ms" << endl;
+                ImGui::EndFrame();
+                break;
+            }
+        }
         const bool screenshotKeyIsPressed = glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS;
         if (screenshotKeyIsPressed && !screenshotKeyWasPressed) {
             glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
@@ -1930,14 +2082,11 @@ int main() {
             // remembering which screenshot was which.
             saveScreenshot("output/latest.png", framebufferWidth, framebufferHeight);
             std::ostringstream matched;
-            matched << "output/gl_focus" << formatCompact(focusDistanceMeters) << "m_f"
-                    << formatCompact(fNumber);
-            if (std::abs(focalLengthMillimeters - 50.0f) > 0.01f) {
-                matched << "_" << formatCompact(focalLengthMillimeters) << "mm";
-            }
-            if (screenMode != ScreenMode::BasicDoF) {
+            matched << "output/gl_"
+                    << captureTag(focusDistanceMeters, fNumber, focalLengthMillimeters,
+                                  screenMode == ScreenMode::Color);
+            if (screenMode != ScreenMode::BasicDoF && screenMode != ScreenMode::Color)
                 matched << "_" << screenModeFileTag(screenMode);
-            }
             matched << ".png";
             saveScreenshot(matched.str(), framebufferWidth, framebufferHeight);
         }
@@ -1955,6 +2104,8 @@ int main() {
 
     }
 
+    if (captureFBO) extraGl.deleteFramebuffers(1, &captureFBO);
+    if (captureTexture) extraGl.deleteTextures(1, &captureTexture);
     //Delete everything
     destroyMesh(importedMesh);
     glDeleteVertexArrays(1, &VAO);

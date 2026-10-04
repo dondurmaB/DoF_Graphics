@@ -42,11 +42,17 @@ class ReferenceConfigTests(unittest.TestCase):
                 self.assertEqual(source.read_bytes(), original)
 
     def test_camera_and_non_square_sensor(self):
-        plan = reference.make_plan(reference.parse_args(["--width", "1600", "--height", "900"]))
+        plan = reference.make_plan(
+            reference.parse_args(
+                ["--scene", "scene/alley.scene", "--width", "1600", "--height", "900"]
+            )
+        )
         self.assertAlmostEqual(plan["vertical_fov_degrees"], 26.99146656, places=6)
         self.assertAlmostEqual(plan["effective_sensor_width_mm"], 24 * 16 / 9)
         self.assertEqual(plan["camera_position_blender"], (0, -5, 0))
-        self.assertEqual(plan["camera_forward_blender"], (0, 1, 0))
+
+        for actual, expected in zip(plan["camera_forward_blender"], (0, 1, 0)):
+            self.assertAlmostEqual(actual, expected)
         self.assertEqual(plan["camera_up_blender"], (0, 0, 1))
         self.assertLess(reference.vertical_fov_degrees(85, 24), plan["vertical_fov_degrees"])
         self.assertGreater(reference.vertical_fov_degrees(50, 36), plan["vertical_fov_degrees"])
@@ -55,8 +61,10 @@ class ReferenceConfigTests(unittest.TestCase):
         for point in [(0, 0, 0), (-0.55, -0.35, 3), (1.6, 0.4, -10), (-3.8, 0.4, -20)]:
             converted = transform(reference.WORLD_CONVERSION, point)
             self.assertEqual(converted, reference.gl_to_blender(point))
-            self.assertAlmostEqual(math.dist(point, reference.CAMERA_POSITION_GL),
-                                   math.dist(converted, reference.gl_to_blender(reference.CAMERA_POSITION_GL)))
+            self.assertAlmostEqual(
+                math.dist(point, (0, 0, 5)),
+                math.dist(converted, reference.gl_to_blender((0, 0, 5))),
+            )
             self.assertAlmostEqual(5 - point[2], converted[1] + 5)
 
     def test_import_rotation_and_scale_applied_once(self):
@@ -72,83 +80,61 @@ class ReferenceConfigTests(unittest.TestCase):
         self.assertAlmostEqual(transform(box, (0, 1, 0))[0], 1)
         self.assertAlmostEqual(transform(imported, (0, 1, 0))[2], 1)
 
-    def test_settings_match_opengl_source(self):
-        source = (ROOT / "src/main.cpp").read_text()
-        scalar_pairs = {"focalLengthMillimeters": reference.FOCAL_LENGTH_MM,
-                        "sensorHeightMillimeters": reference.SENSOR_HEIGHT_MM,
-                        "importedSceneScale": reference.IMPORTED_SCENE_SCALE,
-                        "nearPlane": reference.NEAR_M, "farPlane": reference.FAR_M}
-        for name, expected in scalar_pairs.items():
-            self.assertAlmostEqual(float(re.search(r"float " + name + r" = ([-\d.]+)f;", source)[1]), expected)
-        vector = lambda name: tuple(
-            float(value.strip().rstrip("f"))
-            for value in re.search(name + r" = glm::vec3\(([^)]+)\)", source)[1].split(","))
-        self.assertEqual(vector("importedScenePosition"), reference.IMPORTED_SCENE_POSITION_GL)
-        self.assertEqual(vector("importedSceneAlbedo"), reference.IMPORTED_ALBEDO)
-        # The seven hand-placed cubes this used to compare are gone; the
-        # environment is checked against the shared scene file instead, below.
-
-    def test_scene_file_agrees_with_both_renderers(self):
-        """The one check that keeps the two renderers drawing the same scene.
-
-        scene/alley.scene is loaded by src/SceneFile.cpp for the raster pass and
-        by tools/scene/scene_loader.py for this Cycles script. The camera and
-        lens are additionally duplicated as argparse defaults here and as
-        fallback literals in src/main.cpp, so all three have to agree.
-        """
+    def test_scene_drives_camera_capture_and_optional_import(self):
         loader, scene, geometry = reference.load_shared_scene()
-        source = (ROOT / "src/main.cpp").read_text()
-
-        self.assertEqual(scene.camera.position, reference.CAMERA_POSITION_GL)
-        forward = reference.camera_forward_gl(scene.camera.yaw_degrees, scene.camera.pitch_degrees)
-        for actual, expected in zip(forward, reference.CAMERA_FORWARD_GL):
-            self.assertAlmostEqual(actual, expected, places=9)
-        self.assertEqual(scene.camera.focal_length_mm, reference.FOCAL_LENGTH_MM)
-        self.assertEqual(scene.camera.sensor_height_mm, reference.SENSOR_HEIGHT_MM)
-        self.assertIn(scene.camera.focus_distance_m, reference.FOCUS_DISTANCES_M)
-        self.assertIn(scene.camera.f_number, reference.F_STOPS)
-
-        # src/main.cpp keeps the same values as fallbacks for a missing file.
-        def cpp_vector(name):
-            match = re.search(name + r" = glm::vec3\(([^)]+)\)", source)
-            self.assertIsNotNone(match, f"src/main.cpp no longer defines {name}")
-            return tuple(float(value.strip().rstrip("f")) for value in match[1].split(","))
-
-        def cpp_scalar(name):
-            match = re.search(r"float " + name + r" = ([-\d.]+)f;", source)
-            self.assertIsNotNone(match, f"src/main.cpp no longer defines {name}")
-            return float(match[1])
-
-        self.assertEqual(cpp_vector("lightDirection"), scene.sun.direction)
-        self.assertEqual(cpp_vector("lightColor"), scene.sun.color)
-        self.assertEqual(cpp_scalar("lightEnergy"), scene.sun.energy)
-        self.assertEqual(cpp_vector("ambientColor"), scene.ambient.color)
-        self.assertEqual(cpp_scalar("ambientStrength"), scene.ambient.strength)
-        self.assertEqual(cpp_scalar("focusDistanceMeters"), scene.camera.focus_distance_m)
-        self.assertEqual(cpp_scalar("fNumber"), scene.camera.f_number)
-        self.assertIn(f'scenePath = "{reference.SCENE_FILE}"', source)
-
-        # The digest in every sidecar JSON must be of the file actually loaded.
-        plan = reference.make_plan(reference.parse_args([]))
-        digest = hashlib.sha256((ROOT / reference.SCENE_FILE).read_bytes()).hexdigest()
-        self.assertEqual(plan["scene_sha256"], digest)
-        summary = loader.summary(scene, geometry)
-        self.assertEqual(plan["scene_summary"]["triangles"], summary["triangles"])
-        self.assertEqual(plan["scene_summary"]["sky_radiance"], list(scene.sky_radiance))
-        # Emitters have to exist, or the alley has no practical lights at dusk
-        # and the whole point of the HDR gather is lost.
-        self.assertGreater(summary["emissive_triangles"], 0)
+        args = reference.parse_args([])
+        plan = reference.make_plan(args)
+        self.assertEqual((args.width, args.height), (scene.capture_width, scene.capture_height))
+        self.assertEqual(plan["camera_position_gl"], scene.camera.position)
+        self.assertEqual(
+            plan["camera_forward_gl"],
+            reference.camera_forward_gl(scene.camera.yaw_degrees, scene.camera.pitch_degrees),
+        )
+        self.assertEqual(args.lens, scene.camera.focal_length_mm)
+        self.assertEqual(args.sensor_height, scene.camera.sensor_height_mm)
+        self.assertEqual(args.focus, [scene.camera.focus_distance_m])
+        self.assertIsNone(plan["asset"])
+        self.assertEqual(plan["lighting_mode"], "matched_fill_direct")
+        self.assertFalse(plan["ground_truth"])
+        self.assertEqual(
+            plan["scene_sha256"],
+            hashlib.sha256((ROOT / reference.SCENE_FILE).read_bytes()).hexdigest(),
+        )
+        self.assertEqual(plan["scene_summary"]["triangles"], len(geometry.triangles))
+        custom = "version 1\ncapture width 321 height 245\ncamera pos 1 2 3 yaw -37 pitch -11 lens 71 sensor 19 focus 4\nimported pos 2 3 4 rot 21 33 19 size .2 .3 .4\nbox\n"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "custom.scene"
+            path.write_text(custom)
+            args = reference.parse_args(["--scene", str(path), "--import-mesh", "--full-gi"])
+            plan = reference.make_plan(args)
+            self.assertEqual(plan["resolution_pixels"], [321, 245])
+            self.assertEqual(plan["focal_length_mm"], 71)
+            self.assertEqual(plan["camera_position_gl"], (1, 2, 3))
+            self.assertEqual(plan["lighting_mode"], "full_gi_not_comparable")
+            self.assertIsNotNone(plan["asset"])
+            self.assertEqual(transform(plan["import_matrix_gl"], (0, 0, 0)), (2, 3, 4))
+            rotation = loader.rotation_matrix(21, 33, 19)
+            expected = loader._apply3(rotation, (0.2, 0.6, 1.2))
+            for a, b in zip(
+                transform(plan["import_matrix_gl"], (1, 2, 3)),
+                (expected[0] + 2, expected[1] + 3, expected[2] + 4),
+            ):
+                self.assertAlmostEqual(a, b)
 
     def test_controlled_jobs_and_invalid_arguments(self):
         args = reference.parse_args([])
         self.assertEqual(args.samples, 128)
-        self.assertEqual([job[0] for job in reference.render_jobs(args)],
-                         ["rt_focus5m_f1.4.png", "rt_focus5m_f2.8.png", "rt_focus5m_f8.png"])
-        args = reference.parse_args(["--preview", "--focus", "2", "5", "15", "--sharp"])
+        self.assertEqual(
+            [job[0] for job in reference.render_jobs(args)],
+            [f"rt_focus2.5m_f{f:g}.png" for f in reference.F_STOPS],
+        )
+        args = reference.parse_args(
+            ["--preview", "--focus", "2", "5", "15", "--fstops", "1.4", "2.8", "8", "--sharp"]
+        )
         self.assertEqual(args.samples, 32)
         self.assertEqual(len(reference.render_jobs(args)), 10)
         with self.assertRaises(ValueError):
-            reference.render_jobs(reference.parse_args(["--focus", "5", "5"]))
+            reference.render_jobs(reference.parse_args(["--focus", "5", "5", "--fstops", "1.4"]))
         for argv in [["--focus", "nan"], ["--focus", "0.01"], ["--fstops", "0"],
                      ["--samples", "0"], ["--width", "0"], ["--lens", "inf"], ["--sensor-height", "0"]]:
             with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

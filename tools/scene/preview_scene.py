@@ -178,7 +178,7 @@ def render(scene, geometry, width, height, focus_override=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scene", default="scene/alley.scene")
+    parser.add_argument("--scene", default="scene/cafe.scene")
     parser.add_argument("--output", default="output/scene_preview.png")
     parser.add_argument("--width", type=int, default=600)
     parser.add_argument("--height", type=int, default=600)

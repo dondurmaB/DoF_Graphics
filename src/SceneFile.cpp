@@ -36,11 +36,11 @@ struct Vec3d {
 // Every key takes a fixed number of floats, so parsing needs no lookahead.
 const std::map<std::string, int>& keyArity() {
     static const std::map<std::string, int> table = {
-        {"pos", 3},  {"size", 3},    {"rot", 3},  {"rgb", 3},    {"emit", 1},
-        {"seg", 1},  {"smooth", 1},  {"yaw", 1},  {"pitch", 1},  {"focus", 1},
-        {"fnumber", 1}, {"lens", 1}, {"sensor", 1}, {"dir", 3},  {"color", 3},
-        {"energy", 1}, {"angle", 1}, {"strength", 1}, {"value", 1},
-        {"lo", 3},   {"hi", 3},
+        {"pos", 3},     {"size", 3},   {"rot", 3},      {"rgb", 3},   {"emit", 1},
+        {"seg", 1},     {"smooth", 1}, {"yaw", 1},      {"pitch", 1}, {"focus", 1},
+        {"fnumber", 1}, {"lens", 1},   {"sensor", 1},   {"dir", 3},   {"color", 3},
+        {"energy", 1},  {"angle", 1},  {"strength", 1}, {"value", 1}, {"lo", 3},
+        {"hi", 3},      {"taper", 1},  {"bevel", 1},    {"width", 1}, {"height", 1},
     };
     return table;
 }
@@ -178,6 +178,8 @@ struct Primitive {
     double emit = 0.0;
     int segments = 0;
     bool smooth = true;
+    double taper = 1.0;
+    double bevel = 0.0;
 };
 
 // Unit cube: 6 faces x 4 corners, wound counter-clockwise seen from outside.
@@ -264,7 +266,80 @@ private:
         }
     }
 
+    void emitBeveledBox() {
+        // Twin of the Python physical-size chamfer; default box path is untouched.
+        const Vec3d size = current_->size;
+        const Vec3d h{size.x * .5, size.y * .5, size.z * .5};
+        const double b = current_->bevel;
+        auto polygon = [&](std::vector<Vec3d> points, Vec3d normal) {
+            Vec3d u, v;
+            for (int k = 0; k < 3; ++k) {
+                u[k] = points[1][k] - points[0][k];
+                v[k] = points[2][k] - points[0][k];
+            }
+            const Vec3d cross{u.y * v.z - u.z * v.y, u.z * v.x - u.x * v.z, u.x * v.y - u.y * v.x};
+            if (cross.x * normal.x + cross.y * normal.y + cross.z * normal.z < 0)
+                std::reverse(points.begin(), points.end());
+            std::vector<unsigned int> ids;
+            for (const auto& p : points)
+                ids.push_back(place(Vec3d{p.x / size.x, p.y / size.y, p.z / size.z},
+                                    Vec3d{normal.x * size.x, normal.y * size.y, normal.z * size.z}));
+            for (std::size_t i = 1; i + 1 < ids.size(); ++i) addTriangle(ids[0], ids[i], ids[i + 1], false);
+        };
+        for (int a = 0; a < 3; ++a) {
+            const int j = (a + 1) % 3, k = (a + 2) % 3;
+            for (double sign : {-1., 1.}) {
+                std::vector<Vec3d> points;
+                for (const auto& pair : {std::pair<int, int>{-1, -1}, {1, -1}, {1, 1}, {-1, 1}}) {
+                    Vec3d p;
+                    p[a] = sign * h[a];
+                    p[j] = pair.first * (h[j] - b);
+                    p[k] = pair.second * (h[k] - b);
+                    points.push_back(p);
+                }
+                Vec3d n;
+                n[a] = sign;
+                polygon(points, n);
+            }
+        }
+        for (const auto& axes : {std::pair<int, int>{0, 1}, {0, 2}, {1, 2}}) {
+            const int a = axes.first, j = axes.second, k = 3 - a - j;
+            for (double sa : {-1., 1.})
+                for (double sj : {-1., 1.}) {
+                    std::vector<Vec3d> points;
+                    for (const auto& pair : {std::pair<int, int>{-1, 0}, {-1, 1}, {1, 1}, {1, 0}}) {
+                        const int end = pair.first, inset = pair.second;
+                        Vec3d p;
+                        p[a] = sa * (h[a] - b * inset);
+                        p[j] = sj * (h[j] - b * (1 - inset));
+                        p[k] = end * (h[k] - b);
+                        points.push_back(p);
+                    }
+                    Vec3d n;
+                    n[a] = sa;
+                    n[j] = sj;
+                    polygon(points, n);
+                }
+        }
+        for (double sx : {-1., 1.})
+            for (double sy : {-1., 1.})
+                for (double sz : {-1., 1.}) {
+                    const Vec3d signs{sx, sy, sz};
+                    std::vector<Vec3d> points;
+                    for (int a = 0; a < 3; ++a) {
+                        Vec3d p;
+                        for (int k = 0; k < 3; ++k) p[k] = signs[k] * (h[k] - (k == a ? 0. : b));
+                        points.push_back(p);
+                    }
+                    polygon(points, signs);
+                }
+    }
+
     void emitBox() {
+        if (current_->bevel > 0.0) {
+            emitBeveledBox();
+            return;
+        }
         for (const BoxFace& face : kBoxFaces) {
             const Vec3d normal{face.normal[0], face.normal[1], face.normal[2]};
             unsigned int corner[4];
@@ -279,6 +354,9 @@ private:
 
     void emitCylinder() {
         const int segments = current_->segments;
+        const double topRadius = 0.5 * current_->taper;
+        // r changes over a unit height. The radial profile derivative sets Ny.
+        const double slope = 0.5 - topRadius;
         std::vector<double> angles(static_cast<std::size_t>(segments));
         for (int index = 0; index < segments; ++index) {
             angles[static_cast<std::size_t>(index)] = 2.0 * M_PI * index / segments;
@@ -289,14 +367,14 @@ private:
             bottom.reserve(static_cast<std::size_t>(segments));
             top.reserve(static_cast<std::size_t>(segments));
             for (const double angle : angles) {
-                const Vec3d direction{std::cos(angle), 0.0, std::sin(angle)};
+                const Vec3d direction{std::cos(angle), slope, std::sin(angle)};
                 bottom.push_back(place(Vec3d{0.5 * direction.x, -0.5, 0.5 * direction.z}, direction));
-                top.push_back(place(Vec3d{0.5 * direction.x, 0.5, 0.5 * direction.z}, direction));
+                top.push_back(place(Vec3d{topRadius * direction.x, 0.5, topRadius * direction.z}, direction));
             }
             for (int index = 0; index < segments; ++index) {
                 const std::size_t self = static_cast<std::size_t>(index);
                 const std::size_t next = static_cast<std::size_t>((index + 1) % segments);
-                addTriangle(bottom[self], top[self], top[next], true);
+                if (topRadius > 0.0) addTriangle(bottom[self], top[self], top[next], true);
                 addTriangle(bottom[self], top[next], bottom[next], true);
             }
         } else {
@@ -305,25 +383,28 @@ private:
                 const double b = angles[static_cast<std::size_t>((index + 1) % segments)];
                 // The seam quad wraps past 2*pi, so its mid-angle needs the turn added.
                 const double mid = index + 1 < segments ? 0.5 * (a + b) : 0.5 * (a + b + 2.0 * M_PI);
-                const Vec3d faceNormal{std::cos(mid), 0.0, std::sin(mid)};
+                const Vec3d faceNormal{std::cos(mid), slope * std::cos(M_PI / segments), std::sin(mid)};
                 const unsigned int quad[4] = {
                     place(Vec3d{0.5 * std::cos(a), -0.5, 0.5 * std::sin(a)}, faceNormal),
-                    place(Vec3d{0.5 * std::cos(a), 0.5, 0.5 * std::sin(a)}, faceNormal),
-                    place(Vec3d{0.5 * std::cos(b), 0.5, 0.5 * std::sin(b)}, faceNormal),
+                    place(Vec3d{topRadius * std::cos(a), 0.5, topRadius * std::sin(a)}, faceNormal),
+                    place(Vec3d{topRadius * std::cos(b), 0.5, topRadius * std::sin(b)}, faceNormal),
                     place(Vec3d{0.5 * std::cos(b), -0.5, 0.5 * std::sin(b)}, faceNormal),
                 };
-                addTriangle(quad[0], quad[1], quad[2], false);
+                if (topRadius > 0.0) addTriangle(quad[0], quad[1], quad[2], false);
                 addTriangle(quad[0], quad[2], quad[3], false);
             }
         }
 
         for (const double sign : {1.0, -1.0}) {
+            const double radius = sign > 0.0 ? topRadius : 0.5;
+            if (radius == 0.0) continue;
             const Vec3d normal{0.0, sign, 0.0};
             const unsigned int center = place(Vec3d{0.0, 0.5 * sign, 0.0}, normal);
             std::vector<unsigned int> ring;
             ring.reserve(static_cast<std::size_t>(segments));
             for (const double angle : angles) {
-                ring.push_back(place(Vec3d{0.5 * std::cos(angle), 0.5 * sign, 0.5 * std::sin(angle)}, normal));
+                ring.push_back(
+                    place(Vec3d{radius * std::cos(angle), 0.5 * sign, radius * std::sin(angle)}, normal));
             }
             for (int index = 0; index < segments; ++index) {
                 const std::size_t self = static_cast<std::size_t>(index);
@@ -467,8 +548,9 @@ void parseShadow(const std::vector<std::string>& tokens, std::size_t lineNumber,
 
 Primitive parsePrimitive(const std::string& kind, const std::vector<std::string>& tokens,
                          std::size_t lineNumber) {
-    static const std::set<std::string> boxKeys = {"pos", "size", "rot", "rgb", "emit"};
-    static const std::set<std::string> cylinderKeys = {"pos", "size", "rot", "rgb", "emit", "seg", "smooth"};
+    static const std::set<std::string> boxKeys = {"pos", "size", "rot", "rgb", "emit", "bevel"};
+    static const std::set<std::string> cylinderKeys = {"pos",  "size", "rot",    "rgb",
+                                                       "emit", "seg",  "smooth", "taper"};
     static const std::set<std::string> sphereKeys = {"pos", "size", "rot", "rgb", "emit", "seg"};
 
     Primitive primitive;
@@ -487,6 +569,17 @@ Primitive parsePrimitive(const std::string& kind, const std::vector<std::string>
     if (has(found, "rgb")) primitive.rgb = vectorOf(found, "rgb");
     if (has(found, "emit")) primitive.emit = scalarOf(found, "emit");
     if (has(found, "seg")) primitive.segments = static_cast<int>(scalarOf(found, "seg"));
+    if (has(found, "bevel")) primitive.bevel = scalarOf(found, "bevel");
+    if (primitive.bevel < 0.0 ||
+        (primitive.bevel > 0.0 &&
+         primitive.bevel >= .5 * std::min({primitive.size.x, primitive.size.y, primitive.size.z}))) {
+        throw SceneParseError(lineTag(lineNumber) +
+                              "bevel must be nonnegative and less than half each positive size");
+    }
+    if (has(found, "taper")) primitive.taper = scalarOf(found, "taper");
+    if (primitive.taper < 0.0 || primitive.taper > 8.0) {
+        throw SceneParseError(lineTag(lineNumber) + "taper must be between 0 and 8");
+    }
     if (has(found, "smooth")) primitive.smooth = scalarOf(found, "smooth") != 0.0;
 
     for (int axis = 0; axis < 3; ++axis) {
@@ -532,12 +625,37 @@ bool parseSceneText(const std::string& text, SceneDescription& scene, std::strin
                     throw SceneParseError(lineTag(lineNumber) + "key 'version' needs 1 number(s)");
                 }
                 const double value = toNumber(tokens[0], lineNumber, "version");
-                if (static_cast<int>(value) != 1) {
+                if (value != 1.0) {
                     throw SceneParseError(lineTag(lineNumber) + "scene version " + tokens[0] + " is not 1");
                 }
                 seenVersion = true;
             } else if (kind == "camera") {
                 parseCamera(tokens, lineNumber, scene.camera);
+            } else if (kind == "capture") {
+                const auto found = readKeyValues(tokens, lineNumber, {"width", "height"});
+                for (const auto& key : {"width", "height"})
+                    if (has(found, key)) {
+                        const double value = scalarOf(found, key);
+                        if (value != std::floor(value) || value < 16 || value > 8192)
+                            throw SceneParseError(lineTag(lineNumber) +
+                                                  "capture dimensions must be integers in [16,8192]");
+                        (std::string(key) == "width" ? scene.captureWidth : scene.captureHeight) =
+                            static_cast<int>(value);
+                    }
+            } else if (kind == "imported") {
+                const auto found = readKeyValues(tokens, lineNumber, {"pos", "rot", "size", "rgb"});
+                auto assign = [&](const char* key, SceneVec3& dest) {
+                    if (has(found, key)) {
+                        const auto v = vectorOf(found, key);
+                        dest = {static_cast<float>(v.x), static_cast<float>(v.y), static_cast<float>(v.z)};
+                    }
+                };
+                assign("pos", scene.importPosition);
+                assign("rot", scene.importRotation);
+                assign("size", scene.importScale);
+                assign("rgb", scene.importAlbedo);
+                if (scene.importScale.x <= 0 || scene.importScale.y <= 0 || scene.importScale.z <= 0)
+                    throw SceneParseError(lineTag(lineNumber) + "imported size must be positive");
             } else if (kind == "sun") {
                 parseSun(tokens, lineNumber, scene.sun);
             } else if (kind == "ambient") {

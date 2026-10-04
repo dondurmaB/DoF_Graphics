@@ -21,3 +21,6 @@
 | 17 | [Shading, Shadows, and Live UI](17_shading_shadows_and_ui.md) | Add per-object normals, a PCF shadow map, a 100-tap Vogel gather, and a Dear ImGui parameter panel. |
 | 18 | [Shared Scene File, Alley Scene, HDR Gather, Compact UI](18_alley_scene_and_ui.md) | Author the environment once and load it in both renderers; gather in linear HDR; fix the CoC diameter/radius error. |
 | 18b | [Scene Inventory](18_scene_inventory.md) | Generated table of object sizes, depths and the blur each depth produces. Regenerate with `tools/scene/scene_report.py`. |
+
+Current development checkpoint: [Café Phase 1 and matched-light validation](cafe_phase1.md).
+This is not a completed five-phase ground-truth pipeline or a new archived experiment.

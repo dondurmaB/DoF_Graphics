@@ -68,114 +68,80 @@ Run:
 ./build/DepthResearch
 ```
 
-## Start Here
+## Current checkpoint: café and matched lighting
 
-[`notes/EXPLAINER.md`](notes/EXPLAINER.md) explains the whole project in one read: what depth of
-field is physically, how the OpenGL gather and the Cycles path tracer each produce it, why the two
-can be compared, and everything that changed in experiment 18. Object sizes and depths are in
-[`notes/graphics/18_scene_inventory.md`](notes/graphics/18_scene_inventory.md).
+Start with [the Phase 1 report](notes/graphics/cafe_phase1.md), including framing arithmetic,
+linear-light measurements, images and unfinished phases. The accepted starting point was
+`dof-research 3`; previous café attempts were not reused. Previous experiment archives are unchanged.
 
-## The Scene
-
-The environment is a dusk back-alley described once in `scene/alley.scene` and loaded by **both**
-renderers: by `src/SceneFile.cpp` for the OpenGL pass and by `tools/scene/scene_loader.py` for the
-Cycles reference in `tools/raytraced_reference/render_dof.py`. Neither one authors geometry, so the
-two cannot drift apart and end up comparing different scenes.
-
-There are no image textures. Every surface detail is real geometry (mortar courses, protruding
-bricks, crate panels, railings), which keeps the two renderers matching exactly and makes every
-shadow a real shadow.
+`scene/cafe.scene` supplies geometry, camera, lighting, capture dimensions and optional imported
+transform to both `src/SceneFile.cpp` and `tools/scene/scene_loader.py`. Geometry is generated once
+by Python; renderers only load it. The alley remains a regression scene.
 
 ```sh
-python3 tools/scene/build_alley.py      # regenerate scene/alley.scene
-python3 tools/scene/preview_scene.py    # CPU preview PNG; needs no GPU
+python tools/scene/build_cafe.py
+./build/DepthResearch                         # café, 50 mm, focus 2.5 m, f/1.2
+./build/DepthResearch --scene scene/alley.scene
+python tools/scene/preview_scene.py           # CPU framing preview, no shadows or DoF
+ctest --test-dir build --output-on-failure
 ```
 
-Single-line tweaks can be made directly in `scene/alley.scene` and reloaded in the running
-renderer with `L`. Larger changes belong in `build_alley.py`, which regenerates the file
-deterministically. After regenerating, refresh the cross-language test numbers:
+The café has a finite table, identical 110 mm cups at view depths 2.5/4/6/9/12 m, curved foliage,
+round chair stock, chamfered fixtures, and HDR emitters. Cup/pot bodies are single frusta.
+The shader remains diffuse-only: the measured GGX/Schlick-to-Cycles Glossy mapping failed.
 
-```sh
-python3 tests/test_scene_file.py --print-expected
-```
-
-## Expected Result
-
-A window titled `DOF_Research` should open and display the alley through the active rendering path.
-The project includes an interactive camera, depth testing, model/view/projection matrices, depth and
-circle-of-confusion visualization modes, a shadow map, an HDR off-screen framebuffer, and a
-defocus-gather presentation pass. The terminal prints setup diagnostics: the loaded scene's
-primitive/triangle counts and bounds, the sun and sky values, the shadow-map resolution in
-centimetres per texel, and the scene framebuffer size.
-
-Press Escape or close the window to exit.
+Matched lighting is `albedo * (ambient + sun * max(N.L,0) * visibility / pi)`.
+Cycles adds the ambient as primary-camera-only fill; it is intentionally non-physical.
+Geometry, camera and the direct shading equation match by construction and tests.
+Shadow visibility, pixel filtering, finite precision, and DoF integration still differ.
+`--full-gi` on the Blender tool selects physical indirect transport, explicitly not comparable.
 
 ## Controls
 
-The cursor is free on launch so the panel is immediately clickable. The button at the top of the
-panel switches between "pointer for the panel" and "camera follows the mouse"; `Tab` does the same
-from the keyboard. While the camera has the mouse the panel cannot be clicked, so `Tab` is the way
-back, and the panel says so in that mode. Holding the right mouse button is still available as a
-quick look-around without toggling.
-
-| Key | Action |
+| Input | Action |
 |---|---|
-| `1`-`6` | Color, raw depth, linear depth, CoC magnitude, CoC signed, basic DoF |
-| `0` | Split view: sharp on the left of the divider, defocused on the right |
-| `7` `8` `9` | Focus 2 m / 5 m / 15 m |
-| `F` `B` | Toggle f/1.4 and f/8 / set f/2.8 |
-| `T` | Reference preset: 50 mm f/1.4 focused 5 m, matching the Cycles jobs |
-| `K` | Strong-DoF preset: 85 mm f/1.4 focused 1.6 m, an unmistakable blur |
-| `L` | Reload `scene/alley.scene` |
-| `R` | Reset the camera to the scene file's pose |
-| `[` `]` | Focal length -/+5 mm |
-| `,` `.` | Sensor height -/+2 mm |
-| `V` | Physical / legacy projection |
-| `WASD` | Move |
-| `G` | Cycle the panel: compact -> full -> hidden |
-| `Tab` | Free / capture the mouse |
-| `P` | Screenshot: `output/latest.png` plus a settings-named copy such as `output/gl_focus5m_f1.4.png` |
-| `H` | Print the key list |
+| `1`–`6` | Sharp color, raw depth, linear depth, CoC magnitude, CoC signed, basic DoF |
+| `0` | Sharp/DoF split view |
+| Aperture buttons | f/1.2, 1.4, 2, 2.8, 4, 5.6, 8, 11, 16, 22 |
+| `K` | Original scene framing, focus and lens at f/1.2 |
+| `T` | Restore scene camera and lens defaults |
+| `7` / `8` / `9` | Focus 2 / 5 / 15 m (panel also has the café's 2.5 m) |
+| `F` / `B` | Legacy f/1.4↔f/8 toggle / f/2.8 |
+| `L` / `R` | Reload selected scene / reset camera pose |
+| WASD, right mouse | Move / look |
+| `Tab`, `G` | Capture/free pointer; cycle compact/full/hidden panel |
+| `[` / `]`, `,` / `.` | Change focal length; sensor height |
+| `P` | Save UI-free interactive screenshot and settings-tagged copy |
+| Escape | Exit |
 
-The panel reports the circle-of-confusion radius the current lens settings actually reach next to
-the configured ceiling. That readout matters: at 50 mm f/1.4 focused 5 m the background CoC radius
-is only about 9 px, so the 120 px ceiling does nothing and the panel says "lens-limited". Press `K`
-for settings that produce a large blur. See
-[notes/graphics/18_alley_scene_and_ui.md](notes/graphics/18_alley_scene_and_ui.md) for the numbers.
+The CoC display is labelled as a **near/far plane bound**, not the maximum present in the image.
+The radius ceiling is computed for the widest aperture at the current resolution/lens/focus.
+The original 100-tap gather is still the baseline; an improved gather is pending.
 
-## Comparing the Two Renderers
+## Reproducible inspection captures
 
 ```sh
-# 1. Cycles references -> reports/raytraced_dof/rt_*.png (+ sidecar JSON)
-/Applications/Blender.app/Contents/MacOS/Blender --background --python-exit-code 1 \
-  --python tools/raytraced_reference/render_dof.py
-
-# 2. OpenGL captures: run the renderer, press T then 6, then P. Repeat for F and B.
-#    Writes output/gl_focus5m_f1.4.png, matching the reference's name.
-
-# 3. Pair, check and measure
-python3 tools/compare/compare_renders.py --write-images
+./build/DepthResearch --batch --sharp --output output/sharp.png
+./build/DepthResearch --batch --fstop 1.2 --output output/wide-open.png
+./build/DepthResearch --dry-run
+python tools/raytraced_reference/render_dof.py --dry-run
+python tools/verify/check_cafe.py --dry-run
+python tools/verify/check_cafe.py
+python tools/verify/measure_lighting.py --render
 ```
 
-Step 3 writes side-by-side and 4x difference images plus a metrics table to
-`reports/comparison/`. It refuses to compare a reference whose recorded scene sha256 does not
-match the scene file on disk, so a stale reference cannot silently produce plausible numbers.
+Batch renders through the normal shaders and explicitly allocated 1200×1200 pixel FBOs,
+independent of window/Retina scaling; it queries dimensions and fails on mismatch. `--width`
+and `--height` override the shared scene size. `--scene`, `--lens`, `--sensor-height`, `--focus`,
+`--fstop`, `--x`, `--y`, `--z`, `--yaw`, and `--pitch` support inspection views. `--import-mesh`
+is required to add the OBJ. A companion `.linear.pfm` is the **sharp pre-lens** radiance buffer,
+not the defocused output. Interactive screenshots still use actual window framebuffer size.
 
-## Tests
-
-```sh
-cmake --build build && ctest --test-dir build
-```
-
-`scene_file` and `scene_file_python` are two halves of one check: the C++ and Python scene loaders
-are compared against the same expected geometry numbers, so changing one without the other fails
-with the exact number that moved.
-
-## Development Workflow
-
-The renderer opens as a separate native macOS GLFW window. VS Code cannot directly embed this running GLFW/OpenGL context, so the window is intentionally sized and positioned to sit beside the editor.
-
-Press `P` while the render window is focused to save the current frame to `output/latest.png`. The screenshot uses the actual OpenGL framebuffer size, so Retina / HiDPI screenshots preserve the real rendered resolution. You can open `output/latest.png` directly inside VS Code for inspection.
+`check_cafe.py` produces scene-camera aperture extremes, two wide inspection views, a machine
+close-up and low-sample Cycles renders. It is a Phase 1 inspection runner, **not** the planned
+convergence-certified reference/comparison pipeline. See [Cycles instructions](tools/raytraced_reference/README.md).
+The legacy PNG comparison now fails with no usable pairs and reports stale hashes truthfully;
+it remains a display-space diagnostic, not a linear HDR benchmark or proof of matching cameras.
 
 ## macOS Notes
 

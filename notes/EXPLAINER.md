@@ -1,4 +1,11 @@
-# How this project works, and what changed
+# Experiment 18 explanation (historical baseline)
+
+> Current code is described in [the café checkpoint report](graphics/cafe_phase1.md).
+> This document records the accepted Experiment 18 baseline, including its old 120 px
+> ceiling, duplicated reference defaults and occluded-world/unoccluded-fill mismatch.
+> Aggregate geometry tests are regression checks, not a proof of full renderer equivalence.
+> Current matched mode fixes the fill but still differs in shadow/pixel visibility and lens integration.
+> Cycles inspection images are not convergence-certified ground truth.
 
 Written to be read start to finish before a meeting. It covers what depth of field is
 physically, how each of the two renderers produces it, why they can be compared at all, and
