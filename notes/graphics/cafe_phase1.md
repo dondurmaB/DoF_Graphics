@@ -1,8 +1,8 @@
 # Café checkpoint: Phase 1, with matched-light validation
 
-Status: stopping at the Phase 1 review point authorized in the brief. Scene/model work and the lighting needed to judge it are implemented and inspected. Phases 3–5 are **not complete**: there is no convergence-certified ground truth, improved gather, or complete reference/capture/comparison orchestrator. Some shared settings, capture, filename and comparison fixes needed for inspection are already in place.
+Status: stopping at the Phase 1 review point authorized in the brief. Scene/model work and the lighting needed to judge it are implemented. Phases 3–5 are **not complete**: there is no convergence-certified ground truth, improved gather, or complete reference/capture/comparison orchestrator. Some shared settings, capture, filename and comparison fixes needed for inspection are already in place.
 
-Implementation is in `dof-research-stage2-work`, copied from the accepted `dof-research 3`. That baseline and all previous experiment archives remain unchanged. No rejected café folder was used. The separate repository clone is checked out cleanly at that commit in detached HEAD state; no branch base has been chosen. No push, merge or PR was made. Local commits await the requested confirmation of how to reconcile the baseline with the cloned repository's `origin/main` at `51b5e50f88e50946ff682c53228563e1a695c0fd`.
+The Git-backed rebuild branch is `stage2/cafe-rebuild`, starting from `origin/main` at `51b5e50f88e50946ff682c53228563e1a695c0fd`. The accepted `dof-research 3` baseline was restored as its own local commit, the Phase 1 café checkpoint as a second commit, and this decoration/comparison-settings update as a third commit. No push, merge or PR was made. No rejected café folder was used, and previous experiment archives remain unchanged.
 
 ## Resolution finding
 
@@ -10,7 +10,18 @@ The baseline requested a **1200×1200 logical GLFW window**, not a fixed capture
 
 Both renderers now read `capture width 1200 height 1200` from `scene/cafe.scene`. Batch OpenGL allocates a presentation FBO in pixels, uses the normal scene/shadow/postprocess passes, queries its attachment dimensions, and fails on mismatch/incompleteness. Verified PNG headers and FBO logs: **1200×1200**, plus **321×245** for an odd non-square test. Interactive windows still follow the actual drawable size.
 
-For 85 mm, f/1.2, focus 1.6 m, the infinity CoC radius is **99.3537 px at H=1200**, but **137.6049 px at H=1662**. The old 120 px cap would clip the latter. The new ceiling is derived from the selected lens/focus/resolution and the widest ladder stop (or a wider explicit CLI value). Since signed CoC is monotonic in `1/depth`, its maximum magnitude on `[near,far]` occurs at an endpoint. For the café at 1200 px, f/1.2 and focus 2.5 m, that conservative near/far bound is **510.2041 px**; it is **not** a claim that any café pixel blurs that much. The UI now says near/far bound.
+For 85 mm, f/1.2, focus 1.6 m, the infinity CoC radius is **99.3537 px at H=1200**, but **137.6049 px at H=1662**. The old 120 px cap would clip the latter. The new ceiling is derived from the selected lens/focus/resolution and the widest ladder stop (or a wider explicit CLI value). Since signed CoC is monotonic in `1/depth`, its maximum magnitude on `[near,far]` occurs at an endpoint. For the café at 1200 px, 50 mm, f/1.2 and focus 2.5 m, that conservative near/far bound is **510.2041 px**; it is **not** a claim that any café pixel blurs that much. The UI now says near/far bound.
+
+The comparison defaults were changed because the inherited 50 mm view did not blur the background enough for method comparison. At 1200×1200, focus 2.5 m:
+
+| Lens / stop | Foreground foliage 1.3 m | Hero cup 2.5 m | Mid cup 6 m | Far wall 15 m | Far plane 100 m |
+|---|---:|---:|---:|---:|---:|
+| 50 mm f/1.2 | 19.62 px | 0.00 px | 12.40 px | 17.72 px | 20.73 px |
+| 50 mm f/22 | 1.07 px | 0.00 px | 0.68 px | 0.97 px | 1.13 px |
+| 85 mm f/1.2 | 57.53 px | 0.00 px | 36.36 px | 51.94 px | 60.77 px |
+| 85 mm f/22 | 3.14 px | 0.00 px | 1.98 px | 2.83 px | 3.31 px |
+
+The default comparison job is now **85 mm, focus 2.5 m, f/1.2 and f/22**. The f/1.2 job makes far-background error obvious; f/22 is the near-pinhole control, not a replacement for a reference stop. The 85 mm f/1.2 near/far ceiling is **1495.86 px**, while the actual far-plane radius is **60.77 px**, so the comparison blur is not ceiling-clipped. OpenGL comparison captures request **192 taps** through `--coc-samples`; the shader maximum remains 256 taps.
 
 ## Framing and geometry
 
@@ -30,7 +41,9 @@ The complete arithmetic precedes placement in `tools/scene/build_cafe.py`'s docs
 
 With eye `(0,0,5)`, downward pitch `p`, and `dz=5-z`, view depth is `D=dz cos(p)-y sin(p)` and screen vertical is `V=dz sin(p)+y cos(p)`. The 78 cm table is 72 cm below the eye and ends after 88 cm. Its near edge stays in frame for pitch above about 6.4°; useful back-wall content at y=1.2 m stays in frame below about 8.9°. Chosen pitch: **8°**, deliberately cropping the highest ~16 cm of wall.
 
-The 110 mm cup has a 70 mm base and 94.5 mm top. Five identical cups sit at measured view depths **2.5, 4, 6, 9, 12 m**. Each body is one frustum, with a separate saucer, coffee surface and rolled rim. Small emitters at additional depths have radiance up to **20**. Both final sharp linear buffers were measured to retain a peak of **20.0**, confirming that the HDR path did not clip them to 1. Foreground foliage is around 1.3 m. The service counter is lateral and distant; it is not a receding near-eye bar.
+The 110 mm cup has a 70 mm base and 94.5 mm top. Five identical cups sit at measured view depths **2.5, 4, 6, 9, 12 m**. Each body is one frustum, with a separate saucer, coffee surface and rolled rim. Small emitters at additional depths have radiance up to **20**. Both final sharp linear buffers from the previous Phase 1 inspection retained a peak of **20.0**, confirming that the HDR path did not clip them to 1. Foreground foliage is around 1.3 m. The service counter is lateral and distant; it is not a receding near-eye bar.
+
+The decoration pass adds detail only in useful sightlines: a far-wall menu board, framed prints, hanging mugs, shelf tins, a till/card reader, water station, cake stand, counter labels, mid-depth condiment caddies, and trailing plants. These additions target visually spare depths and high-contrast far-wall/background detail while leaving the hero cup and focus plane readable.
 
 Near cup silhouettes use 64 segments (~0.057 px radial sagitta at 1200 px); the hero table uses 128 (~0.13 px). Round stock spans endpoints using the scene's actual `Ry*Rx*Rz` convention. Brightness jitter is scalar by default. Leaves are thick, smooth ellipsoids. Selected box edges have physical-metre chamfers. Bent stock is still a segmented approximation, not a manufactured CAD surface.
 
@@ -51,9 +64,9 @@ Emitters instead return `albedo * emission`; the background returns `A`. OpenGL 
 
 Cycles matched mode uses Lambert diffuse plus **primary-camera-only unoccluded fill emission**, disables mesh-light sampling for that fill, uses a camera-visible-only world, and disables indirect diffuse/glossy/transmission continuation. The fill is intentionally non-physical. Simply setting diffuse bounces to zero and disabling mesh-light sampling was insufficient: ordinary fill emission still brightened the café by about 12–23% in sampled regions. Restricting its visibility to primary camera rays removed that error.
 
-Reproduction: `python tools/verify/measure_lighting.py --render`. Radiance measurements use GL's pre-lens half-float buffer read as float32 and Cycles' sharp 32-bit linear EXR/PFM. Calibration uses 64² pixels, 32 samples, no denoiser; café checks use 1200², 128 samples, no denoiser. RGB means:
+Reproduction: `python tools/verify/measure_lighting.py --render`. Radiance measurements use GL's pre-lens half-float buffer read as float32 and Cycles' sharp 32-bit linear EXR/PFM. Calibration uses 64² pixels, 32 samples, no denoiser; café checks use 1200², 128 samples, no denoiser. The previously reported “below 0.063%” number was **not** a display-space percentage and **not** a median. It was the largest RGB-channel relative difference of **patch means**, measured in scene-linear radiance against the Cycles matched-light result:
 
-| Patch | OpenGL | Cycles | Largest channel relative difference |
+| Patch | OpenGL mean | Cycles mean | Largest channel relative difference of means |
 |---|---|---|---:|
 | Ambient only | .0999756, .0799561, .0599976 | .1000000, .0800000, .0600000 | 0.0549% |
 | Unit sun only | .1590576, .1273193, .0954590 | .1591549, .1273239, .0954930 | 0.0611% |
@@ -64,7 +77,18 @@ Reproduction: `python tools/verify/measure_lighting.py --render`. Radiance measu
 
 The sealed room using physical world illumination instead returned **[0,0,0]** in Cycles while GL still returned its unoccluded fill. This reproduces the interior-lighting trap numerically. The café window is an actual open aperture, with no opaque emissive pane. Sunlit tables and wall patches in the rendered images confirm sunlight reaches the interior.
 
-Agreement is established on these flat patches, within the GL half-float precision scale. It does **not** prove pixel-identical visibility: biased 3×3 PCF shadows at 4096² differ from Cycles ray intersections; raster coverage, sample filtering, floating-point storage, smooth-normal handling, and lens integration also differ. `--full-gi` restores world/indirect/emitter illumination, is labelled `full_gi_not_comparable`, and has finite bounce limits. It is not an equivalent benchmark.
+Agreement is established on these flat patches, within the GL half-float precision scale. That result is matched by construction for the shared direct-light equation, shared camera/fill constants, and camera-only ambient fill. It is numerical evidence for the selected flat ROIs, not proof that every scene pixel or future geometry will match. The previous artifact did not record a worst-case per-pixel error; `tools/verify/measure_lighting.py` now writes `max_per_pixel_channel_relative_error` and its `[y,x,channel]` location so the next render can answer that separately from mean agreement. Biased 3×3 PCF shadows at 4096² differ from Cycles ray intersections; raster coverage, sample filtering, floating-point storage, smooth-normal handling, and lens integration also differ. `--full-gi` restores world/indirect/emitter illumination, is labelled `full_gi_not_comparable`, and has finite bounce limits. It is not an equivalent benchmark.
+
+## Confirmed baseline fixes
+
+- Loader grammar symmetry: C++ and Python reject empty geometry, trailing/fractional version tokens, repeated keys, invalid finite values, and unsupported keys consistently.
+- Filename pairing contract: C++ and Python both encode focus, aperture, non-50 mm lens and sharp mode; tests exercise both implementations.
+- No usable pairs: the comparison tool fails instead of writing an empty success report.
+- `--allow-stale`: stale scene hashes are reported as unverified rather than certified.
+- Max-CoC readout: the UI says near/far bound and computes the radius ceiling from current lens/focus/resolution.
+- Blender camera/lens duplication: camera pose, capture size, import transform and scene summary come from the shared scene; the default café comparison lens is an explicit 85 mm override, and non-default scenes inherit their own lens.
+- Imported mesh opt-in: the OBJ is still off by default and only appears with `--import-mesh`.
+- Documentation: old ground-truth/equivalent-reference claims were replaced with `ground_truth: false` and matched-light inspection wording.
 
 ## Specular investigation: rejected mapping
 
@@ -76,35 +100,35 @@ This rejects the tested mapping; it does not prove an exact matched BRDF is impo
 
 ## Inspection images and observed limits
 
-These are actual production renderer captures made with approved macOS services. The initial sandboxed Blender launch crashed; the completed images below were not produced by a mocked renderer. All files are local, generated and ignored by Git.
+The previous Phase 1 images were actual production renderer captures made with approved macOS services. The new decoration/comparison settings build and dry-run correctly, but the latest automated OpenGL batch capture in this sandbox hung after macOS window-service warnings before FBO completion. Fresh decorated images therefore still need local visual review.
 
 - [Wide front, 22 mm](../../output/verification/gl_wide_front.png)
 - [Wide corner, 24 mm](../../output/verification/gl_wide_corner.png)
 - [Espresso machine placement](../../output/verification/gl_machine.png)
 - [Scene, sharp OpenGL](../../output/verification/gl_scene.png)
-- [Scene, OpenGL f/1.2](../../output/verification/gl_f1.2.png)
-- [Scene, OpenGL f/22](../../output/verification/gl_f22.png)
-- [Cycles f/1.2](../../output/verification/cycles/rt_focus2.5m_f1.2.png)
-- [Cycles f/22](../../output/verification/cycles/rt_focus2.5m_f22.png)
-- [Cycles sharp](../../output/verification/cycles/rt_focus2.5m_f1.2_sharp.png)
+- [Scene, OpenGL f/1.2 from previous Phase 1 run](../../output/verification/gl_f1.2.png)
+- [Scene, OpenGL f/22 from previous Phase 1 run](../../output/verification/gl_f22.png)
+- [Cycles f/1.2 from previous Phase 1 run](../../output/verification/cycles/rt_focus2.5m_f1.2.png)
+- [Cycles f/22 from previous Phase 1 run](../../output/verification/cycles/rt_focus2.5m_f22.png)
+- [Cycles sharp from previous Phase 1 run](../../output/verification/cycles/rt_focus2.5m_f1.2_sharp.png)
 
 Inspected several angles for support/placement: the machine feet meet the counter, cups meet the drip tray, pot meets its side table, and canisters meet shelves. No obvious floating props or appliance-crossing luminous panel was found. Intentional joins/intersections remain at assembled furniture and plant stems; this is not a watertight manufacturing model.
 
-The focus cup remains sharp; repeated cups blur progressively at f/1.2 and are much sharper at f/22. The old **100-tap gather is unchanged**. Structured highlight sampling, foreground/background bleeding and hard/soft silhouette disagreement are visible in these wide-open captures. Shadow bias and raster aliasing are also visible. Cycles bokeh has visible Monte Carlo noise at 128 samples. These effects must not be conflated.
+In the previous run, the focus cup remained sharp; repeated cups blurred progressively at f/1.2 and were much sharper at f/22. The baseline gather is unchanged, but comparison captures now request **192 taps**. Structured highlight sampling, foreground/background bleeding and hard/soft silhouette disagreement remain expected limitations. Shadow bias and raster aliasing are also expected. Cycles bokeh has visible Monte Carlo noise at 128 samples. These effects must not be conflated.
 
 ## Ground-truth status and cost
 
 Current Cycles captures: 128 uniform samples, explicit seed 16, denoiser off, adaptive off, direct/indirect clamps 0, max bounces 12, matched diffuse/glossy/transmission continuation 0; 32-bit linear RGB EXR plus PNG preview/PFM companion/JSON. Sidecars explicitly record **`ground_truth: false`**. No independent second pass or measured error bar was produced. The corrected future estimator is `std(N − N/2) / sqrt(3)` because independent variances `c/N + c/(N/2) = 3c/N`; no numeric uncertainty is claimed here.
 
-Final café: **1,415 primitives; 132,875 vertices; 131,636 triangles**, including 18,384 emissive and 79,696 smooth triangles. Bounds: `(-3.12,-1.59,-10.12)` to `(3.12,1.70,5.10)`. Scene SHA-256: `01b3320c4ea3c374c1ff5f028ffb3032243f06fcd8d9c235e7a53bc5de67348a`. Alley pins remain 2,551 / 66,802 / 38,572.
+Decorated café: **1,967 primitives; 169,652 vertices; 169,432 triangles**, including 18,384 emissive and 102,872 smooth triangles. Bounds: `(-3.12,-1.59,-10.12)` to `(3.12,1.70,5.10)`. Scene SHA-256: `7d94d62a7512534b53d0befeb643fdcceff2e42f1a31b17a5077b221af7102ae`. Alley pins remain 2,551 / 66,802 / 38,572. The decoration pass added 37,796 triangles and stayed below the 250k budget.
 
-On this Apple M4 Max, 1200² OpenGL means over 20 warm frames after four warm-ups, including an explicit `glFinish` and CPU submission but excluding image I/O: **0.668 ms sharp**, **2.000 ms f/1.2**, **3.036 ms f/22**. The static shadow map is cached; its initial construction is excluded. These short measurements vary with scheduling and are not a sustained benchmark. Cycles/Metal inspection render-and-output times were **2.513 s f/1.2**, **1.558 s f/22**, **1.533 s sharp**, excluding initial process/scene setup. None are convergence-certified reference costs.
+Previous 131,636-triangle Phase 1 OpenGL means over 20 warm frames after four warm-ups, including an explicit `glFinish` and CPU submission but excluding image I/O: **0.668 ms sharp**, **2.000 ms f/1.2**, **3.036 ms f/22**. The static shadow map was cached; its initial construction was excluded. A fresh cost for the decorated 169,432-triangle scene, including the initial shadow pass as requested, was **not measured** in this sandbox because the batch runtime hung after macOS window-service warnings. Do not use the old timing as the new scene's cost. Cycles/Metal inspection render-and-output times from the previous run were **2.513 s f/1.2**, **1.558 s f/22**, **1.533 s sharp**, excluding initial process/scene setup. None are convergence-certified reference costs.
 
 ## Tests and file changes
 
-Build passed with AppleClang 17 / C++17. CMake emitted existing cached-GLM minimum-version deprecation notices. **8/8 CTest suites passed**: mesh loading, physical camera, C++ scene grammar/geometry, comparison failure handling, executable filename contract, per-vertex cross-loader equivalence, reference configuration, Python scene grammar/geometry. Python suites contain 35 individual tests. Both scenes retain full winding/unit-normal/aggregate checks; existing tolerances were not relaxed. Blender 5.2.2 LTS / Metal was exercised; older-version fallbacks were not.
+Build passed with AppleClang 17 / C++17. CMake emitted existing cached-GLM minimum-version deprecation notices. **8/8 CTest suites passed** after the decoration/settings update: mesh loading, physical camera, C++ scene grammar/geometry, comparison failure handling, executable filename contract, per-vertex cross-loader equivalence, reference configuration, Python scene grammar/geometry. Python suites contain 35 individual tests. Both scenes retain full winding/unit-normal/aggregate checks; existing tolerances were not relaxed. Blender 5.2.2 LTS / Metal was exercised in the previous Phase 1 run; the latest turn verified Blender/OpenGL command plans by dry run only.
 
-[Full unabridged CTest output](cafe_phase1_tests.txt). Scene regeneration was deterministic. OpenGL and Cycles dry runs and the Phase 1 inspection-runner dry run passed; all expected inspection outputs exist. The complete Phase 5 pipeline does not yet exist, so its dry run is **not** claimed.
+[Full unabridged CTest output](cafe_phase1_tests.txt). Scene regeneration was deterministic. OpenGL, Cycles and the Phase 1 inspection runner dry runs passed with the new 85 mm comparison names. The latest real OpenGL batch attempt did not complete in this sandbox, so no fresh decorated FBO/image verification is claimed. The complete Phase 5 pipeline does not yet exist, so its dry run is **not** claimed.
 
 | File | Change / reason |
 |---|---|
@@ -116,9 +140,9 @@ Build passed with AppleClang 17 / C++17. CMake emitted existing cached-GLM minim
 | `tools/scene/scene_loader.py` | Matching Python geometry/settings; reject empty scenes, trailing version tokens and fractional versions. |
 | `tools/scene/build_cafe.py` **new** | Framing derivation, deterministic café authoring, round stock and brightness-only jitter. |
 | `scene/cafe.scene` **new** | Generated common scene data; alley retained byte-for-byte. |
-| `src/main.cpp` | Selectable scene, opt-in import, shared transform, exact-pixel batch FBO, camera overrides, linear sharp readback, aperture buttons, honest radius bound/automatic ceiling, capture names. |
+| `src/main.cpp` | Selectable scene, opt-in import, shared transform, exact-pixel batch FBO, camera overrides, linear sharp readback, aperture buttons, honest radius bound/automatic ceiling, capture names, batch `--coc-samples`. |
 | `shaders/basic.frag` | Comments corrected to describe matched fill and visibility limits; production equation unchanged. |
-| `tools/raytraced_reference/render_dof.py` | Scene-derived camera/size/import; matched camera-only fill, full-GI switch, inspection EXR/PFM and honest metadata/names. |
+| `tools/raytraced_reference/render_dof.py` | Scene-derived camera/size/import; matched camera-only fill, full-GI switch, 85 mm café comparison defaults, inspection EXR/PFM and honest metadata/names. |
 | `tools/scene/preview_scene.py` | Default CPU preview selects café. |
 | `tools/compare/compare_renders.py` | Fail on no usable pairs; configurable scene hash; stale override report states actual verification; label PNG diagnostics honestly. |
 | `tests/scene_file.cpp`, `tests/test_scene_file.py` | Keep alley pins; add café pins, grammar cases, taper identity, frustum/chamfer checks, framing and helper tests. |
@@ -126,8 +150,8 @@ Build passed with AppleClang 17 / C++17. CMake emitted existing cached-GLM minim
 | `tests/scene_dump.cpp`, `tests/test_loader_equivalence.py` **new** | Actual C++/Python vertex attributes, indices, settings and rejection parity on a small multi-primitive fixture. |
 | `tests/capture_name.cpp`, `tests/test_capture_contract.py` **new** | Exercise both filename implementations over lenses, focus values, apertures and sharp mode. |
 | `tests/test_comparison.py` **new** | Empty/rejected/dimension-mismatched pairs fail; stale override cannot claim verification. |
-| `tools/verify/check_cafe.py` **new** | Reproducible Phase 1 inspection views; fail on renderer failure/missing output. |
-| `tools/verify/measure_lighting.py` **new** | Isolated and enclosed production-renderer calibration plus café ROI measurements. |
+| `tools/verify/check_cafe.py` **new** | Reproducible Phase 1 inspection views and 85 mm comparison pair; fail on renderer failure/missing output. |
+| `tools/verify/measure_lighting.py` **new** | Isolated and enclosed production-renderer calibration plus café ROI means and worst-pixel reporting. |
 | `tools/verify/measure_specular.py` **new** | Reproducible rejected BRDF mapping measurements. |
 | `README.md`, `tools/raytraced_reference/README.md`, `reports/raytraced_dof/README.md` | Current workflow, defaults and limitations; remove obsolete matching/ground-truth claims. |
 | `notes/EXPLAINER.md` | Mark Experiment 18 explanation as historical and point to this checkpoint. |
@@ -139,4 +163,4 @@ Build passed with AppleClang 17 / C++17. CMake emitted existing cached-GLM minim
 - Phase 3: independent convergence estimates, explicit acceptance thresholds, complete audit records and strict mode/hash rejection for quantitative comparison.
 - Phase 4: keep naive gather and add sample-own-CoC weighting, area-scaled tap counts, deterministic pixel decorrelation, and gather tags. A gather still cannot recover hidden surfaces a real lens sees around an occluder.
 - Phase 5: one settings definition driving the complete reference/capture/linear-comparison pipeline, complete output verification, fast mode and pairing checks. The current runner is inspection-only.
-- Git: confirm whether the new branch should start from current `origin/main`, restoring the accepted baseline before the implementation commits, or from an earlier agreed commit. No repository was initialized over the existing history. No commits/push/merge/PR are claimed.
+- Git: local branch only. The accepted baseline, café checkpoint, and decoration/settings update are intentionally separate commits. No push/merge/PR is claimed.

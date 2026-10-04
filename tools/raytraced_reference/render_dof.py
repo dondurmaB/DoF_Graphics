@@ -12,7 +12,9 @@ import time
 
 PREVIEW_SAMPLES = 32
 FINAL_SAMPLES = 128
-F_STOPS = (1.2, 1.4, 2.0, 2.8, 4.0, 5.6, 8.0, 11.0, 16.0, 22.0)
+DEFAULT_COMPARISON_LENS_MM = 85.0
+DEFAULT_COMPARISON_F_STOPS = (1.2, 22.0)
+F_STOPS = DEFAULT_COMPARISON_F_STOPS
 NEAR_M, FAR_M = 0.1, 100.0
 
 # One proper rotation for every world-space object: (x,y,z) -> (x,-z,y).
@@ -99,7 +101,7 @@ def parse_args(argv):
     parser.add_argument("--lens", type=float, default=None)
     parser.add_argument("--sensor-height", type=float, default=None)
     parser.add_argument("--focus", type=float, nargs="+", default=None)
-    parser.add_argument("--fstops", type=float, nargs="+", default=list(F_STOPS))
+    parser.add_argument("--fstops", type=float, nargs="+", default=None)
     parser.add_argument("--preview", action="store_true")
     parser.add_argument("--samples", type=int, help="Override preview/final sample count")
     parser.add_argument("--device", choices=("auto", "cpu"), default="auto")
@@ -128,12 +130,19 @@ def parse_args(argv):
     args = parser.parse_args(argv)
     _, shared, _ = load_shared_scene(args.scene)
     camera = shared.camera
+    # The shared scene supplies framing, capture dimensions and the focus plane.
+    # The default comparison lens is deliberately longer than the scene-camera
+    # lens: 50 mm at f/1.2 only gives ~18 px on the far wall at 1200px, while
+    # 85 mm focused on the same hero cup gives ~52 px there. f/22 stays in the
+    # list as the near-pinhole diagnostic control.
+    default_lens = DEFAULT_COMPARISON_LENS_MM if args.scene == SCENE_FILE else camera.focal_length_mm
     for key, value in (
         ("width", shared.capture_width),
         ("height", shared.capture_height),
-        ("lens", camera.focal_length_mm),
+        ("lens", default_lens),
         ("sensor_height", camera.sensor_height_mm),
         ("focus", [camera.focus_distance_m]),
+        ("fstops", list(DEFAULT_COMPARISON_F_STOPS)),
         ("position", camera.position),
         ("yaw", camera.yaw_degrees),
         ("pitch", camera.pitch_degrees),

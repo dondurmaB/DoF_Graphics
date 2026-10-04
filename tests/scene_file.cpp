@@ -41,15 +41,15 @@ const double kBoundsMax[3] = {17.5, 20.65, 9.5};
 const double kPositionSum[3] = {2229.83502904, 109495.9536, -916767.8813};
 const double kAreaSum = 6184.47785031;
 
-const std::size_t kCafePrimitives = 1415;
-const std::size_t kCafeVertices = 132875;
-const std::size_t kCafeTriangles = 131636;
+const std::size_t kCafePrimitives = 1967;
+const std::size_t kCafeVertices = 169652;
+const std::size_t kCafeTriangles = 169432;
 const std::size_t kCafeEmissiveTriangles = 18384;
-const std::size_t kCafeSmoothTriangles = 79696;
+const std::size_t kCafeSmoothTriangles = 102872;
 const double kCafeBoundsMin[3] = {-3.12, -1.59, -10.12};
 const double kCafeBoundsMax[3] = {3.12, 1.7, 5.1};
-const double kCafePositionSum[3] = {-16080.1974176, -90379.2084028, -341348.810441};
-const double kCafeAreaSum = 842.636448915;
+const double kCafePositionSum[3] = {-7272.36034358, -85829.2528184, -657413.289451};
+const double kCafeAreaSum = 850.236109347;
 
 bool rejects(const std::string& text, const std::string& expectedFragment) {
     SceneDescription scene;

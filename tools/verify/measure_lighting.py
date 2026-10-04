@@ -87,24 +87,35 @@ def render(blender):
 
 def summarize():
     rows = []
+    def compare_patch(name, gl_pixels, rt_pixels, **extra):
+        gl_mean = gl_pixels.mean((0, 1))
+        rt_mean = rt_pixels.mean((0, 1))
+        rel = np.abs(gl_pixels - rt_pixels) / np.maximum(np.abs(rt_pixels), 1e-9)
+        worst_index = np.unravel_index(np.argmax(rel), rel.shape)
+        rows.append(
+            dict(
+                name=name,
+                gl_mean=gl_mean.tolist(),
+                cycles_mean=rt_mean.tolist(),
+                max_channel_relative_error_of_means=float(
+                    np.max(np.abs(gl_mean - rt_mean) / np.maximum(np.abs(rt_mean), 1e-9))
+                ),
+                max_per_pixel_channel_relative_error=float(rel[worst_index]),
+                worst_pixel_yx_channel=[int(worst_index[0]), int(worst_index[1]), int(worst_index[2])],
+                **extra,
+            )
+        )
+
     for name, sun, ambient in (
         ("ambient", 0, 0.2),
         ("sun", 1, 0),
         ("both", 1, 0.2),
         ("enclosed", 0, 0.2),
     ):
-        gl = read_pfm(OUT / (name + "-gl.linear.pfm"))[28:36, 28:36].mean((0, 1))
-        rt = read_pfm(OUT / (name + "-rt") / "rt_focus3m_f8_sharp.pfm")[28:36, 28:36].mean((0, 1))
+        gl = read_pfm(OUT / (name + "-gl.linear.pfm"))[28:36, 28:36]
+        rt = read_pfm(OUT / (name + "-rt") / "rt_focus3m_f8_sharp.pfm")[28:36, 28:36]
         expected = np.array((0.5, 0.4, 0.3)) * (ambient + sun / math.pi)
-        rows.append(
-            dict(
-                name=name,
-                gl=gl.tolist(),
-                cycles=rt.tolist(),
-                analytic=expected.tolist(),
-                max_relative_error=float(np.max(abs(gl - rt) / np.maximum(rt, 1e-9))),
-            )
-        )
+        compare_patch(name, gl, rt, analytic_mean=expected.tolist(), roi_xywh=[28, 28, 8, 8])
     physical = read_pfm(OUT / "enclosed-world-rt/rt_focus3m_f8_sharp.pfm")[28:36, 28:36].mean(
         (0, 1)
     )
@@ -114,17 +125,7 @@ def summarize():
         "cafe_table": (520, 1010, 90, 40),
         "cafe_sunlit_wall": (380, 310, 60, 50),
     }.items():
-        a = gl[y : y + h, x : x + w].mean((0, 1))
-        b = rt[y : y + h, x : x + w].mean((0, 1))
-        rows.append(
-            dict(
-                name=name,
-                roi_xywh=[x, y, w, h],
-                gl=a.tolist(),
-                cycles=b.tolist(),
-                max_relative_error=float(np.max(abs(a - b) / np.maximum(b, 1e-9))),
-            )
-        )
+        compare_patch(name, gl[y : y + h, x : x + w], rt[y : y + h, x : x + w], roi_xywh=[x, y, w, h])
     result = {
         "quantity": "scene-linear RGB radiance (pre-lens OpenGL; sharp Cycles)",
         "patches": rows,

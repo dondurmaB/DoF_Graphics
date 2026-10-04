@@ -90,7 +90,7 @@ class ReferenceConfigTests(unittest.TestCase):
             plan["camera_forward_gl"],
             reference.camera_forward_gl(scene.camera.yaw_degrees, scene.camera.pitch_degrees),
         )
-        self.assertEqual(args.lens, scene.camera.focal_length_mm)
+        self.assertEqual(args.lens, reference.DEFAULT_COMPARISON_LENS_MM)
         self.assertEqual(args.sensor_height, scene.camera.sensor_height_mm)
         self.assertEqual(args.focus, [scene.camera.focus_distance_m])
         self.assertIsNone(plan["asset"])
@@ -124,9 +124,10 @@ class ReferenceConfigTests(unittest.TestCase):
     def test_controlled_jobs_and_invalid_arguments(self):
         args = reference.parse_args([])
         self.assertEqual(args.samples, 128)
+        self.assertEqual(args.fstops, list(reference.DEFAULT_COMPARISON_F_STOPS))
         self.assertEqual(
             [job[0] for job in reference.render_jobs(args)],
-            [f"rt_focus2.5m_f{f:g}.png" for f in reference.F_STOPS],
+            [f"rt_focus2.5m_f{f:g}_85mm.png" for f in reference.DEFAULT_COMPARISON_F_STOPS],
         )
         args = reference.parse_args(
             ["--preview", "--focus", "2", "5", "15", "--fstops", "1.4", "2.8", "8", "--sharp"]

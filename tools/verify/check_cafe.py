@@ -18,6 +18,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def commands(blender):
     gl = str(ROOT / "build/DepthResearch")
+    comparison_lens = "85"
+    comparison_focus = "2.5"
+    comparison_taps = "192"
     rt = [
         blender,
         "--background",
@@ -75,10 +78,16 @@ def commands(blender):
             [
                 gl,
                 "--batch",
+                "--lens",
+                comparison_lens,
+                "--focus",
+                comparison_focus,
                 "--fstop",
                 str(fstop),
+                "--coc-samples",
+                comparison_taps,
                 "--output",
-                f"output/verification/gl_f{fstop:g}.png",
+                f"output/verification/gl_focus{comparison_focus}m_f{fstop:g}_{comparison_lens}mm.png",
             ]
         )
     result.append(
@@ -118,7 +127,7 @@ def main():
                 raise RuntimeError(f"Missing capture: {path}")
     if not args.dry_run:
         # Fixed names are inspection views, not an aperture sweep pairing API.
-        for tag in ("focus2.5m_f1.2", "focus2.5m_f22", "focus2.5m_f1.2_sharp"):
+        for tag in ("focus2.5m_f1.2_85mm", "focus2.5m_f22_85mm", "focus2.5m_f1.2_85mm_sharp"):
             for extension in ("png", "exr", "pfm", "json"):
                 path = output / "cycles" / f"rt_{tag}.{extension}"
                 if not path.is_file() or path.stat().st_size == 0:

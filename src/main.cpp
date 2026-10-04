@@ -907,7 +907,8 @@ int main(int argc, char** argv) {
                 screenMode = ScreenMode::Color;
             else if (key == "--scene" || key == "--output" || key == "--width" || key == "--height" ||
                      key == "--lens" || key == "--sensor-height" || key == "--focus" || key == "--fstop" ||
-                     key == "--x" || key == "--y" || key == "--z" || key == "--yaw" || key == "--pitch") {
+                     key == "--coc-samples" || key == "--x" || key == "--y" || key == "--z" || key == "--yaw" ||
+                     key == "--pitch") {
                 if (++i >= argc) throw invalid_argument("Missing value for " + key);
                 if (!options.emplace(key, argv[i]).second) throw invalid_argument("Repeated argument " + key);
             } else
@@ -963,6 +964,10 @@ int main(int argc, char** argv) {
         sensorHeightMillimeters = number("--sensor-height", sensorHeightMillimeters);
         focusDistanceMeters = number("--focus", focusDistanceMeters);
         fNumber = number("--fstop", fNumber);
+        const float requestedSamples = number("--coc-samples", static_cast<float>(cocSampleCount));
+        if (requestedSamples != floor(requestedSamples) || requestedSamples < 1 || requestedSamples > 256)
+            throw invalid_argument("CoC samples must be an integer in [1,256]");
+        cocSampleCount = static_cast<int>(requestedSamples);
         if (focalLengthMillimeters < 1 || focalLengthMillimeters > 500 || sensorHeightMillimeters < 1 ||
             sensorHeightMillimeters > 100 || focusDistanceMeters <= focalLengthMillimeters * .001f ||
             fNumber < .1f)
@@ -979,7 +984,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     cout << "Capture pixels: " << captureWidth << " x " << captureHeight << " | imported mesh "
-         << showImportedMesh << endl;
+         << showImportedMesh << " | CoC samples " << cocSampleCount << endl;
     if (dryRun) {
         cout << "Dry run: no OpenGL context or visual verification." << endl;
         return 0;

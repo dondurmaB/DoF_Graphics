@@ -146,6 +146,24 @@ class Builder:
             16,
         )
 
+    def shelf_mug(self, x, y, z, rgb=CREAM):
+        self.cyl((x, y + 0.045, z), (0.070, 0.090, 0.070), rgb, seg=32, taper=1.18)
+        self.ring(x, y + 0.091, z, 0.038, 0.0028, rgb, segments=32)
+        self.curve(
+            [
+                (x + 0.036 + 0.018 * math.cos(t), y + 0.048 + 0.026 * math.sin(t), z)
+                for t in [(-math.pi * 0.62) + i * (1.24 * math.pi) / 24 for i in range(25)]
+            ],
+            0.006,
+            rgb,
+            12,
+        )
+
+    def label_lines(self, x, y, z, width, rows, color):
+        for row in range(rows):
+            line_width = width * (0.55 + 0.35 * ((row * 37) % 9) / 8)
+            self.box((x, y - row * 0.070, z), (line_width, 0.010, 0.010), color, bevel=0.001)
+
     def table(self, x, z, r=0.44):
         self.cyl((x, -0.741, z), (r * 2, 0.042, r * 2), WOOD, seg=128 if r == 0.44 else 80)
         self.cyl((x, -1.12, z), (0.065, 0.716, 0.065), DARK, seg=40)
@@ -291,6 +309,52 @@ def build():
                 seg=32,
                 taper=0.92,
             )
+    b.mark("Far-wall readable detail: high-contrast boards and prints sit inside the 50mm frame.")
+    b.box((-1.80, 0.42, -9.985), (0.82, 0.58, 0.025), (0.025, 0.031, 0.026), bevel=0.012)
+    b.box((-1.80, 0.42, -9.968), (0.72, 0.48, 0.010), (0.055, 0.065, 0.052), bevel=0.004)
+    b.label_lines(-1.80, 0.61, -9.958, 0.48, 6, (0.85, 0.82, 0.66))
+    for x, y, rgb in (
+        (-0.80, 0.54, (0.70, 0.39, 0.24)),
+        (-0.18, 0.58, (0.22, 0.38, 0.45)),
+        (0.44, 0.50, (0.55, 0.48, 0.24)),
+        (1.06, 0.62, (0.42, 0.22, 0.30)),
+    ):
+        b.box((x, y, -9.982), (0.36, 0.42, 0.026), WOOD, bevel=0.010)
+        b.box((x, y, -9.964), (0.28, 0.32, 0.010), rgb, bevel=0.003)
+    b.mark("Shelf dressing at far depth: hanging mugs and tins give sub-pixel-to-tens-pixel DoF cues.")
+    for i, x in enumerate([-0.70, -0.48, -0.26, 0.02, 0.24, 0.46, 0.68, 0.92]):
+        b.stock((x, 0.265, -9.61), (x, 0.150, -9.61), 0.006, DARK, 12)
+        b.shelf_mug(x, 0.060, -9.61, b.jitter((0.70, 0.62, 0.45), 0.10))
+    for i, x in enumerate([-0.98, -0.78, 1.12, 1.32, 1.52]):
+        b.box((x, 0.475, -9.60), (0.120, 0.190, 0.115), b.jitter((0.38, 0.24, 0.10), 0.12), bevel=0.010)
+        b.box((x, 0.580, -9.60), (0.090, 0.022, 0.090), b.jitter((0.80, 0.66, 0.34), 0.08), bevel=0.004)
+    b.mark("Counter detail at 9-12m: till, card reader, water station, cake stand and small labels.")
+    b.box((1.90, -0.325, -4.05), (0.34, 0.16, 0.24), (0.035, 0.038, 0.034), (0, -14, 0), bevel=0.020)
+    b.box((1.82, -0.205, -3.96), (0.30, 0.030, 0.20), (0.16, 0.18, 0.15), (0, -14, 0), bevel=0.006)
+    b.box((1.63, -0.300, -3.70), (0.10, 0.055, 0.17), (0.035, 0.040, 0.036), (0, 24, 0), bevel=0.010)
+    b.stock((1.58, -0.285, -3.60), (1.48, -0.230, -3.50), 0.012, DARK, 12)
+    b.cyl((2.68, -0.280, -4.55), (0.22, 0.40, 0.22), (0.20, 0.34, 0.42), seg=64, taper=0.85)
+    b.cyl((2.68, -0.055, -4.55), (0.18, 0.055, 0.18), (0.72, 0.76, 0.68), seg=48, taper=0.55)
+    b.cyl((2.05, -0.340, -5.10), (0.52, 0.040, 0.52), (0.70, 0.63, 0.46), seg=80)
+    for i, x in enumerate((1.90, 2.04, 2.18)):
+        b.sph((x, -0.285, -5.12), (0.070, 0.045, 0.070), b.jitter((0.62, 0.34, 0.16), 0.08), seg=32)
+    for i, z in enumerate((-3.15, -3.55, -3.95)):
+        b.box((1.78, -0.345, z), (0.34, 0.12, 0.18), b.jitter((0.46, 0.29, 0.12), 0.10), bevel=0.010)
+        b.box((1.78, -0.275, z - 0.01), (0.24, 0.055, 0.012), (0.82, 0.75, 0.55), bevel=0.002)
+    b.mark("Mid-depth props in spare sightlines: condiment caddies and napkin blocks avoid the hero cup.")
+    for x, z in ((-0.72, 0.93), (0.86, -1.02), (-1.28, -4.05), (0.22, -7.00)):
+        b.box((x, -0.675, z), (0.17, 0.075, 0.12), (0.18, 0.10, 0.045), bevel=0.008)
+        for dx, rgb in ((-0.045, (0.75, 0.08, 0.04)), (0.0, (0.85, 0.80, 0.62)), (0.045, (0.12, 0.18, 0.09))):
+            b.cyl((x + dx, -0.620, z), (0.026, 0.080, 0.026), rgb, seg=24, taper=0.9)
+    b.mark("Trailing plants at far corners add silhouette detail without crossing the focus plane.")
+    for x, z, s in ((-2.72, -6.8, 0.42), (2.72, -8.6, 0.36)):
+        b.cyl((x, 0.88, z), (0.24 * s, 0.18 * s, 0.24 * s), (0.25, 0.10, 0.05), seg=32, taper=1.12)
+        for i in range(7):
+            a = i * 2.1
+            start = (x, 0.80, z)
+            tip = (x + math.cos(a) * 0.20 * s, 0.45 - i * 0.045, z + math.sin(a) * 0.26 * s)
+            b.stock(start, tip, 0.006, GREEN, 12)
+            b.sph(tip, (0.055 * s, 0.16 * s, 0.018 * s), b.jitter(GREEN, 0.14, True), (28, math.degrees(-a), -20), seg=24)
     # Brushed rails with bulbs at multiple depths, not an emissive wall.
     for z in (2.4, 0.5, -2, -4.5, -7, -9.3):
         for x in (-1.65, 1.2):

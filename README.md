@@ -87,7 +87,8 @@ ctest --test-dir build --output-on-failure
 ```
 
 The café has a finite table, identical 110 mm cups at view depths 2.5/4/6/9/12 m, curved foliage,
-round chair stock, chamfered fixtures, and HDR emitters. Cup/pot bodies are single frusta.
+round chair stock, chamfered fixtures, wall boards/prints, hanging mugs, counter dressing,
+condiment caddies, trailing plants, and HDR emitters. Cup/pot bodies are single frusta.
 The shader remains diffuse-only: the measured GGX/Schlick-to-Cycles Glossy mapping failed.
 
 Matched lighting is `albedo * (ambient + sun * max(N.L,0) * visibility / pi)`.
@@ -122,7 +123,10 @@ The original 100-tap gather is still the baseline; an improved gather is pending
 
 ```sh
 ./build/DepthResearch --batch --sharp --output output/sharp.png
-./build/DepthResearch --batch --fstop 1.2 --output output/wide-open.png
+./build/DepthResearch --batch --lens 85 --focus 2.5 --fstop 1.2 \
+  --coc-samples 192 --output output/gl_focus2.5m_f1.2_85mm.png
+./build/DepthResearch --batch --lens 85 --focus 2.5 --fstop 22 \
+  --coc-samples 192 --output output/gl_focus2.5m_f22_85mm.png
 ./build/DepthResearch --dry-run
 python tools/raytraced_reference/render_dof.py --dry-run
 python tools/verify/check_cafe.py --dry-run
@@ -133,12 +137,14 @@ python tools/verify/measure_lighting.py --render
 Batch renders through the normal shaders and explicitly allocated 1200×1200 pixel FBOs,
 independent of window/Retina scaling; it queries dimensions and fails on mismatch. `--width`
 and `--height` override the shared scene size. `--scene`, `--lens`, `--sensor-height`, `--focus`,
-`--fstop`, `--x`, `--y`, `--z`, `--yaw`, and `--pitch` support inspection views. `--import-mesh`
-is required to add the OBJ. A companion `.linear.pfm` is the **sharp pre-lens** radiance buffer,
-not the defocused output. Interactive screenshots still use actual window framebuffer size.
+`--fstop`, `--coc-samples`, `--x`, `--y`, `--z`, `--yaw`, and `--pitch` support inspection views.
+`--import-mesh` is required to add the OBJ. A companion `.linear.pfm` is the **sharp pre-lens**
+radiance buffer, not the defocused output. Interactive screenshots still use actual window
+framebuffer size.
 
-`check_cafe.py` produces scene-camera aperture extremes, two wide inspection views, a machine
-close-up and low-sample Cycles renders. It is a Phase 1 inspection runner, **not** the planned
+`check_cafe.py` produces scene-camera inspection views plus the default 85 mm comparison pair:
+focus 2.5 m at f/1.2 and f/22. The wide-open setting makes far-wall blur large enough to inspect;
+f/22 is the near-pinhole control. It is a Phase 1 inspection runner, **not** the planned
 convergence-certified reference/comparison pipeline. See [Cycles instructions](tools/raytraced_reference/README.md).
 The legacy PNG comparison now fails with no usable pairs and reports stale hashes truthfully;
 it remains a display-space diagnostic, not a linear HDR benchmark or proof of matching cameras.

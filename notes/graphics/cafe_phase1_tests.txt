@@ -1,6 +1,6 @@
-UpdateCTestConfiguration  from :/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/build/DartConfiguration.tcl
-Parse Config file:/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/build/DartConfiguration.tcl
-Test project /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/build
+UpdateCTestConfiguration  from :/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/build/DartConfiguration.tcl
+Parse Config file:/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/build/DartConfiguration.tcl
+Test project /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/build
 Constructing a list of tests
 Done constructing a list of tests
 Updating test list for fixtures
@@ -10,91 +10,91 @@ Checking test dependency graph end
 test 1
     Start 1: mesh_loading
 
-1: Test command: /Users/beibarys.myrzash/Documents/Classes\ Fall\ 2026-27/Directed\ Research/dof-research-stage2-work/build/mesh_loading_tests
-1: Working Directory: /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/build
+1: Test command: /Users/beibarys.myrzash/Documents/Classes\ Fall\ 2026-27/Directed\ Research/dof-research-stage2-rebuild/build/mesh_loading_tests
+1: Working Directory: /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/build
 1: Test timeout computed to be: 1500
 1: Mesh loading checks passed: triangulation, indices, normals, UV seams, units, warnings and failure paths.
-1/8 Test #1: mesh_loading .....................   Passed    0.02 sec
+1/8 Test #1: mesh_loading .....................   Passed    0.01 sec
 test 2
     Start 2: physical_camera
 
-2: Test command: /Users/beibarys.myrzash/Documents/Classes\ Fall\ 2026-27/Directed\ Research/dof-research-stage2-work/build/physical_camera_tests
-2: Working Directory: /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/build
+2: Test command: /Users/beibarys.myrzash/Documents/Classes\ Fall\ 2026-27/Directed\ Research/dof-research-stage2-rebuild/build/physical_camera_tests
+2: Working Directory: /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/build
 2: Test timeout computed to be: 1500
 2: Physical FOV, lens/sensor response, non-square projection and invalid inputs passed.
-2/8 Test #2: physical_camera ..................   Passed    0.01 sec
+2/8 Test #2: physical_camera ..................   Passed    0.00 sec
 test 3
     Start 3: scene_file
 
-3: Test command: /Users/beibarys.myrzash/Documents/Classes\ Fall\ 2026-27/Directed\ Research/dof-research-stage2-work/build/scene_file_tests
-3: Working Directory: /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/build
+3: Test command: /Users/beibarys.myrzash/Documents/Classes\ Fall\ 2026-27/Directed\ Research/dof-research-stage2-rebuild/build/scene_file_tests
+3: Working Directory: /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/build
 3: Test timeout computed to be: 1500
 3: Scene grammar, transform order, winding, and cross-language geometry passed: 2551 primitives, 66802 vertices, 38572 triangles.
-3: Scene grammar, transform order, winding, and cross-language geometry passed: 1415 primitives, 132875 vertices, 131636 triangles.
-3/8 Test #3: scene_file .......................   Passed    0.11 sec
+3: Scene grammar, transform order, winding, and cross-language geometry passed: 1967 primitives, 169652 vertices, 169432 triangles.
+3/8 Test #3: scene_file .......................   Passed    0.12 sec
 test 4
     Start 4: comparison_failures
 
-4: Test command: /opt/anaconda3/bin/python3.12 "/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/tests/test_comparison.py"
-4: Working Directory: /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/build
+4: Test command: /opt/anaconda3/bin/python3.12 "/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/tests/test_comparison.py"
+4: Working Directory: /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/build
 4: Test timeout computed to be: 1500
 4: ..
 4: ----------------------------------------------------------------------
-4: Ran 2 tests in 0.015s
+4: Ran 2 tests in 0.016s
 4: 
 4: OK
 4/8 Test #4: comparison_failures ..............   Passed    0.38 sec
 test 5
     Start 5: capture_contract
 
-5: Test command: /opt/anaconda3/bin/python3.12 "/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/tests/test_capture_contract.py" "/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/build/capture_name_dump"
-5: Working Directory: /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/build
+5: Test command: /opt/anaconda3/bin/python3.12 "/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/tests/test_capture_contract.py" "/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/build/capture_name_dump"
+5: Working Directory: /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/build
 5: Test timeout computed to be: 1500
 5: .
 5: ----------------------------------------------------------------------
-5: Ran 1 test in 0.005s
+5: Ran 1 test in 0.008s
 5: 
 5: OK
 5/8 Test #5: capture_contract .................   Passed    0.06 sec
 test 6
     Start 6: loader_equivalence
 
-6: Test command: /opt/anaconda3/bin/python3.12 "/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/tests/test_loader_equivalence.py" "/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/build/scene_dump"
-6: Working Directory: /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/build
+6: Test command: /opt/anaconda3/bin/python3.12 "/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/tests/test_loader_equivalence.py" "/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/build/scene_dump"
+6: Working Directory: /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/build
 6: Test timeout computed to be: 1500
 6: ..
 6: ----------------------------------------------------------------------
-6: Ran 2 tests in 0.062s
+6: Ran 2 tests in 0.055s
 6: 
 6: OK
-6/8 Test #6: loader_equivalence ...............   Passed    0.12 sec
+6/8 Test #6: loader_equivalence ...............   Passed    0.10 sec
 test 7
     Start 7: reference_config
 
-7: Test command: /opt/anaconda3/bin/python3.12 "/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/tests/test_reference_config.py"
-7: Working Directory: /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/build
+7: Test command: /opt/anaconda3/bin/python3.12 "/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/tests/test_reference_config.py"
+7: Working Directory: /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/build
 7: Test timeout computed to be: 1500
 7: ..OBJ material directives omitted; importing geometry without external materials.
 7: OBJ material directives omitted; importing geometry without external materials.
 7: ....
 7: ----------------------------------------------------------------------
-7: Ran 6 tests in 7.598s
+7: Ran 6 tests in 9.441s
 7: 
 7: OK
-7/8 Test #7: reference_config .................   Passed    7.65 sec
+7/8 Test #7: reference_config .................   Passed    9.49 sec
 test 8
     Start 8: scene_file_python
 
-8: Test command: /opt/anaconda3/bin/python3.12 "/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/tests/test_scene_file.py"
-8: Working Directory: /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-work/build
+8: Test command: /opt/anaconda3/bin/python3.12 "/Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/tests/test_scene_file.py"
+8: Working Directory: /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-stage2-rebuild/build
 8: Test timeout computed to be: 1500
 8: ........................
 8: ----------------------------------------------------------------------
-8: Ran 24 tests in 1.452s
+8: Ran 24 tests in 1.743s
 8: 
 8: OK
-8/8 Test #8: scene_file_python ................   Passed    1.52 sec
+8/8 Test #8: scene_file_python ................   Passed    1.82 sec
 
 100% tests passed out of 8
 
-Total Test time (real) =   9.88 sec
+Total Test time (real) =  12.01 sec

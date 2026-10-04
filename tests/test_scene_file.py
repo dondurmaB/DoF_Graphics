@@ -349,15 +349,15 @@ class AlleySceneTests(unittest.TestCase):
 class CafeSceneTests(AlleySceneTests):
     prefix = "kCafe"
     expected = {
-        "primitives": 1415,
-        "vertices": 132875,
-        "triangles": 131636,
+        "primitives": 1967,
+        "vertices": 169652,
+        "triangles": 169432,
         "emissive_triangles": 18384,
-        "smooth_triangles": 79696,
+        "smooth_triangles": 102872,
         "bounds_min": [-3.12, -1.5899999999999999, -10.120000000000001],
         "bounds_max": [3.12, 1.7, 5.1],
-        "position_sum": [-16080.197417584912, -90379.20840275992, -341348.8104406983],
-        "area_sum": 842.6364489145747,
+        "position_sum": [-7272.360343579754, -85829.25281836877, -657413.2894506791],
+        "area_sum": 850.2361093471557,
     }
 
     @classmethod
