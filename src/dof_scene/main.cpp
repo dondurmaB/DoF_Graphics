@@ -426,7 +426,8 @@ public:
         screenProgram_.set("uNear",app.lens.nearPlane); screenProgram_.set("uFar",app.lens.farPlane);
         screenProgram_.set("uFocusDistance",app.lens.focusDistance);
         screenProgram_.set("uFocalLengthMm",app.lens.focalLengthMm); screenProgram_.set("uSensorHeightMm",app.lens.sensorHeightMm);
-        screenProgram_.set("uFNumber",app.lens.fNumber); screenProgram_.set("uMaxRadius",32.0f);
+        screenProgram_.set("uFNumber",app.lens.fNumber); screenProgram_.set("uMaxRadius",120.0f);
+        screenProgram_.set("uGatherMode",1);
         screenProgram_.set("uResolution",glm::vec2(width_,height_)); screenProgram_.set("uMode",app.mode);
         glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D,color_);
         glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D,depth_);

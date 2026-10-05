@@ -86,8 +86,11 @@ float distributionGGX(float nDotH, float roughness)
 {
     float a = roughness * roughness;
     float a2 = a * a;
-    float denom = nDotH * nDotH * (a2 - 1.0) + 1.0;
-    return a2 / max(kPi * denom * denom, 0.0001);
+    // roughness >= .08 in main: denominator is strictly positive.
+    // Avoid cancellation and do not flatten the physically narrow GGX peak.
+    float nh2 = clamp(nDotH * nDotH, 0.0, 1.0);
+    float denom = (1.0 - nh2) + nh2 * a2;
+    return a2 / (kPi * denom * denom);
 }
 
 float geometrySchlickGGX(float nDotV, float roughness)

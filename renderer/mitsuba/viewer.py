@@ -294,11 +294,14 @@ class Renderer(threading.Thread):
             return {"error": "nothing rendered yet"}
         with self.state.lock:
             st = self.state.public()
-            mode, lens = self.state.mode, self.state.lens()
+            mode, lens = self.state.mode, self.state.optics()
+            rendering_lens = self.state.lens()
         mi.Bitmap(rgb).write(str(out / f"{mode}.exr"))
-        (out / f"{mode}.png").write_bytes(self.frame_jpeg)
+        R.save_png(out / f"{mode}.png", R.tonemap(rgb, st["exposure"]))
         h, w = rgb.shape[:2]
-        meta = {"viewer_state": st, "spp": self.stats["spp"], "camera": lens.metadata(w, h)}
+        meta = {"viewer_state": st, "spp": self.stats["spp"], "camera": lens.metadata(w, h),
+                "rendering_camera": rendering_lens.metadata(w, h),
+                "gather_optics": lens.metadata(w, h) if mode == "trad" else None}
         (out / "metadata.json").write_text(json.dumps(meta, indent=2))
         return {"saved": str(out)}
 

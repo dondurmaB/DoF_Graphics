@@ -17,27 +17,21 @@ uniform vec2 uResolution;
 uniform int uMode;
 
 const float kEpsilon = 0.000001;
-const vec2 diskSamples[64] = vec2[](
-    vec2( 0.0884,  0.0000), vec2(-0.1129,  0.1034), vec2( 0.0173, -0.1969), vec2( 0.1423,  0.1856),
-    vec2(-0.2611, -0.0462), vec2( 0.2473, -0.1573), vec2(-0.0827,  0.3078), vec2(-0.1578, -0.3038),
-    vec2( 0.3423,  0.1250), vec2(-0.3561,  0.1470), vec2( 0.1717, -0.3669), vec2( 0.1269,  0.4045),
-    vec2(-0.3824, -0.2216), vec2( 0.4486, -0.0986), vec2(-0.2738,  0.3894), vec2(-0.0632, -0.4880),
-    vec2( 0.3883,  0.3272), vec2(-0.5225,  0.0216), vec2( 0.3811, -0.3792), vec2(-0.0255,  0.5514),
-    vec2(-0.3626, -0.4345), vec2( 0.5744,  0.0773), vec2(-0.4867,  0.3386), vec2( 0.1330, -0.5912),
-    vec2( 0.3076,  0.5368), vec2(-0.6014, -0.1918), vec2( 0.5841, -0.2699), vec2(-0.2531,  0.6047),
-    vec2(-0.2259, -0.6279), vec2( 0.6010,  0.3159), vec2(-0.6675,  0.1760), vec2( 0.3794, -0.5901),
-    vec2( 0.1207,  0.7023), vec2(-0.5720, -0.4430), vec2( 0.7317, -0.0606), vec2(-0.5058,  0.5467),
-    vec2( 0.0037, -0.7552), vec2( 0.5143,  0.5669), vec2(-0.7723, -0.0716), vec2( 0.6258, -0.4750),
-    vec2(-0.1424,  0.7827), vec2(-0.4289, -0.6815), vec2( 0.7859,  0.2154), vec2(-0.7335,  0.3764),
-    vec2( 0.2899, -0.7819), vec2( 0.3179,  0.7809), vec2(-0.7703, -0.3650), vec2( 0.8233, -0.2538),
-    vec2(-0.4401,  0.7511), vec2(-0.1847, -0.8598), vec2( 0.7242,  0.5144), vec2(-0.8902,  0.1109),
-    vec2( 0.5870, -0.6897), vec2( 0.0333,  0.9137), vec2(-0.6477, -0.6573), vec2( 0.9300,  0.0475),
-    vec2(-0.7243,  0.5985), vec2( 0.1310, -0.9388), vec2( 0.5422,  0.7874), vec2(-0.9397, -0.2162),
-    vec2( 0.8459, -0.4793), vec2(-0.3025,  0.9324), vec2(-0.4101, -0.8991), vec2( 0.9170,  0.3890)
-);
+// Shared by the native viewer and the EXR experiment runner. Exactly 100
+// disk samples; the centre is used only by the subpixel early exit.
+const int kSamples = 100;
+uniform int uGatherMode; // 0: equal weight, 1: depth weighted
+uniform int uDepthIsLinear;
+uniform int uLinearOutput;
+vec2 diskSample(int i) {
+    float radius = sqrt((float(i) + 0.5) / float(kSamples));
+    float angle = float(i) * 2.39996323;
+    return radius * vec2(cos(angle), sin(angle));
+}
 
 float linearizeDepth(float rawDepth)
 {
+    if (uDepthIsLinear != 0) return rawDepth;
     float zNdc = rawDepth * 2.0 - 1.0;
     return (2.0 * uNear * uFar) / max(uFar + uNear - zNdc * (uFar - uNear), kEpsilon);
 }
@@ -56,7 +50,8 @@ float signedCoCDiameterPixels(float linearDepth)
     }
 
     float apertureDiameter = focalLength / uFNumber;
-    float denominator = linearDepth * (uFocusDistance - focalLength);
+    // Fixed-FOV sensor convention: aperture rays intersect the focus plane.
+    float denominator = linearDepth * uFocusDistance;
     if (abs(denominator) < kEpsilon) {
         return 0.0;
     }
@@ -91,18 +86,18 @@ vec2 clampUv(vec2 uv, vec2 texelSize)
 vec3 gatherDof(vec2 uv, float centerDepth, float centerRadius)
 {
     vec2 texelSize = 1.0 / max(uResolution, vec2(1.0));
-    float blurRadius = min(abs(centerRadius), min(max(uMaxRadius, 0.0), 32.0));
+    float blurRadius = min(abs(centerRadius), min(max(uMaxRadius, 0.0), 120.0));
 
     if (blurRadius < 0.5) {
         return texture(uColor, uv).rgb;
     }
 
-    vec3 sumColor = texture(uColor, uv).rgb;
-    float sumWeight = 1.0;
+    vec3 sumColor = vec3(0.0);
+    float sumWeight = 0.0;
     float centerIsForeground = centerRadius < 0.0 ? 1.0 : 0.0;
 
-    for (int i = 0; i < 64; ++i) {
-        vec2 sampleUv = clampUv(uv + diskSamples[i] * blurRadius * texelSize, texelSize);
+    for (int i = 0; i < kSamples; ++i) {
+        vec2 sampleUv = clampUv(uv + diskSample(i) * blurRadius * texelSize, texelSize);
         float sampleDepth = linearizeDepth(texture(uDepth, sampleUv).r);
         float sampleRadius = signedCoCRadiusPixels(sampleDepth);
         vec3 sampleColor = texture(uColor, sampleUv).rgb;
@@ -113,23 +108,24 @@ vec3 gatherDof(vec2 uv, float centerDepth, float centerRadius)
             centerIsForeground > 0.5 ? 1.0 - smoothstep(-0.05, 0.25, depthDelta) : 1.0;
         float allowLargeForegroundOcclusion =
             sampleRadius < -0.5 ? smoothstep(0.2, 1.2, abs(sampleRadius)) : 0.0;
-        float sampleCanReachCenter = smoothstep(length(diskSamples[i]) * blurRadius - 0.75,
-                                                length(diskSamples[i]) * blurRadius + 0.75,
+        float sampleCanReachCenter = smoothstep(length(diskSample(i)) * blurRadius - 0.75,
+                                                length(diskSample(i)) * blurRadius + 0.75,
                                                 abs(sampleRadius));
         float weight = mix(0.18, 1.0, similarDepth);
         weight *= max(keepBackgroundFromBleedingOverSharpForeground, allowLargeForegroundOcclusion * 0.85);
         weight *= max(sampleCanReachCenter, similarDepth * 0.65);
 
+        if (uGatherMode == 0) weight = 1.0;
         sumColor += sampleColor * weight;
         sumWeight += weight;
     }
 
-    return sumColor / max(sumWeight, kEpsilon);
+    return sumWeight > kEpsilon ? sumColor / sumWeight : texture(uColor, uv).rgb;
 }
 
 vec3 displayColor(vec3 hdrColor)
 {
-    return toSrgb(filmicTonemap(hdrColor));
+    return uLinearOutput != 0 ? hdrColor : toSrgb(filmicTonemap(hdrColor));
 }
 
 void main()
@@ -153,7 +149,7 @@ void main()
     }
 
     if (uMode == 3) {
-        float radiusView = clamp(abs(signedRadius) / max(min(max(uMaxRadius, 1.0), 32.0), 1.0), 0.0, 1.0);
+        float radiusView = clamp(abs(signedRadius) / max(min(max(uMaxRadius, 1.0), 120.0), 1.0), 0.0, 1.0);
         vec3 nearColor = vec3(1.0, 0.22, 0.08);
         vec3 farColor = vec3(0.10, 0.36, 1.0);
         vec3 focusColor = vec3(0.02);

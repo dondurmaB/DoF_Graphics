@@ -1,20 +1,9 @@
 #!/usr/bin/env python3
-"""Traditional screen-space depth of field applied to a Mitsuba render.
+"""Legacy approximate preview gather used by the browser viewer.
 
-Takes the all-in-focus `sharp.exr` and the planar `depth.npy` that render.py
-writes, blurs them with the same depth-aware 64-tap disk gather as the OpenGL
-DoFScene (shaders/dof_scene/screen.frag), and compares the result with the
-path-traced thin-lens `dof.exr` from the same camera:
-
-    python renderer/mitsuba/traditional_dof.py output/mitsuba/cafe
-
-writes `traditional.exr/.png`, `compare.png` (sharp | traditional | path-traced
-| error) and `traditional_metrics.json` into that directory.
-
-The comparison is fair by construction: all three images come from one camera
-pose, one lens model and one scene, so the only difference is how visibility
-through the aperture is resolved - a single pinhole image plus depth, versus
-rays traced from every point of the lens.
+It is NOT the production OpenGL shader and is NOT used for stage-2 results.
+The command-line comparison now requires authenticated stage2_experiment.py
+artifacts, including independently sampled references and measured noise.
 """
 
 from __future__ import annotations
@@ -30,7 +19,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-# Golden-angle disk, identical to diskSamples[] in shaders/dof_scene/screen.frag.
+# Legacy preview pattern; NOT equivalent to the production OpenGL gather.
 _I = np.arange(64) + 0.5
 DISK = np.stack([np.cos(_I * 2.39996323), np.sin(_I * 2.39996323)], 1) * np.sqrt(_I / 64)[:, None]
 DISK_LEN = np.linalg.norm(DISK, axis=1)
@@ -46,7 +35,7 @@ def smoothstep(e0, e1, x):
 def signed_coc_radius_px(depth, focal_m, sensor_m, f_number, focus_m, height_px):
     """Thin-lens CoC radius in pixels; negative in front of the focus plane."""
     aperture = focal_m / f_number
-    coc_sensor = aperture * focal_m * (depth - focus_m) / (depth * (focus_m - focal_m))
+    coc_sensor = aperture * focal_m * (depth - focus_m) / (depth * focus_m)
     return 0.5 * coc_sensor / sensor_m * height_px
 
 
@@ -64,7 +53,7 @@ def bilinear(img, x, y):
 
 
 def gather_dof(rgb, depth, focal_m, sensor_m, f_number, focus_m, max_radius=MAX_RADIUS_PX):
-    """Port of DoFScene's gatherDof(): per-pixel disk gather with depth-aware weights."""
+    """Legacy preview approximation; not accepted as experimental evidence."""
     h, w = depth.shape
     rgb = rgb.astype(np.float32)
     depth = np.where(np.isfinite(depth), depth, SKY_DEPTH_M).astype(np.float32)
@@ -145,64 +134,18 @@ def to_8bit(rgb):
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("render_dir", help="directory written by render.py (needs sharp.exr, depth.npy, dof.exr)")
-    ap.add_argument("--max-radius", type=float, default=MAX_RADIUS_PX)
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("render_dir", type=Path, help="qualified stage-2 per-stop directory")
     args = ap.parse_args(argv)
     import mitsuba as mi
-
     mi.set_variant("scalar_rgb")
-    import render as R
-    from PIL import Image
-
-    d = Path(args.render_dir)
-    meta = json.loads((d / "metadata.json").read_text())
-    cam = meta["camera"]
-    sharp = np.asarray(mi.Bitmap(str(d / "sharp.exr")), np.float32)[..., :3]
-    truth = np.asarray(mi.Bitmap(str(d / "dof.exr")), np.float32)[..., :3]
-    depth = np.load(d / "depth.npy")
-
-    trad = gather_dof(sharp, depth, cam["focal_length_mm"] / 1000, cam["sensor_height_mm"] / 1000,
-                      cam["f_number"], cam["focus_distance_m"], args.max_radius)
-    mi.Bitmap(trad.astype(np.float32)).write(str(d / "traditional.exr"))
-    R.save_png(d / "traditional.png", R.tonemap(trad, 0.0))
-
-    s8, t8, g8 = to_8bit(sharp), to_8bit(trad), to_8bit(truth)
-    err = np.abs(t8 - g8).mean(-1)
-    # Depth discontinuities: where the depth changes by >30% within a pixel,
-    # dilated by the local blur radius, which is where screen-space DoF breaks.
-    finite = np.where(np.isfinite(depth), depth, SKY_DEPTH_M)
-    ld = np.log(finite)
-    edge = np.zeros_like(ld, bool)
-    edge[:, 1:] |= np.abs(np.diff(ld, axis=1)) > math.log(1.3)
-    edge[1:, :] |= np.abs(np.diff(ld, axis=0)) > math.log(1.3)
-    from PIL import ImageFilter
-
-    band = np.asarray(Image.fromarray((edge * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(15))) > 0
-    metrics = {
-        "method": "DoFScene depth-aware 64-tap gather on the pinhole render + planar depth",
-        "reference": "path-traced thin lens (dof.exr), same camera",
-        "spp": {k: v["spp"] for k, v in meta["passes"].items()},
-        "mae_0_255": {"traditional_vs_reference": float(err.mean()),
-                      "sharp_vs_reference": float(np.abs(s8 - g8).mean())},
-        "mae_0_255_depth_edges": {"traditional_vs_reference": float(err[band].mean()),
-                                  "sharp_vs_reference": float(np.abs(s8 - g8).mean(-1)[band].mean()),
-                                  "edge_pixel_fraction": float(band.mean())},
-        "mae_0_255_away_from_edges": {"traditional_vs_reference": float(err[~band].mean())},
-    }
-    (d / "traditional_metrics.json").write_text(json.dumps(metrics, indent=2))
-
-    # sharp | traditional | path-traced, with a 4x amplified error map beneath.
-    h, w = sharp.shape[:2]
-    heat = np.clip(err * 4.0 / 255.0, 0, 1)
-    heat_rgb = np.stack([heat, heat ** 2 * 0.6, heat ** 4 * 0.2], -1)
-    sheet = np.full((2 * h + 12, 2 * w + 12, 3), 1.0, np.float32)
-    sheet[:h, :w] = s8 / 255
-    sheet[:h, w + 12:] = t8 / 255
-    sheet[h + 12:, :w] = g8 / 255
-    sheet[h + 12:, w + 12:] = heat_rgb
-    R.save_png(d / "compare.png", sheet)
-    print(json.dumps(metrics["mae_0_255"]), json.dumps(metrics["mae_0_255_depth_edges"]))
+    from experiment_contract import compare
+    from stage2_experiment import source_manifest
+    meta = json.loads((args.render_dir / "context.json").read_text())
+    if meta.get("sources") != source_manifest():
+        raise ValueError("Stale experiment sources")
+    result = compare(args.render_dir, meta)
+    print(json.dumps(result, indent=2))
     return 0
 
 

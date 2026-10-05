@@ -116,7 +116,7 @@ class Lens:
     def coc_pixels(self, depth_m: float, height_px: int) -> float:
         """Thin-lens circle-of-confusion diameter in pixels for a point at depth."""
         f, s, a = self.lens_m, self.focus_m, 2 * self.aperture_radius
-        coc_sensor = abs(a * f * (depth_m - s) / (depth_m * (s - f)))
+        coc_sensor = abs(a * f * (depth_m - s) / (depth_m * s))
         return coc_sensor / self.sensor_m * height_px
 
     def sensor(self, width, height, spp, thin_lens: bool, rfilter: str = "gaussian") -> dict:
@@ -148,7 +148,7 @@ class Lens:
             "f_number": self.f_number, "aperture_radius_m": self.aperture_radius,
             "focus_distance_m": self.focus_m, "fov_y_deg": self.fov_y,
             "intrinsics_px": {"fx": fy, "fy": fy, "cx": width / 2, "cy": height / 2},
-            "coc_diameter_px_at_infinity": self.lens_m ** 2 / (self.f_number * (self.focus_m - self.lens_m))
+            "coc_diameter_px_at_infinity": self.lens_m ** 2 / (self.f_number * self.focus_m)
             / self.sensor_m * height,
         }
 
@@ -234,10 +234,13 @@ def main(argv=None) -> int:
           f"CoC at infinity {lens.metadata(args.width, args.height)['coc_diameter_px_at_infinity']:.1f} px")
 
     out = Path(args.out)
+    if out.exists() and any(out.iterdir()):
+        raise ValueError("Refusing to mix passes with an existing render; choose a fresh --out directory")
     out.mkdir(parents=True, exist_ok=True)
     meta = {"variant": variant, "mitsuba": mi.__version__, "resolution": [args.width, args.height],
             "view": args.view, "camera": lens.metadata(args.width, args.height),
-            "integrator": {"type": "path", "max_depth": args.max_depth},
+            "integrator": {"type": "path", "max_depth": args.max_depth, "rr_depth": 6, "hide_emitters": False},
+            "qualified_reference": False, "denoising": False, "seed": args.seed,
             "shapes": shapes, "triangles": tris, "passes": {}}
 
     if "sharp" in args.passes:

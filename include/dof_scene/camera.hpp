@@ -50,7 +50,7 @@ struct Lens {
         if (depth <= 0 || focusDistance <= focal || fNumber <= 0 || sensorHeightMm <= 0 || height <= 0) return 0;
         // Thin-lens CoC is a diameter; the gather footprint needs its radius.
         return 0.5f * (focal * focal / fNumber) * (depth - focusDistance) /
-            (depth * (focusDistance - focal)) * height / (sensorHeightMm * 0.001f);
+            (depth * focusDistance) * height / (sensorHeightMm * 0.001f);
     }
 };
 
