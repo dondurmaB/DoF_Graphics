@@ -1,5 +1,11 @@
 # Mitsuba Cafe
 
+For defensible quantitative comparisons use [the qualified stage-2 pipeline](STAGE2.md).
+The full-lighting render/viewer commands below produce previews; they do not
+establish convergence. The legacy Python gather is not identical to the native
+shader and is not used for the qualified benchmark. Existing output directories
+are now refused by `render.py` to prevent stale partial-pass pairing.
+
 A physically based cafe interior for [Mitsuba 3](https://mitsuba.readthedocs.io/), built to be the realistic counterpart of the OpenGL `DoFScene`. It uses path-traced global illumination, sun and sky light through real window openings, soft shadows, glass that refracts, metals, glazed ceramics and procedural textures. From one camera it renders three pixel-aligned passes:
 
 | Output | What it is |

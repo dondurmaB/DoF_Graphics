@@ -156,5 +156,16 @@ def compare(directory, context):
     write_json(d / 'qualification.json', result)
     if not qualified:
         raise ValueError('Reference/input noise is not sufficiently below measured gather error')
+    # Attach the measured qualification to each reference's own sidecar too.
+    # It is recomputed, never trusted as a free-standing boolean on recompare.
+    for replica in ('a', 'b'):
+        p = d / f'reference-{replica}.exr'
+        record = records[f'reference-{replica}']
+        record['qualification'] = dict(
+            report_sha256=file_hash(d / 'qualification.json'),
+            independent_pair_sha256=records['reference-b' if replica=='a' else 'reference-a']['sha256'],
+            whole=noise(ref_a,ref_b), depth_edges=noise(ref_a,ref_b,mask),
+            scope='empirical equal-N noise; not a systematic-bias or worst-pixel bound')
+        write_json(str(p) + '.json', record)
     write_json(d / 'results.json', result)
     return result

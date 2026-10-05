@@ -28,7 +28,7 @@ class SensorFootprint(unittest.TestCase):
         for f, s, stop in ((50.,1.8873722024030972,1.8),(85.,2.,1.2),(28.,.5,16.)):
             lens=R.Lens([0,0,0],[0,0,1],f,24.,stop,s)
             sensor=mi.load_dict(lens.sensor(960,540,1,True,'box'))
-            for z in (.3*s,s,10*s):
+            for z in (.3*s,s,10.,10*s):
                 def hit(v):
                     ray,_=sensor.sample_ray(0.,.5,mi.Point2f(.5,v),mi.Point2f(.5,1.))
                     return np.array(ray.o)+np.array(ray.d)*((z-ray.o.z)/ray.d.z)
@@ -112,6 +112,25 @@ class Contracts(unittest.TestCase):
 
 
 class PortEquivalence(unittest.TestCase):
+    def test_naive_disk_orientation_and_100_taps_against_scalar_sampling(self):
+        from gl_gather import Gather
+        from traditional_dof import bilinear
+        rng=np.random.default_rng(4)
+        rgb=rng.random((47,63,3),dtype=np.float32)
+        depth=np.full((47,63),7.,np.float32)
+        c=dict(focal_length_mm=100.,sensor_height_mm=24.,focus_distance_m=1.,f_number=1.)
+        radius=float(abs(signed_coc_radius_px(7.,.1,.024,1.,1.,47)))
+        y,x=23,31
+        expected=np.zeros(3)
+        for i in range(100):
+            r=math.sqrt((i+.5)/100)*radius;angle=i*2.39996323
+            # Native texture y points up; ndarray y points down.
+            expected+=bilinear(rgb,np.asarray(x+math.cos(angle)*r),np.asarray(y-math.sin(angle)*r))
+        with Gather() as g:actual=g.run(rgb,depth,c,'naive')[y,x]
+        # Float32 GLSL trig and hardware bilinear filtering are not a double
+        # arithmetic oracle. The tolerance is 0.0001 on this unit-range fixture.
+        np.testing.assert_allclose(actual,expected/100,atol=1e-4,rtol=1e-5)
+
     def test_native_depth_encoding_matches_linear_adapter(self):
         from gl_gather import Gather
         rng=np.random.default_rng(12)

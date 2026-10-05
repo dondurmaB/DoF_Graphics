@@ -119,7 +119,7 @@ class Lens:
         coc_sensor = abs(a * f * (depth_m - s) / (depth_m * s))
         return coc_sensor / self.sensor_m * height_px
 
-    def sensor(self, width, height, spp, thin_lens: bool, rfilter: str = "gaussian") -> dict:
+    def sensor(self, width, height, spp, thin_lens: bool, rfilter: str = "gaussian", sampler: str = "independent") -> dict:
         import mitsuba as mi
 
         spec = {
@@ -130,7 +130,7 @@ class Lens:
             "far_clip": 1000.0,
             "to_world": mi.ScalarTransform4f().look_at(origin=self.origin.tolist(),
                                                        target=self.target.tolist(), up=[0, 1, 0]),
-            "sampler": {"type": "independent", "sample_count": spp},
+            "sampler": {"type": sampler, "sample_count": spp},
             "film": {"type": "hdrfilm", "width": width, "height": height, "pixel_format": "rgb",
                      "rfilter": {"type": rfilter}},
         }

@@ -21,7 +21,7 @@ ROOT = HERE.parents[1]
 
 def source_manifest():
     paths = [HERE / n for n in ('cafe_scene.py', 'procedural.py', 'props.py', 'render.py',
-                               'stage2_experiment.py', 'gl_gather.py', 'experiment_contract.py')]
+                               'stage2_experiment.py', 'stage2_scene.py', 'gl_gather.py', 'experiment_contract.py')]
     paths += [ROOT / 'shaders/dof_scene/screen.frag']
     return {str(p.relative_to(ROOT)): file_hash(p) for p in paths}
 
@@ -58,7 +58,8 @@ def main(argv=None):
     if args.compare_only:
         import mitsuba as mi
         mi.set_variant('scalar_rgb')
-        manifests = sorted(args.out.glob('f*/context.json'))
+        settings = json.loads((args.out / 'settings.json').read_text()) if (args.out/'settings.json').exists() else {}
+        manifests = [args.out/f'f{stop:g}'/'context.json' for stop in settings.get('stops',[])]
         if not manifests:
             raise ValueError('No usable pairs: no authenticated experiment contexts')
         for p in manifests:
@@ -70,7 +71,7 @@ def main(argv=None):
     config = json.loads(args.config.read_text())
     if (config['spp'] <= 0 or config['chunk_spp'] <= 0 or len(config['stops']) != 2 or
             min(config['stops']) <= 0 or config['gather'] != {'max_radius_px':120., 'samples':100} or
-            config['sampler'] != 'independent' or config['filter'] != 'box' or
+            config['sampler'] not in ('independent','multijitter') or config['filter'] != 'box' or
             not 0 < config['noise_fraction'] <= .1):
         raise ValueError('Invalid stage-2 configuration')
     args.out.mkdir(parents=True, exist_ok=False)
@@ -79,17 +80,20 @@ def main(argv=None):
     if variant == 'scalar_rgb':
         raise RuntimeError('Full experiment requires a vectorized backend; auto found no GPU/LLVM')
     import mitsuba as mi
-    from cafe_scene import build_scene
+    from stage2_scene import build_controlled_scene
     from gl_gather import Gather, SHADER
     start = time.time()
     assets = HERE / 'generated'
-    scene_dict, _ = build_scene(assets)
+    if config['scene_profile'] != 'opaque-diffuse-fixed-flash' or config['integrator']['max_depth'] != 2:
+        raise ValueError('This experiment qualifies only its declared controlled transport model')
+    scene_dict, _ = build_controlled_scene(assets)
     # The existing asset cache is explicitly hashed: stale assets cannot be
     # silently equated with a newly generated scene on another machine.
     sources = source_manifest()
     assets_hashes = {str(p.relative_to(assets)): file_hash(p) for p in sorted(assets.rglob('*')) if p.is_file()}
     scene_hash = digest(dict(recipe={k:v for k,v in sources.items() if Path(k).name in
-                                    ('cafe_scene.py','procedural.py','props.py')}, assets=assets_hashes, seed=7))
+                                    ('cafe_scene.py','procedural.py','props.py','stage2_scene.py')},
+                             assets=assets_hashes, seed=7, profile=config['scene_profile']))
     write_json(args.out / 'scene-assets.json', dict(scene_hash=scene_hash, files=assets_hashes))
     scene_dict['integrator'] = config['integrator']
     scene = mi.load_dict(scene_dict)
@@ -102,7 +106,7 @@ def main(argv=None):
     depth = depth_at_centres(scene, base_lens, w, h)
     sharp = []
     for replica, seed in zip(('a','b'), config['seeds']['sharp']):
-        rgb, _ = R.render_beauty(scene, base_lens.sensor(w,h,1,False,config['filter']),
+        rgb, _ = R.render_beauty(scene, base_lens.sensor(w,h,1,False,config['filter'],config['sampler']),
                                 config['spp'], config['chunk_spp'], seed, 'sharp-' + replica)
         sharp.append(rgb)
         # Save immediately: a later failure must not lose expensive renders.
@@ -115,7 +119,8 @@ def main(argv=None):
         directory = args.out / f'f{stop:g}'
         directory.mkdir()
         context = dict(scene_hash=scene_hash, sources=sources, camera=camera.metadata(w,h),
-                       resolution=[w,h], integrator=config['integrator'], sampler=config['sampler'],
+                       resolution=[w,h], scene_profile=config['scene_profile'],
+                       integrator=config['integrator'], sampler=config['sampler'],
                        filter=config['filter'], variant=variant, mitsuba=mi.__version__,
                        seed_schedule='render_beauty: seed*100003 + chunk_index',
                        chunk_spp=config['chunk_spp'], noise_fraction=config['noise_fraction'],
@@ -138,7 +143,7 @@ def main(argv=None):
                        seed=seed, spp=config['spp'], integrator=config['integrator'], denoising=False,
                        sensor='perspective')
         for replica, seed in zip(('a','b'), config['seeds']['reference']):
-            rgb, _ = R.render_beauty(scene, camera.sensor(w,h,1,True,config['filter']),
+            rgb, _ = R.render_beauty(scene, camera.sensor(w,h,1,True,config['filter'],config['sampler']),
                                     config['spp'], config['chunk_spp'], seed, f'f{stop:g}-reference-{replica}')
             save_image(directory / f'reference-{replica}.exr', rgb, context, f'reference-{replica}',
                        seed=seed, spp=config['spp'], integrator=config['integrator'], denoising=False,
@@ -146,7 +151,7 @@ def main(argv=None):
         with Gather() as gl:
             for kind in ('naive','weighted'):
                 for replica, rgb in zip(('a','b'), sharp):
-                    image = gl.run(rgb, depth, context['camera'], kind, 120.)
+                    image = gl.run(rgb, depth, context['camera'], kind, config['gather']['max_radius_px'])
                     save_image(directory / f'gather-{kind}-{replica}.exr', image, context,
                                f'gather-{kind}-{replica}', variant=kind, renderer=gl.renderer,
                                shader_sha256=file_hash(SHADER),
@@ -177,6 +182,17 @@ def main(argv=None):
                qualified_reference=False,seed=config['seeds']['overview'],spp=overview['spp'],
                integrator=config['integrator'],denoising=False)
     write_json(args.out/'results.json',dict(settings=config, results=results,seconds=time.time()-start))
+    lines = ['# Qualified stage-2 results', '',
+             'All errors are in scene-linear RGB. PSNR peak = 1 linear radiance unit.',
+             'Noise is the equal-N pair difference divided by sqrt(2); reference A is used.', '',
+             '| f-number | gather | region | MAE | RMSE | PSNR dB | reference noise RMS | combined noise / MAE |',
+             '|---:|---|---|---:|---:|---:|---:|---:|']
+    for result in results:
+        for row in result['rows']:
+            lines.append(f"| {result['stop']:g} | {row['variant']} | {row['region']} | {row['mae']:.8g} | "
+                         f"{row['rmse']:.8g} | {row['psnr_db']:.5g} | "
+                         f"{row['reference_noise']['rmse_estimate']:.8g} | {row['noise_to_mae']:.4%} |")
+    (args.out/'RESULTS.md').write_text('\n'.join(lines)+'\n')
     print(f'QUALIFIED experiment complete: {args.out}',flush=True)
     return 0
 
