@@ -1,0 +1,49 @@
+{
+  "resolution": [
+    640,
+    360
+  ],
+  "view": "home",
+  "focal_length_mm": 85.0,
+  "sensor_height_mm": 24.0,
+  "focus_distance_m": 1.8873722024030972,
+  "stops": [
+    1.2,
+    16.0
+  ],
+  "spp": 8192,
+  "chunk_spp": 256,
+  "integrator": {
+    "type": "path",
+    "max_depth": 12,
+    "rr_depth": 6,
+    "hide_emitters": false
+  },
+  "filter": "box",
+  "sampler": "independent",
+  "noise_fraction": 0.1,
+  "gather": {
+    "max_radius_px": 120.0,
+    "samples": 100
+  },
+  "overview": {
+    "view": "wide",
+    "focal_length_mm": 28.0,
+    "resolution": [
+      960,
+      540
+    ],
+    "spp": 1024
+  },
+  "seeds": {
+    "sharp": [
+      17,
+      997
+    ],
+    "reference": [
+      211,
+      431
+    ],
+    "overview": 719
+  }
+}

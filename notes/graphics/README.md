@@ -20,3 +20,9 @@
 | 16 | [Multi-View Depth of Field](16_multiview_dof.md) | Evaluate the aperture integral by re-rendering the scene once per point on the lens. |
 | 17 | [Lens-Sampled Ray Tracing](17_raytraced_dof.md) | Sample the same integral stochastically per pixel to build the reference, and what that reference found. |
 
+
+## Current stage-2 experiment
+
+[Qualified production-gather experiment](stage2_qualified_gather.md): one shared
+Mitsuba scene, actual OpenGL gather, authenticated inputs and measured reference
+noise. Historical numbered notes above describe their original checkpoints.

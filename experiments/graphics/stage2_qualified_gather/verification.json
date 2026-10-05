@@ -1,0 +1,23 @@
+{
+  "build": "PASS: cmake -S . -B build; cmake --build build -j 8",
+  "ctest": "PASS 5/5 suites, 15 native checks + 15 Python test methods",
+  "sensor": "12 sample_ray configurations, including the original 50mm / 1.887372m / 10m case",
+  "shader": "Production GLSL, Apple M4 Max; raw-depth vs linear-depth adapter, scalar 100-tap check, HDR/orientation, 120px support, GGX peak",
+  "qualification": "PASS all eight rows; equal-N independent randomized multijitter seeds, reference=A, delta/sqrt(2)",
+  "recompare": "PASS: --compare-only on the final output before preservation",
+  "visual_inspection": "Inspected wide-stop four-panel comparison, f/22 four-panel comparison and 28mm overview",
+  "native_render": "PASS FBO/shader linkage and 30-frame capture",
+  "native_cursor_smoke": "FAIL: HUD mode button verification failed. Not a passed control test; not required by offscreen experiment.",
+  "not_verified": [
+    "Full-GI/glossy original cafe convergence",
+    "worst-pixel error bounds",
+    "browser live interaction",
+    "other GPUs/backends",
+    "all cafe geometry from all viewpoints"
+  ],
+  "failed_runs_preserved": [
+    "output/stage2/qualified-8192",
+    "output/stage2/direct-8192",
+    "output/stage2/flash-65536"
+  ]
+}

@@ -1,0 +1,4 @@
+Renderer: Apple M4 Max
+Cafe scene: 126 objects; shader programs linked; shadow framebuffer complete
+Scene framebuffer complete: 1500 x 1000
+Saved /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-ray-work/output/stage2/native-render-after-fixes.png (1920x1280)

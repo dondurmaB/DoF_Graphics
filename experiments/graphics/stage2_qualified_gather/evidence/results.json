@@ -1,0 +1,301 @@
+{
+  "settings": {
+    "resolution": [
+      640,
+      360
+    ],
+    "view": "home",
+    "focal_length_mm": 85.0,
+    "sensor_height_mm": 24.0,
+    "focus_distance_m": 1.8873722024030972,
+    "stops": [
+      1.2,
+      22.0
+    ],
+    "spp": 131072,
+    "chunk_spp": 256,
+    "scene_profile": "opaque-diffuse-fixed-flash",
+    "integrator": {
+      "type": "path",
+      "max_depth": 2,
+      "rr_depth": 6,
+      "hide_emitters": false
+    },
+    "filter": "box",
+    "sampler": "multijitter",
+    "noise_fraction": 0.1,
+    "gather": {
+      "max_radius_px": 120.0,
+      "samples": 100
+    },
+    "overview": {
+      "view": "wide",
+      "focal_length_mm": 28.0,
+      "resolution": [
+        960,
+        540
+      ],
+      "spp": 1024
+    },
+    "seeds": {
+      "sharp": [
+        17,
+        997
+      ],
+      "reference": [
+        211,
+        431
+      ],
+      "overview": 719
+    }
+  },
+  "results": [
+    {
+      "schema": 1,
+      "context_hash": "7029d428f1354ed2d36f4d0420497ec0ce9db9d6d6170d7a9815c1957be82fb8",
+      "qualified": true,
+      "colour_space": "scene-linear RGB radiance; no tone mapping or clipping",
+      "reference": "reference-a.exr; independent equal-N reference-b.exr estimates noise",
+      "criterion": "hypot(reference noise, propagated sharp noise) <= noise_fraction * MAE in every row",
+      "edge_definition": "adjacent planar depth ratio >1.3, marked on both sides, dilated by 7 pixels",
+      "edge_fraction": 0.16653211805555557,
+      "rows": [
+        {
+          "variant": "naive",
+          "region": "whole",
+          "mae": 0.004499035942924208,
+          "rmse": 0.019692141008762924,
+          "psnr_db": 34.11414126104437,
+          "psnr_peak_linear": 1.0,
+          "reference_noise": {
+            "rmse_estimate": 2.719408730339551e-05,
+            "std_estimate": 2.7194019433155715e-05,
+            "difference_mean": -8.592245161817455e-08,
+            "difference_mae": 1.2798150963828061e-05,
+            "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+          },
+          "propagated_input_noise": {
+            "rmse_estimate": 2.0000342356197775e-06,
+            "std_estimate": 1.999968262642942e-06,
+            "difference_mean": -2.2973553149717594e-08,
+            "difference_mae": 2.341115151272822e-07,
+            "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+          },
+          "combined_noise_rmse": 2.7267536031118545e-05,
+          "noise_to_mae": 0.006060750875752206,
+          "qualified": true
+        },
+        {
+          "variant": "weighted",
+          "region": "whole",
+          "mae": 0.0016380986413237666,
+          "rmse": 0.007972820173956521,
+          "psnr_db": 41.967760625166896,
+          "psnr_peak_linear": 1.0,
+          "reference_noise": {
+            "rmse_estimate": 2.719408730339551e-05,
+            "std_estimate": 2.7194019433155715e-05,
+            "difference_mean": -8.592245161817455e-08,
+            "difference_mae": 1.2798150963828061e-05,
+            "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+          },
+          "propagated_input_noise": {
+            "rmse_estimate": 2.047775421742961e-06,
+            "std_estimate": 2.047749589982365e-06,
+            "difference_mean": -1.4546107494155606e-08,
+            "difference_mae": 2.1350681994068442e-07,
+            "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+          },
+          "combined_noise_rmse": 2.7271079341357056e-05,
+          "noise_to_mae": 0.016648008034069902,
+          "qualified": true
+        },
+        {
+          "variant": "naive",
+          "region": "depth_edges",
+          "mae": 0.021950842482710342,
+          "rmse": 0.04660049632229342,
+          "psnr_db": 26.63218915594875,
+          "psnr_peak_linear": 1.0,
+          "reference_noise": {
+            "rmse_estimate": 5.554434301929718e-05,
+            "std_estimate": 5.554262348014767e-05,
+            "difference_mean": -6.180912358136995e-07,
+            "difference_mae": 2.4537126003279685e-05,
+            "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+          },
+          "propagated_input_noise": {
+            "rmse_estimate": 3.5103203610808007e-06,
+            "std_estimate": 3.509002907180117e-06,
+            "difference_mean": -1.3599731482587928e-07,
+            "difference_mae": 8.937887047631168e-07,
+            "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+          },
+          "combined_noise_rmse": 5.565515600986818e-05,
+          "noise_to_mae": 0.0025354450998272687,
+          "qualified": true
+        },
+        {
+          "variant": "weighted",
+          "region": "depth_edges",
+          "mae": 0.006342737171862138,
+          "rmse": 0.018487185580356003,
+          "psnr_db": 34.66258398336561,
+          "psnr_peak_linear": 1.0,
+          "reference_noise": {
+            "rmse_estimate": 5.554434301929718e-05,
+            "std_estimate": 5.554262348014767e-05,
+            "difference_mean": -6.180912358136995e-07,
+            "difference_mae": 2.4537126003279685e-05,
+            "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+          },
+          "propagated_input_noise": {
+            "rmse_estimate": 3.6660591275379134e-06,
+            "std_estimate": 3.6654423794293786e-06,
+            "difference_mean": -9.509668434956188e-08,
+            "difference_mae": 8.154766998366332e-07,
+            "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+          },
+          "combined_noise_rmse": 5.566519586754322e-05,
+          "noise_to_mae": 0.008776210389811993,
+          "qualified": true
+        }
+      ],
+      "input_hashes": {
+        "sharp-a": "7f1c61f2f31c907a57c41091dd6840400ee1cfe6fac5c38c7d9508217e0065f0",
+        "sharp-b": "fd0f4395845351b332fb9315e5810b79eb49ceda334e464612757871a68fd120",
+        "reference-a": "2e1314529e26a2f12c6ad87a3903b02b52a49c46043f642bc37765183c962dde",
+        "reference-b": "cbcf05a159c6c21f2cd4fe44421bd01b6a75db3973ad51d78d2172a8f001ed35",
+        "gather-naive-a": "e642c8333ebd9405f6ebde2e905c3b628b62147e664edf690accb6fcd17bf26a",
+        "gather-naive-b": "269f3110f1daa51974d76d47829553d2d47a29df68b974152c2aacf4128f7d3c",
+        "gather-weighted-a": "3a78a207e4fcb9c62c6ea8e3e9a8c510886d716868889cb3a78eccdedb2eab2b",
+        "gather-weighted-b": "ec34110a53ba79db4676102d2eafebe9935673b5db593976c01116c5ee09bb0a"
+      },
+      "stop": 1.2
+    },
+    {
+      "schema": 1,
+      "context_hash": "5e39f676c6da2187f59caca5bed7a71649acf944feafe81a7a4ee15a2ece24a1",
+      "qualified": true,
+      "colour_space": "scene-linear RGB radiance; no tone mapping or clipping",
+      "reference": "reference-a.exr; independent equal-N reference-b.exr estimates noise",
+      "criterion": "hypot(reference noise, propagated sharp noise) <= noise_fraction * MAE in every row",
+      "edge_definition": "adjacent planar depth ratio >1.3, marked on both sides, dilated by 7 pixels",
+      "edge_fraction": 0.16653211805555557,
+      "rows": [
+        {
+          "variant": "naive",
+          "region": "whole",
+          "mae": 0.00041299899705526434,
+          "rmse": 0.0029385800399241192,
+          "psnr_db": 50.637249512815224,
+          "psnr_peak_linear": 1.0,
+          "reference_noise": {
+            "rmse_estimate": 1.3181508996597181e-05,
+            "std_estimate": 1.3181376700369394e-05,
+            "difference_mean": 8.351898384472843e-08,
+            "difference_mae": 4.4402583695189065e-06,
+            "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+          },
+          "propagated_input_noise": {
+            "rmse_estimate": 5.185899191587941e-06,
+            "std_estimate": 5.1858882113908645e-06,
+            "difference_mean": -1.5092002498746566e-08,
+            "difference_mae": 4.642277979179973e-07,
+            "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+          },
+          "combined_noise_rmse": 1.4164947223787488e-05,
+          "noise_to_mae": 0.03429777632581525,
+          "qualified": true
+        },
+        {
+          "variant": "weighted",
+          "region": "whole",
+          "mae": 0.0002921051041823251,
+          "rmse": 0.0015370538373453578,
+          "psnr_db": 56.266218409894165,
+          "psnr_peak_linear": 1.0,
+          "reference_noise": {
+            "rmse_estimate": 1.3181508996597181e-05,
+            "std_estimate": 1.3181376700369394e-05,
+            "difference_mean": 8.351898384472843e-08,
+            "difference_mae": 4.4402583695189065e-06,
+            "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+          },
+          "propagated_input_noise": {
+            "rmse_estimate": 5.199961668544877e-06,
+            "std_estimate": 5.1999515098552665e-06,
+            "difference_mean": -1.4536126716140846e-08,
+            "difference_mae": 4.6753913251349233e-07,
+            "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+          },
+          "combined_noise_rmse": 1.4170101650366113e-05,
+          "noise_to_mae": 0.0485102843034248,
+          "qualified": true
+        },
+        {
+          "variant": "naive",
+          "region": "depth_edges",
+          "mae": 0.0012795025978707027,
+          "rmse": 0.007054932543197533,
+          "psnr_db": 43.030142689240535,
+          "psnr_peak_linear": 1.0,
+          "reference_noise": {
+            "rmse_estimate": 2.4264458897194326e-05,
+            "std_estimate": 2.4264426829732207e-05,
+            "difference_mean": 5.5788855601970236e-08,
+            "difference_mae": 6.6698351727050425e-06,
+            "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+          },
+          "propagated_input_noise": {
+            "rmse_estimate": 1.1487068760305249e-05,
+            "std_estimate": 1.1486778477897159e-05,
+            "difference_mean": -1.15489425484481e-07,
+            "difference_mae": 1.910487715197582e-06,
+            "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+          },
+          "combined_noise_rmse": 2.6846167590134976e-05,
+          "noise_to_mae": 0.020981721830663963,
+          "qualified": true
+        },
+        {
+          "variant": "weighted",
+          "region": "depth_edges",
+          "mae": 0.000716261735860077,
+          "rmse": 0.003548791898283121,
+          "psnr_db": 48.998389340053706,
+          "psnr_peak_linear": 1.0,
+          "reference_noise": {
+            "rmse_estimate": 2.4264458897194326e-05,
+            "std_estimate": 2.4264426829732207e-05,
+            "difference_mean": 5.5788855601970236e-08,
+            "difference_mae": 6.6698351727050425e-06,
+            "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+          },
+          "propagated_input_noise": {
+            "rmse_estimate": 1.1523125706192161e-05,
+            "std_estimate": 1.1522853649924863e-05,
+            "difference_mean": -1.1198038328087446e-07,
+            "difference_mae": 1.9184226581898255e-06,
+            "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+          },
+          "combined_noise_rmse": 2.6861615580868166e-05,
+          "noise_to_mae": 0.03750251372651244,
+          "qualified": true
+        }
+      ],
+      "input_hashes": {
+        "sharp-a": "7f1c61f2f31c907a57c41091dd6840400ee1cfe6fac5c38c7d9508217e0065f0",
+        "sharp-b": "fd0f4395845351b332fb9315e5810b79eb49ceda334e464612757871a68fd120",
+        "reference-a": "aba0c19419a3906a2124d730da141cfc413603b8c92ed4e0b1e6dc61e434c3b7",
+        "reference-b": "d15b137ab97f7e681eea05160f4374a0c6f67cbbd6ce621db69117755f1df877",
+        "gather-naive-a": "b5d66d44ba6335aec4c11557cc2039a9054cdb5ce9e776df65937bdc5b1a6d71",
+        "gather-naive-b": "8a23619ef75d92cd95f23cff3924cd4eb32f519ac4531bab8894ee906936f3f3",
+        "gather-weighted-a": "77bb75a18cf1572a5f38ffab6a13385e21d73495550c33f287b42bb7f514c6c5",
+        "gather-weighted-b": "827fe5e3e450ef617a1d21eecc46951a6bcf502d8492772ba0ab2fe06f593703"
+      },
+      "stop": 22.0
+    }
+  ],
+  "seconds": 402.9861171245575
+}

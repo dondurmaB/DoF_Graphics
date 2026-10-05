@@ -1,5 +1,12 @@
 # Depth of Field Research
 
+The current, qualified stage-2 experiment is documented in
+[the run guide](renderer/mitsuba/STAGE2.md) and
+[the meeting account](notes/graphics/stage2_qualified_gather.md).
+It feeds Mitsuba sharp/depth into the production OpenGL gather and compares
+against independently noise-qualified Mitsuba thin-lens renders. It does not
+compare the independently authored OpenGL and Mitsuba cafés.
+
 Educational C++17 / OpenGL 3.3 Core project for learning the graphics pipeline before building monocular-depth-based Depth of Field experiments.
 
 The longer-term pipeline is:

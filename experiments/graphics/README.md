@@ -20,3 +20,9 @@
 
 Experiments 01-14 archive a source snapshot each, because the active `src/` moved on after them. Experiments 15-17 do not: all three are one program, `DoFApproaches`, rendering one shared scene through three different visibility solves, selected with `--method 1|2|3`. Copying it three times would only let the copies drift apart and destroy the comparison, so those directories hold the setup, the commands and the measured findings instead.
 
+
+## Qualified stage-2 comparison
+
+[Production OpenGL gather on Mitsuba inputs](stage2_qualified_gather/): reproducible
+settings, float32 references, both gather variants, linear metrics and measured
+noise. This is separate from the historical numbered snapshots.

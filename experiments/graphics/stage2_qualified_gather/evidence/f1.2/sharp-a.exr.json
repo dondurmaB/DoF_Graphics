@@ -1,0 +1,95 @@
+{
+  "schema": 1,
+  "file": "sharp-a.exr",
+  "sha256": "7f1c61f2f31c907a57c41091dd6840400ee1cfe6fac5c38c7d9508217e0065f0",
+  "scene_hash": "72010aeff39e23c5766636f0551e7ff52399787d5101610144adfc04132ea200",
+  "camera_hash": "9dc8a3450b062f6636d2844ebb52c8cf82d057a15b23d89a47c3f10c499777ec",
+  "context_hash": "7029d428f1354ed2d36f4d0420497ec0ce9db9d6d6170d7a9815c1957be82fb8",
+  "context": {
+    "scene_hash": "72010aeff39e23c5766636f0551e7ff52399787d5101610144adfc04132ea200",
+    "sources": {
+      "renderer/mitsuba/cafe_scene.py": "2bd344666ce18dc2913388c9640aa43cc1a69ff73c14b54b732bbb699e0de9e0",
+      "renderer/mitsuba/procedural.py": "873b9131e211fe6030f9283741932cd3149cc3dc94e2ac17dfcb1e398fc60a29",
+      "renderer/mitsuba/props.py": "d4abc7e78f681fde81fe49cd65b42bda6457ac9d8ff8ce5e346bc1243e2bfcf8",
+      "renderer/mitsuba/render.py": "d3e7123b4d031c435ba6f68a619983193fe50434bde4c3f0ebad174298bc882f",
+      "renderer/mitsuba/stage2_experiment.py": "cf8ba6df27a41039a6e6c96d754a1133dc0b34c1ec1e9d487b19ec98b7ebed1f",
+      "renderer/mitsuba/stage2_scene.py": "1e0e01414ac57cbaa8a871d026e140305250a3b1969ccba04f383cb5fe3a47d0",
+      "renderer/mitsuba/gl_gather.py": "1b76565ff2997df9649d9e7c661efeef52eda4c79be6fff60218fa73fb4d1578",
+      "renderer/mitsuba/experiment_contract.py": "13bc0f052488020450e970142b3df68bc5ba94064bfebf24d1d8919f8c0fa9e7",
+      "shaders/dof_scene/screen.frag": "8b6b61e80b4c817920059f65913c1d3ca58ceed32ae161e933d58e5c41bc6109"
+    },
+    "camera": {
+      "origin": [
+        0.34,
+        1.22,
+        1.85
+      ],
+      "target": [
+        -0.4,
+        0.88,
+        -3.0
+      ],
+      "up": [
+        0,
+        1,
+        0
+      ],
+      "forward": [
+        -0.15047085508121094,
+        -0.06913525774001583,
+        -0.9861941177619906
+      ],
+      "focal_length_mm": 85.0,
+      "sensor_height_mm": 24.0,
+      "f_number": 1.2,
+      "aperture_radius_m": 0.03541666666666667,
+      "focus_distance_m": 1.8873722024030972,
+      "fov_y_deg": 16.071421421069587,
+      "intrinsics_px": {
+        "fx": 1275.0,
+        "fy": 1275.0,
+        "cx": 320.0,
+        "cy": 180.0
+      },
+      "coc_diameter_px_at_infinity": 47.8509219776627
+    },
+    "resolution": [
+      640,
+      360
+    ],
+    "scene_profile": "opaque-diffuse-fixed-flash",
+    "integrator": {
+      "type": "path",
+      "max_depth": 2,
+      "rr_depth": 6,
+      "hide_emitters": false
+    },
+    "sampler": "multijitter",
+    "filter": "box",
+    "variant": "metal_ad_rgb",
+    "mitsuba": "3.9.1",
+    "seed_schedule": "render_beauty: seed*100003 + chunk_index",
+    "chunk_spp": 256,
+    "noise_fraction": 0.1,
+    "depth": "first intersection at pixel centre; optical-axis metres; misses=10000m",
+    "gather": {
+      "max_radius_px": 120.0,
+      "samples": 100,
+      "shader_sha256": "8b6b61e80b4c817920059f65913c1d3ca58ceed32ae161e933d58e5c41bc6109",
+      "colour": "RGB32F linear, bilinear",
+      "depth": "R32F metres, nearest",
+      "target": "RGBA32F, linear readback, no display transform"
+    }
+  },
+  "role": "sharp-a",
+  "seed": 17,
+  "spp": 131072,
+  "integrator": {
+    "type": "path",
+    "max_depth": 2,
+    "rr_depth": 6,
+    "hide_emitters": false
+  },
+  "denoising": false,
+  "sensor": "perspective"
+}

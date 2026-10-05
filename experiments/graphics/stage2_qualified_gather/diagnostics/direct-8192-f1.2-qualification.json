@@ -1,0 +1,122 @@
+{
+  "schema": 1,
+  "context_hash": "05a56836c2ec3d802e6db40db8464ce030a9d6c29fc2de46381ce7de388583ba",
+  "qualified": false,
+  "colour_space": "scene-linear RGB radiance; no tone mapping or clipping",
+  "reference": "reference-a.exr; independent equal-N reference-b.exr estimates noise",
+  "criterion": "hypot(reference noise, propagated sharp noise) <= noise_fraction * MAE in every row",
+  "edge_definition": "adjacent planar depth ratio >1.3, marked on both sides, dilated by 7 pixels",
+  "edge_fraction": 0.16653211805555557,
+  "rows": [
+    {
+      "variant": "naive",
+      "region": "whole",
+      "mae": 0.0003125930124147394,
+      "rmse": 0.0011715932993648032,
+      "psnr_db": 58.624462416442654,
+      "psnr_peak_linear": 1.0,
+      "reference_noise": {
+        "rmse_estimate": 0.00016810246966114675,
+        "std_estimate": 0.00016810148653706203,
+        "difference_mean": 8.130562178635248e-07,
+        "difference_mae": 8.409623369990166e-05,
+        "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+      },
+      "propagated_input_noise": {
+        "rmse_estimate": 5.3626573015212e-06,
+        "std_estimate": 5.358861422229302e-06,
+        "difference_mean": -2.8529840834177794e-07,
+        "difference_mae": 2.4733994502178364e-06,
+        "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+      },
+      "combined_noise_rmse": 0.00016818798530070548,
+      "noise_to_mae": 0.5380414104636431,
+      "qualified": false
+    },
+    {
+      "variant": "weighted",
+      "region": "whole",
+      "mae": 0.0008692197801722598,
+      "rmse": 0.0036295231830732163,
+      "psnr_db": 48.803008505127615,
+      "psnr_peak_linear": 1.0,
+      "reference_noise": {
+        "rmse_estimate": 0.00016810246966114675,
+        "std_estimate": 0.00016810148653706203,
+        "difference_mean": 8.130562178635248e-07,
+        "difference_mae": 8.409623369990166e-05,
+        "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+      },
+      "propagated_input_noise": {
+        "rmse_estimate": 5.572251999538703e-06,
+        "std_estimate": 5.568568260637016e-06,
+        "difference_mean": -2.864956299460639e-07,
+        "difference_mae": 2.5162488440373066e-06,
+        "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+      },
+      "combined_noise_rmse": 0.00016819479866667436,
+      "noise_to_mae": 0.19350088723630052,
+      "qualified": false
+    },
+    {
+      "variant": "naive",
+      "region": "depth_edges",
+      "mae": 0.0009237998351495494,
+      "rmse": 0.0025110504333458964,
+      "psnr_db": 52.00289129170834,
+      "psnr_peak_linear": 1.0,
+      "reference_noise": {
+        "rmse_estimate": 0.00025865124286799285,
+        "std_estimate": 0.00025864963846772515,
+        "difference_mean": 1.2883770197154328e-06,
+        "difference_mae": 0.0001462997512503707,
+        "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+      },
+      "propagated_input_noise": {
+        "rmse_estimate": 8.48189118735903e-06,
+        "std_estimate": 8.478484713277866e-06,
+        "difference_mean": -3.3992670066448405e-07,
+        "difference_mae": 4.191798381126307e-06,
+        "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+      },
+      "combined_noise_rmse": 0.000258790277860803,
+      "noise_to_mae": 0.2801367439288498,
+      "qualified": false
+    },
+    {
+      "variant": "weighted",
+      "region": "depth_edges",
+      "mae": 0.003036728092270424,
+      "rmse": 0.008164229942973774,
+      "psnr_db": 41.76169544031889,
+      "psnr_peak_linear": 1.0,
+      "reference_noise": {
+        "rmse_estimate": 0.00025865124286799285,
+        "std_estimate": 0.00025864963846772515,
+        "difference_mean": 1.2883770197154328e-06,
+        "difference_mae": 0.0001462997512503707,
+        "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+      },
+      "propagated_input_noise": {
+        "rmse_estimate": 8.94954747273507e-06,
+        "std_estimate": 8.946771046021278e-06,
+        "difference_mean": -3.1523901032062343e-07,
+        "difference_mae": 4.382438678298135e-06,
+        "method": "equal-N independent A,B; reference=A; difference/sqrt(2)"
+      },
+      "combined_noise_rmse": 0.00025880602743584655,
+      "noise_to_mae": 0.08522528839332105,
+      "qualified": true
+    }
+  ],
+  "input_hashes": {
+    "sharp-a": "a8a7ed284508eb9ba79d7e3e93354c4391086a75c959fb092facff2bc5a28c18",
+    "sharp-b": "76dfc92fa543f2b18ff460c3a8cc737c45071592bec5da821f8624dd4b70c356",
+    "reference-a": "a5b6ec6f3d2c0409b9a3672d86298392e46198c28fdb10b1bfd58b49c2a8676b",
+    "reference-b": "0344f57b1457415276b7177ceced46667e8c70dc1357813b2f9f5c9f85a3aec9",
+    "gather-naive-a": "b7314bb0c2d5c80d087de94b53391cd5cc44a87f4d6f0dbccda7c9ae92be2a65",
+    "gather-naive-b": "ed539345737558832661a4713328527cddfe9a17f09ce43ecfc6b623f3dcf13e",
+    "gather-weighted-a": "a9304b7a918404a223bcf2360a5aaec6d9f3d0c269eaabfd06e264f4f788ae09",
+    "gather-weighted-b": "6f54545b047368374b2d94028dee3343e841d0f0db5d4fb92d0cc9cde7d21068"
+  }
+}

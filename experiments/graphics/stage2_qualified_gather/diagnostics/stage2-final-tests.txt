@@ -1,0 +1,19 @@
+Test project /Users/beibarys.myrzash/Documents/Classes Fall 2026-27/Directed Research/dof-research-ray-work/build
+    Start 1: dof_scene_math_and_mesh
+1/5 Test #1: dof_scene_math_and_mesh ..........   Passed    0.04 sec
+    Start 2: stage2_sensor
+2/5 Test #2: stage2_sensor ....................   Passed    0.41 sec
+    Start 3: stage2_contracts
+3/5 Test #3: stage2_contracts .................   Passed    0.45 sec
+    Start 4: stage2_gpu
+4/5 Test #4: stage2_gpu .......................   Passed    0.39 sec
+    Start 5: stage2_viewer
+5/5 Test #5: stage2_viewer ....................   Passed    0.27 sec
+
+100% tests passed, 0 tests failed out of 5
+
+Label Time Summary:
+opengl              =   0.39 sec*proc (1 test)
+port_equivalence    =   0.39 sec*proc (1 test)
+
+Total Test time (real) =   1.57 sec

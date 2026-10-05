@@ -1,0 +1,5 @@
+Renderer: Apple M4 Max
+Cafe scene: 126 objects; shader programs linked; shadow framebuffer complete
+Scene framebuffer complete: 1473 x 1000
+Scene framebuffer complete: 1500 x 1000
+DoFScene: HUD mode button verification failed

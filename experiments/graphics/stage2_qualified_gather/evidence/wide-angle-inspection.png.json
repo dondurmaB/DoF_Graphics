@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "file": "wide-angle-inspection.png",
+  "sha256": "0fd36cf521d6411690298ef44230035655184debda4aee373db184cb41718de0",
+  "scene_hash": "72010aeff39e23c5766636f0551e7ff52399787d5101610144adfc04132ea200",
+  "camera_hash": "582e4d4517e14eba60357be830cdd2f993447b2c11765ebb71cb41ca817549cc",
+  "context_hash": "70c43657fcb8e68b8cc36f4f651df106b49f2da4ebb334602878fa779a65f0ca",
+  "context": {
+    "scene_hash": "72010aeff39e23c5766636f0551e7ff52399787d5101610144adfc04132ea200",
+    "camera": {
+      "origin": [
+        2.6,
+        1.55,
+        2.9
+      ],
+      "target": [
+        -1.2,
+        1.0,
+        -3.0
+      ],
+      "up": [
+        0,
+        1,
+        0
+      ],
+      "forward": [
+        -0.5398222879036506,
+        -0.0781321732492126,
+        -0.8381451312188261
+      ],
+      "focal_length_mm": 28.0,
+      "sensor_height_mm": 24.0,
+      "f_number": 16.0,
+      "aperture_radius_m": 0.000875,
+      "focus_distance_m": 1.8873722024030972,
+      "fov_y_deg": 46.39718102729637,
+      "intrinsics_px": {
+        "fx": 630.0,
+        "fy": 630.0,
+        "cx": 480.0,
+        "cy": 270.0
+      },
+      "coc_diameter_px_at_infinity": 0.5841455112013633
+    }
+  },
+  "role": "inspection-only-display",
+  "linear_source_sha256": "ff0e3f853e48517f2bffc4cbab554aa49f7096ca7e19b04aec3826e2d5c770aa",
+  "display_transform": "ACES fit after exposure multiplier .8, then sRGB; 8 bit"
+}
