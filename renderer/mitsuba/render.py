@@ -14,6 +14,7 @@ Examples:
   python render.py --preview                              # quick local check
   python render.py --res 1920x1080 --spp 1024 --out output/mitsuba/cafe
   python render.py --focus-target books --f-number 1.4    # focus the midground
+  python render.py --scene cafe --roll 12                 # camera tilted 12 degrees about its axis
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -31,18 +33,14 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 REPO = HERE.parent.parent
 
-VIEWS = {
-    # Seated at the hero table, looking down the room toward the counter.
-    "home": {"origin": (0.34, 1.22, 1.85), "target": (-0.4, 0.88, -3.0)},
-    # Lower and closer: strong foreground, the counter far behind.
-    "close": {"origin": (0.12, 0.98, 0.95), "target": (-0.25, 0.86, -2.0)},
-    # From the front corner, taking in the windows and most of the room.
-    "wide": {"origin": (2.6, 1.55, 2.9), "target": (-1.2, 1.0, -3.0)},
-}
-
+import scene_api as S  # noqa: E402
 
 def parse_args(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--scene", default="cafe", help=f"scene id; available: {', '.join(S.list_scenes())}")
+    ap.add_argument("--scene-seed", type=int, default=None, help="seed for the scene's procedural layout (default: the scene's own)")
+    ap.add_argument("--env", default="clear", help="environment preset the scene implements")
+    ap.add_argument("--roll", type=float, default=None, help="camera roll about the optical axis, degrees (default: the view's)")
     ap.add_argument("--variant", default="auto",
                     help="Mitsuba variant, or 'auto' for cuda > metal > llvm > scalar (rgb)")
     ap.add_argument("--res", default="1280x720", help="WIDTHxHEIGHT")
@@ -50,19 +48,19 @@ def parse_args(argv=None):
     ap.add_argument("--dof-spp", type=int, default=None, help="override spp for the DoF pass (default: --spp)")
     ap.add_argument("--spp-per-pass", type=int, default=64,
                     help="split rendering into chunks of this many spp to bound GPU memory")
-    ap.add_argument("--max-depth", type=int, default=12)
+    ap.add_argument("--max-depth", type=int, default=None, help="default: the scene's own")
     ap.add_argument("--passes", default="sharp,dof,gbuffer", help="comma list of sharp,dof,gbuffer")
-    ap.add_argument("--view", choices=sorted(VIEWS), default="home")
+    ap.add_argument("--view", default=None, help="a view declared by the scene (default: its default_view)")
     ap.add_argument("--lens", type=float, default=50.0, help="focal length, mm")
-    ap.add_argument("--sensor-height", type=float, default=24.0, help="sensor height, mm")
+    ap.add_argument("--sensor-height", type=float, default=S.SENSOR_HEIGHT_MM, help="sensor height, mm")
     ap.add_argument("--f-number", type=float, default=1.8)
     ap.add_argument("--focus", type=float, default=None, help="focus distance, meters (planar)")
-    ap.add_argument("--focus-target", default="teapot", help="named point to focus on (see --list-targets)")
+    ap.add_argument("--focus-target", default=None, help="named point to focus on (see --list-targets; default: the view's)")
     ap.add_argument("--list-targets", action="store_true")
     ap.add_argument("--exposure", type=float, default=0.0, help="EV applied to PNG previews only")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--out", default=str(REPO / "output" / "mitsuba" / "cafe"))
-    ap.add_argument("--assets", default=str(HERE / "generated"), help="procedural asset cache")
+    ap.add_argument("--out", default=None, help="default: output/mitsuba/<scene>")
+    ap.add_argument("--assets", default=str(HERE / "generated"), help="procedural asset cache root")
     ap.add_argument("--rebuild-assets", action="store_true")
     ap.add_argument("--preview", action="store_true", help="640x360, 32 spp")
     args = ap.parse_args(argv)
@@ -90,6 +88,18 @@ def pick_variant(requested: str) -> str:
     return "scalar_rgb"
 
 
+def rolled_up(forward: np.ndarray, roll_deg: float) -> np.ndarray:
+    """World-up projected perpendicular to `forward`, rotated about `forward` by roll_deg."""
+    up = np.array([0.0, 1.0, 0.0])
+    up = up - np.dot(up, forward) * forward
+    norm = np.linalg.norm(up)
+    if norm < 1e-6:
+        raise ValueError("camera looks straight up or down; roll is undefined")
+    up /= norm
+    a = math.radians(roll_deg)
+    return up * math.cos(a) + np.cross(forward, up) * math.sin(a)
+
+
 class Lens:
     """Thin-lens camera matching the DoFScene/DoFApproaches convention.
 
@@ -99,10 +109,12 @@ class Lens:
     here is planar z-depth, the same quantity written to depth.exr.
     """
 
-    def __init__(self, origin, target, lens_mm, sensor_mm, f_number, focus_m):
+    def __init__(self, origin, target, lens_mm, sensor_mm, f_number, focus_m, roll_deg=0.0):
         self.origin = np.asarray(origin, float)
         self.target = np.asarray(target, float)
         self.forward = (self.target - self.origin) / np.linalg.norm(self.target - self.origin)
+        self.roll_deg = float(roll_deg)
+        self.up = rolled_up(self.forward, self.roll_deg)
         self.lens_m = lens_mm / 1000.0
         self.sensor_m = sensor_mm / 1000.0
         self.f_number = f_number
@@ -114,10 +126,26 @@ class Lens:
         return float(np.dot(np.asarray(point, float) - self.origin, self.forward))
 
     def coc_pixels(self, depth_m: float, height_px: int) -> float:
-        """Thin-lens circle-of-confusion diameter in pixels for a point at depth."""
-        f, s, a = self.lens_m, self.focus_m, 2 * self.aperture_radius
-        coc_sensor = abs(a * f * (depth_m - s) / (depth_m * (s - f)))
-        return coc_sensor / self.sensor_m * height_px
+        """Circle-of-confusion diameter in pixels for a point at planar depth.
+
+        Mitsuba's `thinlens` keeps the field of view fixed by the focal length
+        (image distance = f), so the diameter is H f^2 |z - s| / (N z s sensor).
+        The textbook form divides by (s - f) instead of s; it overestimates
+        by s / (s - f), measured 16-29% at 135 mm.
+        """
+        f, s = self.lens_m, self.focus_m
+        return height_px * f * f * abs(depth_m - s) / (self.f_number * depth_m * s * self.sensor_m)
+
+    def coc_map(self, depth: np.ndarray, height_px: int) -> np.ndarray:
+        """Signed CoC diameter in pixels per pixel: positive behind the focus plane, negative in front.
+
+        Pixels with no surface (depth = inf) get the at-infinity value, positive.
+        """
+        f, s = self.lens_m, self.focus_m
+        scale = height_px * f * f / (self.f_number * s * self.sensor_m)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            signed = np.where(np.isfinite(depth), scale * (depth - s) / depth, scale)
+        return signed.astype(np.float32)
 
     def sensor(self, width, height, spp, thin_lens: bool, rfilter: str = "gaussian") -> dict:
         import mitsuba as mi
@@ -129,7 +157,7 @@ class Lens:
             "near_clip": 0.01,
             "far_clip": 1000.0,
             "to_world": mi.ScalarTransform4f().look_at(origin=self.origin.tolist(),
-                                                       target=self.target.tolist(), up=[0, 1, 0]),
+                                                       target=self.target.tolist(), up=self.up.tolist()),
             "sampler": {"type": "independent", "sample_count": spp},
             "film": {"type": "hdrfilm", "width": width, "height": height, "pixel_format": "rgb",
                      "rfilter": {"type": rfilter}},
@@ -142,14 +170,15 @@ class Lens:
     def metadata(self, width, height) -> dict:
         fy = self.lens_m / self.sensor_m * height
         return {
-            "origin": self.origin.tolist(), "target": self.target.tolist(), "up": [0, 1, 0],
+            "origin": self.origin.tolist(), "target": self.target.tolist(), "up": self.up.tolist(),
+            "roll_deg": self.roll_deg,
+            "aperture": {"shape": "disc", "rotation_deg": 0.0},
             "forward": self.forward.tolist(),
             "focal_length_mm": self.lens_m * 1000, "sensor_height_mm": self.sensor_m * 1000,
             "f_number": self.f_number, "aperture_radius_m": self.aperture_radius,
             "focus_distance_m": self.focus_m, "fov_y_deg": self.fov_y,
             "intrinsics_px": {"fx": fy, "fy": fy, "cx": width / 2, "cy": height / 2},
-            "coc_diameter_px_at_infinity": self.lens_m ** 2 / (self.f_number * (self.focus_m - self.lens_m))
-            / self.sensor_m * height,
+            "coc_diameter_px_at_infinity": self.lens_m ** 2 / (self.f_number * self.focus_m) / self.sensor_m * height,
         }
 
 
@@ -203,41 +232,70 @@ def render_gbuffer(scene, sensor_dict, lens: Lens, seed):
     return depth, layers, time.time() - t0
 
 
+def write_gbuffer(path: Path, layers: dict) -> None:
+    import mitsuba as mi
+
+    gb = np.concatenate([layers["pos"], layers["nn"], layers["alb"], layers["idx"][..., :1]], -1)
+    mi.Bitmap(gb, channel_names=["P.X", "P.Y", "P.Z", "N.X", "N.Y", "N.Z", "albedo.R", "albedo.G",
+                                 "albedo.B", "shape_index.Y"]).write(str(path))
+
+
+def git_state() -> dict:
+    try:
+        run = lambda *c: subprocess.run(["git", *c], cwd=REPO, capture_output=True, text=True, check=True).stdout.strip()
+        return {"commit": run("rev-parse", "HEAD"), "dirty": bool(run("status", "--porcelain", "--untracked-files=no"))}
+    except Exception:
+        return {"commit": None, "dirty": None}
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     variant = pick_variant(args.variant)
     import mitsuba as mi
 
-    from cafe_scene import build_scene
-
     t0 = time.time()
-    scene_dict, focus_points = build_scene(Path(args.assets), args.rebuild_assets)
+    scene_def = S.load_scene(args.scene)
+    view_name = args.view or scene_def.default_view
+    if view_name not in scene_def.views:
+        raise SystemExit(f"scene {args.scene!r} has no view {view_name!r}; choose from {sorted(scene_def.views)}")
+    view = scene_def.views[view_name]
+    ctx = S.make_context(scene_def, Path(args.assets), args.scene_seed, args.env, args.rebuild_assets)
+    bundle = S.build_checked(scene_def, ctx)
+    focus_points = bundle.focus_points
     if args.list_targets:
         for k, v in focus_points.items():
             print(f"{k:10s} {v}")
         return 0
-    view = VIEWS[args.view]
-    probe = Lens(view["origin"], view["target"], args.lens, args.sensor_height, args.f_number, 1.0)
+    roll = view.roll_deg if args.roll is None else args.roll
+    target_name = args.focus_target or view.focus or next(iter(focus_points))
+    probe = Lens(view.origin, view.target, args.lens, args.sensor_height, args.f_number, 1.0, roll)
     if args.focus is None:
-        point = focus_points[args.focus_target]
-        point = point[0] if isinstance(point[0], list) else point
-        args.focus = probe.depth_of(point)
-    lens = Lens(view["origin"], view["target"], args.lens, args.sensor_height, args.f_number, args.focus)
+        args.focus = probe.depth_of(focus_points[target_name][0])
+    lens = Lens(view.origin, view.target, args.lens, args.sensor_height, args.f_number, args.focus, roll)
 
-    scene_dict["integrator"] = {"type": "path", "max_depth": args.max_depth, "rr_depth": 6}
+    max_depth = args.max_depth or scene_def.max_depth
+    scene_dict = dict(bundle.scene)
+    scene_dict["integrator"] = {"type": "path", "max_depth": max_depth, "rr_depth": scene_def.rr_depth}
     scene_dict["sensor"] = lens.sensor(args.width, args.height, 1, thin_lens=False)
     scene = mi.load_dict(scene_dict)
     shapes = len(scene.shapes())
     tris = sum(int(s.face_count()) for s in scene.shapes() if hasattr(s, "face_count"))
     print(f"variant {variant} | {shapes} shapes, {tris:,} triangles | load {time.time() - t0:.1f}s")
-    print(f"lens {args.lens:.0f} mm f/{args.f_number:g} | focus {lens.focus_m:.3f} m ({args.focus_target}) | "
+    print(f"lens {args.lens:.0f} mm f/{args.f_number:g} | focus {lens.focus_m:.3f} m ({target_name}) | roll {roll:g} deg | "
           f"CoC at infinity {lens.metadata(args.width, args.height)['coc_diameter_px_at_infinity']:.1f} px")
 
-    out = Path(args.out)
+    out = Path(args.out or REPO / "output" / "mitsuba" / args.scene)
     out.mkdir(parents=True, exist_ok=True)
-    meta = {"variant": variant, "mitsuba": mi.__version__, "resolution": [args.width, args.height],
-            "view": args.view, "camera": lens.metadata(args.width, args.height),
-            "integrator": {"type": "path", "max_depth": args.max_depth},
+    meta = {"contract_version": S.CONTRACT_VERSION,
+            "scene": {"id": scene_def.id, "group": scene_def.group, "seed": ctx.seed, "env": ctx.env,
+                      "fingerprint": S.fingerprint(bundle.scene, [ctx.shared_dir, ctx.assets_dir]),
+                      "asset_version": scene_def.asset_version, **bundle.meta},
+            "git": git_state(), "variant": variant, "mitsuba": mi.__version__,
+            "resolution": [args.width, args.height], "view": view_name, "focus_target": target_name,
+            "render_seed": args.seed, "exposure_ev_png_only": args.exposure,
+            "camera": lens.metadata(args.width, args.height),
+            "integrator": {"type": "path", "max_depth": max_depth, "rr_depth": scene_def.rr_depth},
+            "coc_formula": "H f^2 |z - s| / (N z s sensor_h), planar z, matches Mitsuba thinlens",
             "shapes": shapes, "triangles": tris, "passes": {}}
 
     if "sharp" in args.passes:
@@ -255,7 +313,7 @@ def main(argv=None) -> int:
         meta["passes"]["dof"] = {"spp": spp, "seconds": round(sec, 2)}
     if "gbuffer" in args.passes:
         depth, layers, sec = render_gbuffer(scene, lens.sensor(args.width, args.height, 1, False, "box"),
-                                            lens, args.seed + 2)
+                                            lens, (args.seed + 2) * 100003 + 50000)
         np.save(out / "depth.npy", depth)
         mi.Bitmap(np.where(np.isfinite(depth), depth, 0.0)[..., None]).write(str(out / "depth.exr"))
         finite = depth[np.isfinite(depth)]
@@ -263,16 +321,12 @@ def main(argv=None) -> int:
         vis = 1.0 - np.clip((np.log(np.where(np.isfinite(depth), depth, far)) - math.log(near))
                             / (math.log(far) - math.log(near)), 0, 1)
         save_png(out / "depth.png", np.repeat(vis[..., None], 3, -1))
-        gb = np.concatenate([layers["pos"], layers["nn"], layers["alb"], layers["idx"][..., :1]], -1)
-        mi.Bitmap(gb, channel_names=["P.X", "P.Y", "P.Z", "N.X", "N.Y", "N.Z", "albedo.R", "albedo.G",
-                                     "albedo.B", "shape_index.Y"]).write(str(out / "gbuffer.exr"))
+        write_gbuffer(out / "gbuffer.exr", layers)
         save_png(out / "normal.png", 0.5 + 0.5 * layers["nn"])
-        coc = np.vectorize(lambda d: lens.coc_pixels(d, args.height) if np.isfinite(d) else
-                           lens.metadata(args.width, args.height)["coc_diameter_px_at_infinity"])
         meta["depth_range_m"] = [near, float(finite.max())]
         meta["sky_fraction"] = float(1.0 - finite.size / depth.size)
         meta["coc_px_percentiles"] = {str(p): float(v) for p, v in zip(
-            (5, 50, 95), np.percentile(coc(depth[::8, ::8]), (5, 50, 95)))}
+            (5, 50, 95), np.percentile(np.abs(lens.coc_map(depth[::8, ::8], args.height)), (5, 50, 95)))}
         meta["passes"]["gbuffer"] = {"spp": 1, "seconds": round(sec, 2)}
 
     (out / "metadata.json").write_text(json.dumps(meta, indent=2))

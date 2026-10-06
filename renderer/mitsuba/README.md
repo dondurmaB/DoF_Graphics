@@ -27,7 +27,7 @@ python renderer/mitsuba/render.py --focus-target books --f-number 1.4 --view clo
 
 `--variant auto` picks `cuda_ad_rgb`, then `metal_ad_rgb` (Apple GPU), then `llvm_ad_rgb`, then `scalar_rgb`. On an M4 Max, 1280x720 at 2048 spp takes about 70 s per beauty pass.
 
-Other options: `--view home|close|wide`, `--lens mm`, `--sensor-height mm`, `--f-number`, `--focus meters` (overrides `--focus-target`), `--passes sharp,dof,gbuffer`, `--dof-spp`, `--max-depth`, `--seed`, `--exposure EV` (previews only), `--rebuild-assets`.
+Other options: `--scene <id>`, `--scene-seed`, `--env`, `--roll degrees` (tilt the camera about its optical axis), `--view` (a view the scene declares; the cafe has `home|close|wide`), `--lens mm`, `--sensor-height mm`, `--f-number`, `--focus meters` (overrides `--focus-target`), `--passes sharp,dof,gbuffer`, `--dof-spp`, `--max-depth`, `--seed`, `--exposure EV` (previews only), `--rebuild-assets`.
 
 ## Interactive viewer
 
@@ -95,7 +95,7 @@ Units are meters, y is up, and the camera looks toward -z, the same convention a
 
 About 626k triangles in total. Glassware is modelled as closed shells with real wall thickness, so the dielectrics refract correctly.
 
-Files: `procedural.py` holds the numpy mesh primitives (lathe, sweep, box, leaf) and procedural textures. `props.py` holds the recipe for each object. `cafe_scene.py` holds materials, layout and lights. `render.py` holds the camera, the passes and the outputs.
+Files: `procedural.py` holds the numpy mesh primitives (lathe, sweep, box, leaf) and procedural textures. `props.py` holds the recipe for each object. `scenes/cafe.py` holds the cafe's materials, layout and lights, and declares it as a `SCENE` under the shared contract (`SCENE_CONTRACT.md`, `scene_api.py`, `scene_kit.py`). `render.py` holds the camera, the passes and the outputs.
 
 ## Design notes
 

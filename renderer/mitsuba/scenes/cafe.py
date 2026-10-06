@@ -1,8 +1,8 @@
 """A physically based cafe interior for Mitsuba 3.
 
-`build_scene(assets_dir)` returns a Mitsuba scene dictionary (no sensor; see
-`camera.py`) plus named points of interest for focusing. Meshes and textures
-are generated procedurally on first use and cached as PLY/PNG in `assets_dir`.
+`SCENE.build(ctx)` returns a Mitsuba scene dictionary (no sensor; the renderer adds
+it) plus named points of interest for focusing. Meshes and textures are generated
+procedurally on first use and cached as PLY/PNG in `ctx.shared_dir`.
 
 Layout, meters, y up, camera looking toward -z:
   room          x in [-3.8, 3.8], z in [-7.0, 3.5], ceiling at 3.2
@@ -24,6 +24,8 @@ import numpy as np
 import mitsuba as mi
 import procedural as G
 import props as P
+from scene_api import BuildContext, SceneBundle, SceneDef, View
+from scene_kit import Assets, SceneBuilder, bitmap, luminance, principled, rgb, xf
 
 ROOM_X, ROOM_Z0, ROOM_Z1, ROOM_H = 3.8, -7.0, 3.5, 3.2
 TABLE_H = 0.75
@@ -37,131 +39,6 @@ SUN_DIRECTION = (-0.80, 0.42, 0.30)
 # bare bulb. Scaling sun and sky together keeps their ratio physical while
 # putting a sunlit patch a few stops under the bulbs, as in a daytime interior.
 DAYLIGHT_SCALE = 60.0
-
-
-class Assets:
-    """Generates each mesh/texture once and hands back its cached path."""
-
-    def __init__(self, root: Path, rebuild: bool = False):
-        self.root = Path(root)
-        self.rebuild = rebuild
-
-    def _path(self, sub: str, name: str, ext: str) -> Path:
-        return self.root / sub / f"{name}.{ext}"
-
-    def mesh(self, name: str, build) -> str:
-        path = self._path("meshes", name, "ply")
-        if self.rebuild or not path.exists():
-            build().write_ply(path)
-        return str(path)
-
-    def meshes(self, name: str, build) -> dict[str, str]:
-        """For recipes returning {part: Mesh}; builds all parts together."""
-        out = {}
-        cached = sorted((self.root / "meshes").glob(f"{name}.*.ply")) if not self.rebuild else []
-        if cached:
-            return {p.stem.split(".", 1)[1]: str(p) for p in cached}
-        parts = build()
-        for part, mesh in parts.items():
-            path = self._path("meshes", f"{name}.{part}", "ply")
-            mesh.write_ply(path)
-            out[part] = str(path)
-        return out
-
-    def texture(self, name: str, build, gray: bool = False) -> str:
-        path = self._path("textures", name, "png")
-        if self.rebuild or not path.exists():
-            (G.save_gray if gray else G.save_rgb)(path, build())
-        return str(path)
-
-
-def _xf(matrix) -> mi.ScalarTransform4f:
-    return mi.ScalarTransform4f(np.asarray(matrix, dtype=np.float32))
-
-
-def rgb(*v):
-    return {"type": "rgb", "value": list(v)}
-
-
-def luminance(c) -> float:
-    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
-
-
-class SceneBuilder:
-    def __init__(self, assets: Assets):
-        self.assets = assets
-        self.d: dict = {"type": "scene"}
-        self.counts: dict[str, int] = {}
-        self.focus_points: dict[str, list[float]] = {}
-        self.lamp_weight = 0.0
-
-    # --- registration ---------------------------------------------------
-    def material(self, name: str, spec: dict) -> None:
-        self.d[name] = spec
-
-    def _key(self, prefix: str) -> str:
-        n = self.counts.get(prefix, 0)
-        self.counts[prefix] = n + 1
-        return f"{prefix}_{n:03d}"
-
-    def _shape(self, prefix: str, spec: dict, material: str | None, emission=None, power: float = 1.0) -> None:
-        """`power` (luminance x area) sets the emitter's share of light samples.
-
-        Mitsuba otherwise picks emitters uniformly, so the sun would get one
-        light sample in ~40 and every sunlit surface would sparkle.
-        """
-        if material is not None:
-            spec["bsdf"] = {"type": "ref", "id": material}
-        if emission is not None:
-            spec["emitter"] = {"type": "area", "sampling_weight": float(power),
-                               "radiance": emission if isinstance(emission, dict) else rgb(*emission)}
-            self.lamp_weight += power
-        self.d[self._key(prefix)] = spec
-
-    def ply(self, path: str, matrix, material: str | None, emission=None, prefix: str = "mesh",
-            power: float = 1.0) -> None:
-        self._shape(prefix, {"type": "ply", "filename": path, "to_world": _xf(matrix)}, material, emission, power)
-
-    def cube(self, centre, size, material: str, yaw: float = 0.0, emission=None, prefix: str = "box") -> None:
-        m = G.compose(G.translate(centre), G.rotate((0, 1, 0), yaw), G.scale(np.asarray(size) / 2))
-        self._shape(prefix, {"type": "cube", "to_world": _xf(m)}, material, emission)
-
-    def box_mesh(self, name: str, centre, size, material: str, yaw: float = 0.0) -> None:
-        """Box with uv in meters, for textures that tile at a physical scale."""
-        path = self.assets.mesh(f"box_{name}", lambda: G.box(size))
-        self.ply(path, G.compose(G.translate(centre), G.rotate((0, 1, 0), yaw)), material, prefix="boxuv")
-
-    def rect(self, matrix, material: str | None, emission=None, prefix: str = "rect", power: float = 1.0) -> None:
-        self._shape(prefix, {"type": "rectangle", "to_world": _xf(matrix)}, material, emission, power)
-
-    def sphere(self, centre, radius, material: str | None, emission=None, prefix: str = "sphere") -> None:
-        power = 4 * np.pi * radius ** 2 * luminance(emission) if emission is not None else 1.0
-        self._shape(prefix, {"type": "sphere", "center": list(map(float, centre)), "radius": float(radius)},
-                    material, emission, power)
-
-    def part_set(self, parts: dict[str, str], matrix, materials: dict[str, str], emission=None,
-                 power: float = 1.0) -> None:
-        for part, path in parts.items():
-            emit = emission.get(part) if emission else None
-            self.ply(path, matrix, materials.get(part), emit, prefix=part, power=power)
-
-
-# ----------------------------------------------------------------------------
-# Materials
-# ----------------------------------------------------------------------------
-
-def principled(base, roughness, **kw) -> dict:
-    spec = {"type": "principled", "base_color": base if isinstance(base, dict) else rgb(*base),
-            "roughness": roughness if isinstance(roughness, dict) else float(roughness)}
-    spec.update(kw)
-    return spec
-
-
-def bitmap(path: str, raw: bool = False, uv_scale=None) -> dict:
-    spec = {"type": "bitmap", "filename": path, "raw": raw, "filter_type": "bilinear"}
-    if uv_scale is not None:
-        spec["to_uv"] = mi.ScalarTransform4f().scale([uv_scale[0], uv_scale[1], 1.0])
-    return spec
 
 
 def add_materials(b: SceneBuilder) -> None:
@@ -413,10 +290,10 @@ def candle(b: SceneBuilder, x: float, z: float, surface: float = TABLE_H) -> Non
 def laptop(b: SceneBuilder, x: float, z: float, yaw: float) -> None:
     base = G.compose(G.translate((x, TABLE_H, z)), G.rotate((0, 1, 0), yaw))
     m_base = G.compose(base, G.translate((0, 0.008, 0)), G.scale((0.16, 0.008, 0.11)))
-    b._shape("laptop", {"type": "cube", "to_world": _xf(m_base)}, "aluminium")
+    b._shape("laptop", {"type": "cube", "to_world": xf(m_base)}, "aluminium")
     hinge = G.compose(base, G.translate((0, 0.016, -0.11)), G.rotate((1, 0, 0), -12))
     lid = G.compose(hinge, G.translate((0, 0.11, -0.004)), G.scale((0.16, 0.11, 0.004)))
-    b._shape("laptop", {"type": "cube", "to_world": _xf(lid)}, "aluminium")
+    b._shape("laptop", {"type": "cube", "to_world": xf(lid)}, "aluminium")
     screen_tex = b.assets.texture("laptop_screen", lambda: G.laptop_screen(256, 384))
     screen = G.compose(hinge, G.translate((0, 0.112, 0.0005)), G.scale((0.148, 0.098, 1)))
     b.rect(screen, "emitter_backing", emission={"type": "bitmap", "filename": screen_tex, "raw": False},
@@ -567,7 +444,7 @@ def add_walls_decor(b: SceneBuilder) -> None:
     # Round mirror and two framed paintings on the right wall.
     mirror_c = (ROOM_X - 0.02, 1.75, -3.6)
     face_left = G.rotate((0, 1, 0), -90)
-    b._shape("mirror", {"type": "disk", "to_world": _xf(G.compose(G.translate(mirror_c), face_left, G.scale(0.45)))},
+    b._shape("mirror", {"type": "disk", "to_world": xf(G.compose(G.translate(mirror_c), face_left, G.scale(0.45)))},
              "mirror")
     ring = b.assets.mesh("mirror_ring", lambda: P.frame_ring(0.46, 0.022))
     b.ply(ring, G.compose(G.translate(mirror_c), face_left), "brass")
@@ -589,10 +466,9 @@ def add_lights(b: SceneBuilder) -> None:
         globe_bulb(b, x, -5.85, 1.0)
 
 
-def build_scene(assets_dir: Path, rebuild_assets: bool = False, seed: int = 7) -> tuple[dict, dict]:
-    """Return (mitsuba scene dict without sensor, named focus points)."""
-    rng = np.random.default_rng(seed)
-    b = SceneBuilder(Assets(assets_dir, rebuild_assets))
+def build(ctx: BuildContext) -> SceneBundle:
+    rng = np.random.default_rng(ctx.seed)
+    b = SceneBuilder(Assets(ctx.shared_dir, ctx.rebuild))
     add_materials(b)
     add_room(b)
     add_hero_table(b)
@@ -603,4 +479,24 @@ def build_scene(assets_dir: Path, rebuild_assets: bool = False, seed: int = 7) -
     # Daylight gets as many light samples as all the lamps together: it lights
     # most of the room, but lamp-lit corners it cannot reach still converge.
     b.d["sky"]["sampling_weight"] = b.lamp_weight
-    return b.d, b.focus_points
+    return SceneBundle(b.d, b.focus_points, {"sun_direction": list(SUN_DIRECTION), "daylight_scale": DAYLIGHT_SCALE})
+
+
+SCENE = SceneDef(
+    id="cafe", group="artificial", owner="rui",
+    description="Daytime cafe interior: window sun, pendant and string lights, glass, metal, ceramic, plants.",
+    build=build,
+    views={
+        # Seated at the hero table, looking down the room toward the counter.
+        "home": View((0.34, 1.22, 1.85), (-0.4, 0.88, -3.0), focus="teapot"),
+        # Lower and closer: strong foreground, the counter far behind.
+        "close": View((0.12, 0.98, 0.95), (-0.25, 0.86, -2.0), focus="teapot"),
+        # From the front corner, taking in the windows and most of the room.
+        "wide": View((2.6, 1.55, 2.9), (-1.2, 1.0, -3.0), focus="teapot"),
+    },
+    default_view="home",
+    camera_box=((-3.6, 0.15, -6.8), (3.6, 3.0, 3.3)),
+    target_box=((-3.8, 0.0, -7.0), (3.8, 3.2, 3.5)),
+    tags=("indoor", "day", "artificial_light", "clutter", "glass", "metal", "bokeh"),
+    default_seed=7,
+)

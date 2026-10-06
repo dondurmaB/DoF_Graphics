@@ -32,6 +32,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import render as R  # noqa: E402
+import scene_api as S  # noqa: E402
 
 RESOLUTIONS = {"640x360": (640, 360), "960x540": (960, 540), "1280x720": (1280, 720)}
 MODES = ("dof", "sharp", "depth", "coc", "trad")
@@ -41,9 +42,10 @@ class ViewerState:
     """Everything the page can change, guarded by `lock`. The render thread polls it and
     restarts accumulation when `render_key()` changes."""
 
-    def __init__(self, view: str, focus_points: dict):
+    def __init__(self, view: str, scene: S.SceneDef, focus_points: dict):
         self.lock = threading.Lock()
-        self.focus_points = {k: (v[0] if isinstance(v[0], list) else v) for k, v in focus_points.items()}
+        self.scene = scene
+        self.focus_points = {k: v[0] for k, v in focus_points.items()}
         self.mode = "dof"
         self.lens_mm = 50.0
         self.f_number = 1.8
@@ -54,13 +56,13 @@ class ViewerState:
         self.set_view(view)
 
     def set_view(self, name: str) -> None:
-        v = R.VIEWS[name]
-        o, t = np.asarray(v["origin"], float), np.asarray(v["target"], float)
+        v = self.scene.views[name]
+        o, t = np.asarray(v.origin, float), np.asarray(v.target, float)
         f = (t - o) / np.linalg.norm(t - o)
         self.position = o
         self.yaw = math.atan2(f[0], -f[2])
         self.pitch = math.asin(f[1])
-        self.focus_m = self.depth_of(self.focus_points["teapot"])
+        self.focus_m = self.depth_of(self.focus_points[v.focus or next(iter(self.focus_points))])
 
     def forward(self) -> np.ndarray:
         cp = math.cos(self.pitch)
@@ -99,15 +101,15 @@ class ViewerState:
                 "focus_m": self.focus_m, "exposure": self.exposure, "res": self.res,
                 "max_spp": self.max_spp, "position": [round(float(x), 3) for x in self.position],
                 "coc_inf_px": lens.metadata(w, h)["coc_diameter_px_at_infinity"],
-                "targets": sorted(k for k in self.focus_points if k != "pendants"),
-                "views": sorted(R.VIEWS), "resolutions": list(RESOLUTIONS)}
+                "targets": sorted(self.focus_points),
+                "views": sorted(self.scene.views), "resolutions": list(RESOLUTIONS)}
 
 
 class Renderer(threading.Thread):
     def __init__(self, state: ViewerState, scene_dict: dict, out_dir: Path):
         super().__init__(daemon=True)
         self.state = state
-        self.scene_dict = scene_dict
+        self.scene_dict = dict(scene_dict)
         self.out_dir = out_dir
         self.frame_jpeg = b""
         self.frame_id = 0
@@ -135,7 +137,8 @@ class Renderer(threading.Thread):
 
         self.mi, self.dr = mi, dr
         w, h = RESOLUTIONS[self.state.res]
-        self.scene_dict["integrator"] = {"type": "path", "max_depth": 10, "rr_depth": 5}
+        sc = self.state.scene
+        self.scene_dict["integrator"] = {"type": "path", "max_depth": min(sc.max_depth, 10), "rr_depth": min(sc.rr_depth, 5)}
         self.scene_dict["sensor"] = self.state.lens().sensor(w, h, 1, thin_lens=True)
         self.scene = mi.load_dict(self.scene_dict)
         self.params = mi.traverse(self.scene)
@@ -368,7 +371,7 @@ def make_handler(state: ViewerState, renderer: Renderer, token: str | None):
             body = json.loads(self.rfile.read(n) or b"{}")
             if self.path == "/set":
                 with state.lock:
-                    if body.get("view") in R.VIEWS:
+                    if body.get("view") in state.scene.views:
                         state.set_view(body["view"])
                     if body.get("mode") in MODES:
                         state.mode = body["mode"]
@@ -393,9 +396,8 @@ def make_handler(state: ViewerState, renderer: Renderer, token: str | None):
                     step = (float(body.get("forward", 0)) * flat + float(body.get("right", 0)) * right
                             + np.array([0.0, float(body.get("up", 0)), 0.0]))
                     state.position = state.position + step
-                    state.position[0] = min(max(state.position[0], -3.6), 3.6)
-                    state.position[1] = min(max(state.position[1], 0.15), 3.0)
-                    state.position[2] = min(max(state.position[2], -6.8), 3.3)
+                    lo, hi = np.asarray(state.scene.camera_box, float)
+                    state.position = np.clip(state.position, lo, hi)
                 self._json({"ok": True})
             elif self.path == "/pick":
                 res = renderer.call("pick", body)
@@ -417,17 +419,23 @@ def main() -> int:
     ap.add_argument("--host", default="127.0.0.1",
                     help="interface to listen on; 0.0.0.0 on a cluster node (a token is then required)")
     ap.add_argument("--variant", default="auto")
-    ap.add_argument("--view", default="home", choices=sorted(R.VIEWS))
+    ap.add_argument("--scene", default="cafe", help=f"scene id; available: {', '.join(S.list_scenes())}")
+    ap.add_argument("--scene-seed", type=int, default=None)
+    ap.add_argument("--env", default="clear")
+    ap.add_argument("--view", default=None, help="default: the scene's default_view")
     ap.add_argument("--assets", default=str(HERE / "generated"))
     ap.add_argument("--out", default=str(R.REPO / "output" / "mitsuba" / "viewer"))
     args = ap.parse_args()
 
     variant = R.pick_variant(args.variant)
-    from cafe_scene import build_scene
-
-    scene_dict, focus_points = build_scene(Path(args.assets))
-    state = ViewerState(args.view, focus_points)
-    renderer = Renderer(state, scene_dict, Path(args.out))
+    scene_def = S.load_scene(args.scene)
+    view = args.view or scene_def.default_view
+    if view not in scene_def.views:
+        raise SystemExit(f"scene {args.scene!r} has no view {view!r}; choose from {sorted(scene_def.views)}")
+    ctx = S.make_context(scene_def, Path(args.assets), args.scene_seed, args.env)
+    bundle = S.build_checked(scene_def, ctx)
+    state = ViewerState(view, scene_def, bundle.focus_points)
+    renderer = Renderer(state, bundle.scene, Path(args.out))
     renderer.load()
     renderer.start()
     token = None if args.host in ("127.0.0.1", "localhost") else secrets.token_urlsafe(16)
