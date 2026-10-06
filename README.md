@@ -255,3 +255,27 @@ If GLAD initialization fails, make sure `gladLoadGLLoader()` runs after `glfwMak
 If the triangle looks stretched or clipped after moving the window between displays, confirm the framebuffer resize callback is firing and that `glViewport()` receives framebuffer dimensions rather than logical window dimensions.
 
 If `cmake -G Ninja` fails because Ninja is missing, activate the Conda environment first. `environment.yml` includes `ninja`.
+
+## Stage 3: dataset generation
+
+The learned stage consumes tensors produced by `dataset/build_dataset.py`. The
+format, and the AI input/output contract, are in
+[`dataset/README.md`](dataset/README.md).
+
+```sh
+python dataset/verify_pipeline.py                      # check this machine first
+python dataset/build_dataset.py --dry-run              # plan only, no Mitsuba needed
+python dataset/build_dataset.py --out /tmp/ds --preset smoke
+sbatch --array=0-63 renderer/mitsuba/hpc/dataset.slurm # the real run
+```
+
+The production gather now runs headless on Linux through EGL as well as on macOS
+through CGL (`renderer/mitsuba/gl_context.py`). Check a compute node before
+submitting an array job:
+
+```sh
+python renderer/mitsuba/gl_context.py
+```
+
+It must report a vendor GPU renderer. `llvmpipe` means the driver is not in use,
+and `build_dataset.py` will refuse to run rather than spend days in software.

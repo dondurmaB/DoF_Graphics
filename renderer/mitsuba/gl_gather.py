@@ -1,12 +1,19 @@
 """Run the production DoFScene fragment shader on linear Mitsuba inputs.
 
-macOS CGL, offscreen RGBA32F; no window, display transform, or Python blur.
-Arrays use top-left row order. Upload/readback flip rows so native OpenGL bottom-left texture coordinates
-and its disk orientation are preserved.
+Offscreen RGBA32F; no window, display transform, or Python blur. Arrays use
+top-left row order. Upload/readback flip rows so native OpenGL bottom-left
+texture coordinates and its disk orientation are preserved.
+
+The context comes from gl_context.py: CGL on macOS, EGL on Linux. This file used
+to create a CGL context inline with the framework path hard-coded, which meant
+the production gather could not run on the GPU cluster the stage-3 dataset is
+generated on.
 """
 from pathlib import Path
 import ctypes as C
 import numpy as np
+
+from gl_context import ContextError, create_context  # noqa: F401  (re-exported)
 
 ROOT = Path(__file__).resolve().parents[2]
 SHADER = ROOT / "shaders/dof_scene/screen.frag"
@@ -21,22 +28,11 @@ void main() {
 
 
 class Gather:
-    def __init__(self, fragment=None):
-        self.gl = C.CDLL('/System/Library/Frameworks/OpenGL.framework/OpenGL')
-        self.context = C.c_void_p()
-        pf, count = C.c_void_p(), C.c_int()
-        attrs = (C.c_int * 3)(99, 0x3200, 0)
-        err = self.f('CGLChoosePixelFormat', C.c_int, C.POINTER(C.c_int),
-                     C.POINTER(C.c_void_p), C.POINTER(C.c_int))(attrs, C.byref(pf), C.byref(count))
-        if err:
-            raise RuntimeError(f'CGL pixel format failed ({err}); macOS graphics access is required')
-        err = self.f('CGLCreateContext', C.c_int, C.c_void_p, C.c_void_p,
-                     C.POINTER(C.c_void_p))(pf, None, C.byref(self.context))
-        self.f('CGLDestroyPixelFormat', C.c_int, C.c_void_p)(pf)
-        if err:
-            raise RuntimeError(f'CGL context failed: {err}')
-        self.f('CGLSetCurrentContext', C.c_int, C.c_void_p)(self.context)
-        self.renderer = self.f('glGetString', C.c_char_p, C.c_uint)(0x1f01).decode()
+    def __init__(self, fragment=None, backend=None, device_index=None):
+        self.backend = create_context(backend, device_index)
+        info = self.backend.describe()
+        self.renderer = info['renderer']
+        self.gl_info = info
         self.program = self.f('glCreateProgram', C.c_uint)()
         for kind, source in ((0x8b31, VERTEX), (0x8b30, fragment or SHADER.read_text())):
             shader = self.compile(kind, source)
@@ -55,9 +51,13 @@ class Gather:
         self.vao = vao
 
     def f(self, name, result, *args):
-        func = getattr(self.gl, name)
-        func.restype, func.argtypes = result, list(args)
-        return func
+        """Resolve a GL entry point through the active backend.
+
+        EGL drivers do not reliably export every GL 3.3 symbol from libGL, so
+        the backend tries eglGetProcAddress first. A missing glGenVertexArrays
+        otherwise appears as a null-pointer crash rather than an error.
+        """
+        return self.backend.function(name, result, *args)
 
     def compile(self, kind, source):
         shader = self.f('glCreateShader', C.c_uint, C.c_uint)(kind)
@@ -94,7 +94,7 @@ class Gather:
             raise ValueError('Depth must be finite and positive; map sky explicitly before upload')
         if variant not in ('naive', 'weighted') or not 0 < max_radius <= 120:
             raise ValueError('Invalid gather settings')
-        self.f('CGLSetCurrentContext', C.c_int, C.c_void_p)(self.context)
+        self.backend.make_current()
         self.f('glUseProgram', None, C.c_uint)(self.program)
         self.f('glBindVertexArray', None, C.c_uint)(self.vao)
         ids = (C.c_uint * 3)()
@@ -141,8 +141,7 @@ class Gather:
         return result[::-1, :, :3].copy()
 
     def close(self):
-        self.f('CGLSetCurrentContext', C.c_int, C.c_void_p)(None)
-        self.f('CGLDestroyContext', C.c_int, C.c_void_p)(self.context)
+        self.backend.destroy()
 
     def __enter__(self):
         return self
