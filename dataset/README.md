@@ -118,6 +118,9 @@ images are the same size and look plausible together, so the failure is silent.
 targets × N scenes = **216 samples per scene**. At the default 12 scenes that is
 2592 samples.
 
+The focus targets are `teapot`, `books`, and `espresso` (the named point on the
+counter's espresso machine). The café builder has no target named `counter`.
+
 f/16 is included deliberately. It is nearly sharp and is the control: a model
 that cannot pass a near-sharp image through is broken in an obvious way, and it
 anchors the blur range at zero.
@@ -145,11 +148,15 @@ Re-running is safe: a sample whose `sample.json` exists is skipped unless
 ## Known limitations
 
 - **References are not convergence-certified.** `spp` is a budget, not a measured
-  error bound. Stage 2 measured that the full-lighting café needed roughly
-  **844,000 spp** for a qualified comparison at f/1.2 — far beyond a dataset
-  budget. These targets are good renders, not qualified ground truth, and should
+  error bound. Stage 2 failed qualification at 8,192 spp: whole-image reference
+  noise was 0.013847 linear RMS versus unqualified naive-gather MAE 0.013690.
+  Scaling that measured noise by `1/sqrt(N)` while holding MAE fixed estimated
+  roughly **844,000 spp** per seed when increasing both sharp and reference
+  samples. That is an unverified planning estimate, not a measured passing count.
+  These targets are budgeted renders, not qualified ground truth, and should
   not be described as the latter. A per-sample error bar would need two seeds per
-  target and is not currently generated.
+  target and is not currently generated. Each sample context explicitly records
+  `qualified_reference: false` and `reference_noise_rms: null`.
 - **One scene family.** All samples are the same café builder with different
   seeds. Generalisation beyond café interiors is untested.
 - **Glass and metal are present**, so some targets contain refraction and

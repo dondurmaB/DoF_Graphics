@@ -215,7 +215,7 @@ def build_plan(args):
     scene_seeds = [args.scene_seed_base + i for i in range(args.scenes)]
     # Focus targets are named points in the café; the scene builder returns their
     # positions, and the depth is measured along the optical axis at render time.
-    focus_fractions = [("teapot", None), ("books", None), ("counter", None)]
+    focus_fractions = [("teapot", None), ("books", None), ("espresso", None)]
     samples = enumerate_samples(scene_seeds, focus_fractions)
     splits = assign_splits(samples, scene_seeds, args.val_scenes, args.test_scenes)
     mine = [s for s in samples if s["index"] % args.shards == args.shard]
@@ -305,6 +305,10 @@ def main(argv=None):
                 # Building a café costs seconds and every lens setting reuses it,
                 # so the loop is ordered scene-outermost and the scene is cached.
                 scene_dict, focus_points = build_scene(assets, False, seed=seed)
+                scene_dict["integrator"] = {
+                    "type": "path", "max_depth": args.max_depth,
+                    "rr_depth": 6, "hide_emitters": False,
+                }
                 scene_cache.clear()          # one at a time: these are large
                 scene_cache[seed] = (mi.load_dict(scene_dict), focus_points,
                                      stable_hash(sorted(scene_dict.keys())))
@@ -322,6 +326,10 @@ def main(argv=None):
                 "resolution": [args.width, args.height],
                 "sharp_spp": args.spp, "reference_spp": args.dof_spp,
                 "max_depth": args.max_depth, "config_hash": config["config_hash"],
+                "integrator": {"type": "path", "max_depth": args.max_depth,
+                               "rr_depth": 6, "hide_emitters": False},
+                "beauty_filter": "gaussian", "depth_filter": "box",
+                "qualified_reference": False, "reference_noise_rms": None,
             }
 
             sharp_sensor = lens.sensor(args.width, args.height, args.spp, thin_lens=False)
@@ -330,7 +338,9 @@ def main(argv=None):
                                                    args.spp_per_pass, seed, "sharp")
             reference, dof_seconds = R.render_beauty(scene, dof_sensor, args.dof_spp,
                                                      args.spp_per_pass, seed + 1, "dof")
-            depth, layers, depth_seconds = R.render_gbuffer(scene, sharp_sensor, lens, seed)
+            depth_sensor = lens.sensor(args.width, args.height, 1,
+                                       thin_lens=False, rfilter="box")
+            depth, layers, depth_seconds = R.render_gbuffer(scene, depth_sensor, lens, seed)
 
             coc = signed_coc_radius_px(
                 finite_depth_for_gather(depth, config["sky_depth_m"]),
