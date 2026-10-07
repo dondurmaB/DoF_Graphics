@@ -1,5 +1,16 @@
 {
-  "train": ["cafe"],
+  "train": [
+    "cafe",
+    "courtyard",
+    "desk",
+    "greenhouse",
+    "museum",
+    "night_street",
+    "pool",
+    "rooftop",
+    "terminal",
+    "workshop"
+  ],
   "val": [],
   "test": [],
   "test_ood": []
