@@ -89,13 +89,17 @@ a roll, and a focal length (log-uniform in the intersection of 24 to 135 mm and 
 scene's range). It renders the 1-spp G-buffer and rejects the pose when: pitch is
 beyond 75 degrees; the target is under 0.5 m away; more than 50% of pixels are sky;
 the 1st-percentile surface depth is under 0.3 m; or the view is one flat surface
-(p95/p5 depth under 1.5). Rejection reasons are counted and printed. On the cafe,
+(p95/p5 depth under 1.5); more than 80% of pixels face within 15 degrees of one
+direction (a wall filling the frame); or a 4-spp probe has median luminance under 0.002
+(essentially black). Rejection reasons are counted and printed. On the cafe,
 with no `exclude_boxes`, about 1 attempt in 5 is rejected (mostly flat views; 51 of 251 over 200 poses), so
 exclude boxes are only needed if a new scene's rate is much higher. The thresholds
 are constants at the top of `sampler.py` to tune. You still guarantee the boxes are
 honest: a tight box around places you checked beats a big box with bad corners.
 
-**Camera roll.** The sampler also draws `roll_deg`, a rotation of the camera
+**Camera roll.** The sampler also draws `roll_deg` the way people hold cameras: 60% level with
+handheld wobble (sigma 3 degrees), 30% tilted up to 45 degrees, 10% portrait (90 degrees either way).
+It is a rotation of the camera
 about its optical axis (the tilted "Dutch angle" photographers use). It is part
 of the camera, not an image rotation: the sharp and DoF passes are rendered with
 the same rolled `up` vector, depth stays planar z along the optical axis, nothing
@@ -274,10 +278,15 @@ Crops are free and preserve everything (the CoC does not depend on the crop).
   (if visible) or a depth quantile, 50/50. Rebalancing is a later step: over-generate
   cheap poses and lenses with `--dry-run`, then render only a balanced subset. Every
   dataset report states counts by scene, group, env and CoC bin.
-- **Exposure gate in practice.** `pose.json` records the sharp pass's median
-  luminance and `exposure_gate_ok`. On the first two cafe poses, one was too dark
-  (0.008). Random poses include dull dark views, so we still need to decide whether to
-  reject at generation time with a cheap low-spp probe, or render everything and filter.
+- **Exposure in practice.** Random poses legitimately range from deep shade to sunlit
+  paving (the courtyard audit: medians 0.015 to 0.83), as real photos do before a camera
+  meters them. So only near-black frames are rejected (4-spp probe); every sample records
+  `auto_exposure_scale` (log-average luminance brought to 0.18, what a camera's meter does)
+  for the data loader to apply. The EXRs stay unscaled. `exposure_gate_ok` is kept as a flag.
+- **Audit before generating.** `python renderer/mitsuba/audit_poses.py --scene <id>` (on the
+  cluster) renders a contact sheet of the sampler's actual poses. Every scene must look
+  right from every pose in it: unfinished edges, backs of props and empty corners show up
+  here and are fixed in the scene or excluded by the boxes.
 
 ## 9. Budgets (per scene, RTX 5000 Ada)
 

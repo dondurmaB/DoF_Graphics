@@ -43,8 +43,14 @@ PITCH_MAX_DEG = 75.0
 MIN_CLEARANCE_M = 0.3          # 1st percentile of surface depth
 MAX_SKY_FRACTION = 0.5
 MIN_DEPTH_SPREAD = 1.5         # p95 / p5 of surface depth: rejects a single flat surface
+MAX_SAME_FACING = 0.8          # share of pixels within 15 deg of the dominant normal: rejects a wall filling the frame
+AUTO_EXPOSURE_KEY = 0.18       # mid-grey a camera meters to; recorded per sample, never baked into the EXRs
+MIN_MEDIAN_LUMINANCE = 0.002   # below this the frame is essentially black and rejected after the sharp pass
 MIN_VIEW_DISTANCE_M = 0.5      # between camera and target
-ROLL_PROB, ROLL_MAX_DEG = 0.5, 25.0
+# Camera roll, as people hold cameras: mostly level with handheld wobble, often tilted, sometimes portrait.
+ROLL_LEVEL_P, ROLL_LEVEL_JITTER_DEG = 0.6, 3.0
+ROLL_TILT_P, ROLL_TILT_MAX_DEG = 0.3, 45.0
+ROLL_PORTRAIT_JITTER_DEG = 5.0                      # remaining 10%: +-90 degrees, either way
 LENS_MM_GLOBAL = (24.0, 135.0)
 F_NUMBER_GLOBAL = (1.2, 16.0)
 COC_FRAC_RANGE = (0.0005, 0.04)  # target p95 |CoC| as a fraction of image height (0.5 to 43 px at 1080p)
@@ -88,14 +94,20 @@ def draw_pose(scene: S.SceneDef, rng, reasons: Counter):
     if abs(math.degrees(math.asin(d[1] / dist))) > PITCH_MAX_DEG:
         reasons["pitch"] += 1
         return None
-    roll = float(rng.uniform(-ROLL_MAX_DEG, ROLL_MAX_DEG)) if rng.random() < ROLL_PROB else 0.0
+    u = rng.random()
+    if u < ROLL_LEVEL_P:
+        roll = float(rng.normal(0.0, ROLL_LEVEL_JITTER_DEG))
+    elif u < ROLL_LEVEL_P + ROLL_TILT_P:
+        roll = float(rng.uniform(-ROLL_TILT_MAX_DEG, ROLL_TILT_MAX_DEG))
+    else:
+        roll = float(rng.choice([-90.0, 90.0]) + rng.normal(0.0, ROLL_PORTRAIT_JITTER_DEG))
     lo, hi = max(LENS_MM_GLOBAL[0], scene.lens_mm[0]), min(LENS_MM_GLOBAL[1], scene.lens_mm[1])
     lo, hi = (lo, hi) if lo <= hi else scene.lens_mm
     focal = float(math.exp(rng.uniform(math.log(lo), math.log(hi))))
     return origin, target, roll, focal
 
 
-def check_depth(depth: np.ndarray, reasons: Counter) -> bool:
+def check_depth(depth: np.ndarray, reasons: Counter, normals: np.ndarray | None = None) -> bool:
     finite = depth[np.isfinite(depth)]
     if finite.size < 0.5 * depth.size or 1.0 - finite.size / depth.size > MAX_SKY_FRACTION:
         reasons["sky"] += 1
@@ -107,7 +119,29 @@ def check_depth(depth: np.ndarray, reasons: Counter) -> bool:
     if p95 / max(p5, 1e-6) < MIN_DEPTH_SPREAD:
         reasons["flat"] += 1
         return False
+    if normals is not None:
+        n = normals[np.isfinite(depth)].reshape(-1, 3)[::7]
+        n = n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-6)
+        dominant = np.median(n, axis=0)
+        dominant /= max(np.linalg.norm(dominant), 1e-6)
+        if np.mean(n @ dominant > np.cos(np.radians(15))) > MAX_SAME_FACING:
+            reasons["single_surface"] += 1
+            return False
     return True
+
+
+def bright_enough(scene, lens, w, h, rng, reasons: Counter) -> bool:
+    """4-spp probe: rejects frames that are essentially black before the expensive passes."""
+    probe, _ = R.render_beauty(scene, lens.sensor(w, h, 4, False), 4, 4, int(rng.integers(0, 10000)), "probe")
+    if np.median(luminance(probe)) < MIN_MEDIAN_LUMINANCE:
+        reasons["black"] += 1
+        return False
+    return True
+
+
+def auto_exposure(lum: np.ndarray) -> float:
+    """Linear scale a camera's meter would apply: brings the log-average luminance to mid-grey."""
+    return float(AUTO_EXPOSURE_KEY / np.exp(np.mean(np.log(np.maximum(lum, 1e-4)))))
 
 
 def draw_lens(scene: S.SceneDef, rng, pose_lens: R.Lens, depth, pos, focus_points, height_px: int):
@@ -168,7 +202,7 @@ def run_sample(index, scene_def, bundle, scene, ctx, args, base: Path, fp: str, 
         pose_lens = R.Lens(origin, target, focal, S.SENSOR_HEIGHT_MM, 1e5, 1.0, roll, scene_def.far_clip)
         depth, layers, g_sec = R.render_gbuffer(scene, pose_lens.sensor(w, h, 1, False, "box"), pose_lens,
                                                 int(rng.integers(0, 2 ** 31 - 1)))
-        if check_depth(depth, reasons):
+        if check_depth(depth, reasons, layers["nn"]) and bright_enough(scene, pose_lens, w, h, rng, reasons):
             pose = dict(origin=origin, target=target, roll=roll, focal=focal, attempt=k)
             break
     if pose is None:
@@ -201,6 +235,7 @@ def run_sample(index, scene_def, bundle, scene, ctx, args, base: Path, fp: str, 
                  "sharp": {"spp": args.spp, "seconds": round(sharp_sec, 2), "seed": sharp_seed},
                  "sharp_median_luminance": float(np.median(lum)),
                  "exposure_gate_ok": bool(0.02 <= np.median(lum) <= 0.5),
+                 "auto_exposure_scale": auto_exposure(lum),
                  "camera": pose_lens.metadata(w, h)}
     (pdir / "pose.json").write_text(json.dumps(pose_meta, indent=2))
 
@@ -234,7 +269,8 @@ def run_sample(index, scene_def, bundle, scene, ctx, args, base: Path, fp: str, 
                          "focal_mm": round(focal, 2), "f_number": round(lens_spec["f_number"], 3),
                          "focus_m": round(lens_spec["focus"], 3), "roll_deg": round(roll, 2),
                          "coc_p95_frac": round(lens_spec["achieved_frac"], 5), "coc_out_of_range": lens_spec["coc_out_of_range"],
-                         "exposure_gate_ok": pose_meta["exposure_gate_ok"]})
+                         "exposure_gate_ok": pose_meta["exposure_gate_ok"],
+                         "auto_exposure_scale": round(pose_meta["auto_exposure_scale"], 5)})
     (pdir / ".done").write_text("")
     with open(base / "manifest.jsonl", "a") as f:
         f.write("".join(json.dumps(m) + "\n" for m in manifest))
