@@ -81,7 +81,7 @@ read -r JOB NODE <<<"$srv"
 stop_steps "$JOB" "$SCENE"
 LOG=$REMOTE/logs/viewer-$SCENE.out
 "${SSH[@]}" "rm -f $LOG; setsid nohup srun --jobid=$JOB --overlap --ntasks=1 --cpus-per-task=4 -J viewer-$SCENE \
-  bash -c 'source ~/anaconda3/etc/profile.d/conda.sh && conda activate dof-graphics && cd $REMOTE && \
+  bash -c 'source ~/anaconda3/etc/profile.d/conda.sh && conda activate dof-graphics && export OPTIX_CACHE_PATH=/tmp/optix_cache_\$USER && cd $REMOTE && \
   exec python -u renderer/mitsuba/viewer.py --scene $SCENE --env $ENVNAME --variant cuda_ad_rgb --host 0.0.0.0 --port $PORT \
   --out output/viewer/$SCENE' >$LOG 2>&1 < /dev/null &"
 

@@ -36,6 +36,7 @@ CMD=$(printf '%q ' "$@")
 set -euo pipefail
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate dof-graphics
+export OPTIX_CACHE_PATH=/tmp/optix_cache_\$USER   # node-local: two nodes sharing the NFS home corrupt one cache
 cd $REMOTE
 echo "node \$(hostname -s), GPU: \$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
 exec flock /tmp/dof_gpu.lock python -u $CMD

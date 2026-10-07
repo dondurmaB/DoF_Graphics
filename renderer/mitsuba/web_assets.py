@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""CC0 models from Poly Haven: pinned in a manifest, fetched on demand, converted for Mitsuba.
+"""CC0 models and textures from the web: pinned in a manifest, fetched on demand, converted for Mitsuba.
+
+Sources (all CC0): Poly Haven models and textures (plain ids), ambientCG materials (`acg:<AssetId>`),
+Smithsonian Open Access 3D OBJ zips (`si:<name>`, pinned with --url).
 
   python web_assets.py search tree shrub         # list matching Poly Haven models (light, run anywhere)
   python web_assets.py search --textures concrete floor   # ... or textures
   python web_assets.py pin bench_vice_01 --res 1k  # record file URLs and md5 in scenes/assets/web_manifest.json
+  python web_assets.py pin acg:Tiles107          # ambientCG material (downloads the zip once to record its sha256)
+  python web_assets.py pin si:amphora_x --url https://3d-api.si.edu/.../x-obj.zip --name "Amphora"   # Smithsonian
+  python web_assets.py stage si:amphora_x        # download locally: the cluster cannot reach 3d-api.si.edu, and
+                                                 # remote_run.sh syncs web_assets/ to it (conversion runs there)
   python web_assets.py info bench_vice_01        # fetch + convert, print parts, bounds, triangles (run on the cluster)
 
 In a scene build:
@@ -75,7 +82,50 @@ def search(words: list[str], kind: str = "models") -> None:
             print(f"{aid:34s} {dims} m  {a.get('polycount', '?')} polys  {', '.join(a.get('categories', [])[:4])}")
 
 
-def pin(aid: str, res: str = "1k") -> None:
+def _source(aid: str) -> str:
+    return aid.split(":", 1)[0] if ":" in aid else "polyhaven"
+
+
+def _hash_url(url: str) -> tuple[str, int]:
+    h, n = hashlib.sha256(), 0
+    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=600) as r:
+        while chunk := r.read(1 << 20):
+            h.update(chunk)
+            n += len(chunk)
+    return h.hexdigest(), n
+
+
+def _store(aid: str, res: str, entry: dict) -> None:
+    with _locked(MANIFEST.parent / ".web_manifest.lock"):     # several agents may pin at once
+        m = _read_manifest()
+        m["assets"].setdefault(aid, {})[res] = entry
+        _write_atomic(MANIFEST, (json.dumps(m, indent=1, sort_keys=True) + "\n").encode())
+    mb = sum(f["size"] for f in entry["files"].values()) / 1e6
+    print(f"pinned {entry['kind']} {aid} @ {res}: {len(entry['files'])} files, {mb:.1f} MB, "
+          f"{entry.get('polycount') or '-'} polys, {entry.get('dimensions_m')} m")
+
+
+def pin(aid: str, res: str = "1k", url: str | None = None, name: str | None = None) -> None:
+    src = _source(aid)
+    if src == "acg":
+        a = _get(f"https://ambientcg.com/api/v2/full_json?id={aid[4:]}&include=downloadData,dimensionsData")["foundAssets"][0]
+        dl = next(d for d in a["downloadFolders"]["default"]["downloadFiletypeCategories"]["zip"]["downloads"]
+                  if d["attribute"] == f"{res.upper()}-JPG")
+        sha, size = _hash_url(dl["downloadLink"])
+        dims = [a.get("dimensionX"), a.get("dimensionY")]
+        entry = {"name": a.get("displayName", aid), "page": f"https://ambientcg.com/view?id={aid[4:]}", "kind": "texture",
+                 "source": "ambientcg", "license": "CC0", "dimensions_m": [d / 100 for d in dims if d] or [1.0],
+                 "files": {dl["fileName"]: {"url": dl["downloadLink"], "size": size, "sha256": sha, "unzip": True}}}
+        return _store(aid, res, entry)
+    if src == "si":
+        if not url:
+            raise ValueError("Smithsonian assets need --url <full-resolution OBJ zip from 3d-api.si.edu>")
+        req = urllib.request.Request(url, headers=UA, method="HEAD")
+        size = int(urllib.request.urlopen(req, timeout=60).headers.get("Content-Length", 0))
+        entry = {"name": name or aid, "page": url, "kind": "obj_zip", "source": "smithsonian",
+                 "license": "CC0 (Smithsonian Open Access)",
+                 "files": {Path(url).name: {"url": url, "size": size, "unzip": True}}}
+        return _store(aid, res, entry)
     api = _get(f"{API}/files/{aid}")
     info = _get(f"{API}/info/{aid}")
     entry = {"name": info.get("name", aid), "page": f"https://polyhaven.com/a/{aid}",
@@ -92,13 +142,7 @@ def pin(aid: str, res: str = "1k") -> None:
         entry["kind"] = "model"
         entry["files"] = {Path(files["url"]).name: {k: files[k] for k in ("url", "md5", "size")},
                           **{k: {f: v[f] for f in ("url", "md5", "size")} for k, v in files["include"].items()}}
-    with _locked(MANIFEST.parent / ".web_manifest.lock"):     # several agents may pin at once
-        m = _read_manifest()
-        m["assets"].setdefault(aid, {})[res] = entry
-        _write_atomic(MANIFEST, (json.dumps(m, indent=1, sort_keys=True) + "\n").encode())
-    mb = sum(f["size"] for f in entry["files"].values()) / 1e6
-    print(f"pinned {entry['kind']} {aid} @ {res}: {len(entry['files'])} files, {mb:.1f} MB, "
-          f"{entry['polycount'] or '-'} polys, {entry['dimensions_m']} m")
+    _store(aid, res, entry)
 
 
 @contextmanager
@@ -114,24 +158,52 @@ def _fetch(aid: str, res: str) -> tuple[Path, dict]:
     if entry is None:
         raise KeyError(f"web asset {aid!r} @ {res} is not pinned: run `python renderer/mitsuba/web_assets.py pin "
                        f"{aid} --res {res}` locally and commit scenes/assets/web_manifest.json")
-    root = CACHE / "polyhaven" / aid / res / "src"
+    root = _base(aid, res) / "src"
     for rel, f in entry["files"].items():
         dst = root / rel
         if dst.exists() and dst.stat().st_size == f["size"]:
+            _unzip(dst, f)
             continue
-        md5 = hashlib.md5()
         dst.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=dst.parent)
-        with os.fdopen(fd, "wb") as out, urllib.request.urlopen(urllib.request.Request(f["url"], headers=UA),
-                                                                timeout=600) as r:
-            while chunk := r.read(1 << 20):
-                md5.update(chunk)
-                out.write(chunk)
-        if md5.hexdigest() != f["md5"]:
+        for attempt in range(4):                                   # big scans: survive dropped connections
+            md5, sha = hashlib.md5(), hashlib.sha256()
+            fd, tmp = tempfile.mkstemp(dir=dst.parent)
+            try:
+                with os.fdopen(fd, "wb") as out, urllib.request.urlopen(
+                        urllib.request.Request(f["url"], headers=UA), timeout=600) as r:
+                    while chunk := r.read(1 << 20):
+                        md5.update(chunk)
+                        sha.update(chunk)
+                        out.write(chunk)
+                break
+            except OSError:
+                os.unlink(tmp)
+                if attempt == 3:
+                    raise
+                import time
+                time.sleep(10 * (attempt + 1))
+        bad = (("md5" in f and md5.hexdigest() != f["md5"]) or ("sha256" in f and sha.hexdigest() != f["sha256"])
+               or (f.get("size") and os.path.getsize(tmp) != f["size"]))
+        if bad:
             os.unlink(tmp)
-            raise IOError(f"md5 mismatch for {f['url']}")
+            raise IOError(f"checksum or size mismatch for {f['url']}")
         os.replace(tmp, dst)
+        _unzip(dst, f)
     return root, entry
+
+
+def _base(aid: str, res: str) -> Path:
+    return CACHE / _source(aid) / aid.split(":", 1)[-1] / res
+
+
+def _unzip(path: Path, f: dict) -> None:
+    import zipfile
+
+    marker = path.with_suffix(".unzipped")
+    if f.get("unzip") and not marker.exists():
+        with zipfile.ZipFile(path) as z:
+            z.extractall(path.parent / path.stem)
+        marker.write_text("")
 
 
 # --------------------------------------------------------------------------- glTF -> PLY + BSDF
@@ -314,6 +386,88 @@ def _convert(gltf: Path, out: Path, foliage_translucency: float) -> dict:
     return meta
 
 
+def _convert_obj(root: Path, out: Path) -> dict:
+    """Smithsonian-style OBJ (+ MTL with map_Kd, optional normal map) -> one PLY per material."""
+    import numpy as np
+    from PIL import Image
+
+    sys.path.insert(0, str(HERE))
+    import procedural as G
+
+    obj = max(root.rglob("*.obj"), key=lambda p: p.stat().st_size)
+    mtl_maps: dict = {}
+    for mtl in obj.parent.glob("*.mtl"):
+        cur = None
+        for line in mtl.read_text(errors="ignore").splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+            if parts[0] == "newmtl":
+                cur = parts[1]
+                mtl_maps[cur] = {}
+            elif cur and parts[0] in ("map_Kd", "map_Bump", "bump", "norm", "map_Kn"):
+                mtl_maps[cur][parts[0]] = obj.parent / parts[-1]
+    v, vt, vn, faces, cur = [], [], [], {}, "default"
+    for line in obj.read_text(errors="ignore").splitlines():
+        if line.startswith("v "):
+            v.append(line.split()[1:4])
+        elif line.startswith("vt "):
+            vt.append(line.split()[1:3])
+        elif line.startswith("vn "):
+            vn.append(line.split()[1:4])
+        elif line.startswith("usemtl"):
+            cur = line.split()[1]
+        elif line.startswith("f "):
+            idx = [tuple(int(x) if x else 0 for x in (tok.split("/") + ["", ""])[:3]) for tok in line.split()[1:]]
+            for k in range(1, len(idx) - 1):
+                faces.setdefault(cur, []).extend((idx[0], idx[k], idx[k + 1]))
+    v = np.asarray(v, float)
+    vt = np.asarray(vt, float) if vt else np.zeros((1, 2))
+    vn = np.asarray(vn, float) if vn else None
+    (out / "textures").mkdir(parents=True, exist_ok=True)
+    parts, lo, hi, total = [], np.full(3, np.inf), np.full(3, -np.inf), 0
+    for mat, corners in faces.items():
+        c = np.asarray(corners, np.int64)
+        c = np.where(c < 0, c + np.array([len(v), len(vt), len(vn) if vn is not None else 0]) + 1, c)
+        keys, inv = np.unique(c, axis=0, return_inverse=True)
+        p = v[keys[:, 0] - 1]
+        uv = vt[np.maximum(keys[:, 1] - 1, 0)][:, :2] if len(vt) > 1 else np.zeros((len(keys), 2))
+        uv = np.column_stack([uv[:, 0], 1.0 - uv[:, 1]])          # OBJ puts v = 0 at the image bottom
+        f = inv.reshape(-1, 3)
+        if vn is not None and keys[:, 2].min() > 0:
+            n = vn[keys[:, 2] - 1]
+        else:
+            n = np.zeros_like(p)
+            fn = np.cross(p[f[:, 1]] - p[f[:, 0]], p[f[:, 2]] - p[f[:, 0]])
+            for k in range(3):
+                np.add.at(n, f[:, k], fn)
+        n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
+        name = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in mat)
+        G.Mesh(p, n, uv, f).write_ply(out / f"{name}.ply")
+        maps = mtl_maps.get(mat, {})
+        base = {"type": "rgb", "value": [0.6, 0.6, 0.6]}
+        if maps.get("map_Kd") and maps["map_Kd"].exists():
+            dst = out / "textures" / maps["map_Kd"].name
+            if not dst.exists():
+                Image.open(maps["map_Kd"]).convert("RGB").save(dst)
+            base = {"type": "bitmap", "filename": str(dst.relative_to(out))}
+        bsdf = {"type": "principled", "base_color": base, "roughness": 0.6}
+        nmap = next((maps[k] for k in ("norm", "map_Kn", "map_Bump", "bump") if k in maps and "norm" in maps[k].name.lower()), None)
+        if nmap is not None and nmap.exists():
+            dst = out / "textures" / nmap.name
+            if not dst.exists():
+                Image.open(nmap).convert("RGB").save(dst)
+            bsdf = {"type": "normalmap", "normalmap": {"type": "bitmap", "raw": True, "filename": str(dst.relative_to(out))},
+                    "bsdf": bsdf}
+        parts.append({"name": name, "ply": f"{name}.ply", "bsdf": {"type": "twosided", "bsdf": bsdf},
+                      "triangles": int(len(f))})
+        lo, hi, total = np.minimum(lo, p.min(0)), np.maximum(hi, p.max(0)), total + len(f)
+    meta = {"converter_version": CONVERTER_VERSION, "parts": parts, "bounds": [lo.tolist(), hi.tolist()],
+            "triangles": int(total), "note": "OBJ scans have arbitrary units and up axis: place() with height= and check"}
+    _write_atomic(out / "model.json", json.dumps(meta, indent=1).encode())
+    return meta
+
+
 @dataclass
 class Part:
     name: str
@@ -339,12 +493,15 @@ def _absolute(spec, out: Path):
 
 def model(aid: str, res: str = "1k", foliage_translucency: float = 0.35) -> Model:
     """Fetch (once) and convert (once) a pinned Poly Haven model."""
-    base = CACHE / "polyhaven" / aid / res
+    base = _base(aid, res)
     out = base / f"mitsuba_v{CONVERTER_VERSION}_t{foliage_translucency:g}"
     with _locked(base / ".lock"):
         if not (out / "model.json").exists():
             root, entry = _fetch(aid, res)
-            _convert(root / next(k for k in entry["files"] if k.endswith(".gltf")), out, foliage_translucency)
+            if entry.get("kind") == "obj_zip":
+                _convert_obj(root, out)
+            else:
+                _convert(root / next(k for k in entry["files"] if k.endswith(".gltf")), out, foliage_translucency)
     meta = json.loads((out / "model.json").read_text())
     parts = [Part(p["name"], str(out / p["ply"]), _absolute(p["bsdf"], out), p["triangles"]) for p in meta["parts"]]
     return Model(aid, res, parts, tuple(map(tuple, meta["bounds"])), meta["triangles"])
@@ -360,13 +517,17 @@ def surface(aid: str, res: str = "1k", uv_scale=None, tint=None) -> dict:
     import numpy as np
     from PIL import Image
 
-    base = CACHE / "polyhaven" / aid / res
+    base = _base(aid, res)
     out = base / f"surface_v{CONVERTER_VERSION}"
     with _locked(base / ".lock"):
         root, entry = _fetch(aid, res)
         if entry.get("kind") != "texture":
             raise ValueError(f"{aid} is a model; use model()")
-        roles = {f["role"]: root / name for name, f in entry["files"].items()}
+        if entry.get("source") == "ambientcg":
+            suffix = {"_Color.jpg": "diff", "_Roughness.jpg": "rough", "_NormalGL.jpg": "nor_gl", "_Metalness.jpg": "metal"}
+            roles = {role: p for p in root.rglob("*.jpg") for end, role in suffix.items() if p.name.endswith(end)}
+        else:
+            roles = {f["role"]: root / name for name, f in entry["files"].items()}
         if not (out / "rough.png").exists():
             out.mkdir(parents=True, exist_ok=True)
             for role in ("rough", "metal"):
@@ -411,28 +572,50 @@ def place(m: Model, at=(0.0, 0.0, 0.0), yaw: float = 0.0, height: float | None =
     return G.compose(G.translate(at), G.rotate((0, 1, 0), yaw), G.scale(s), G.translate(-anchor))
 
 
-def add(b, m: Model, matrix, prefix: str | None = None, overrides: dict | None = None) -> None:
-    """Register the model's materials (once per prefix) and shapes on a scene_kit.SceneBuilder."""
-    prefix = prefix or f"web_{m.id}"
+def add(b, m: Model, matrix, prefix: str | None = None, overrides: dict | None = None, instance: bool = True) -> None:
+    """Add the model to a scene_kit.SceneBuilder at `matrix`.
+
+    By default the geometry is stored once as a Mitsuba shapegroup per prefix and every call adds an
+    instance of it, so ten copies of a 2M-triangle tree cost 2M triangles. Pass a different `prefix`
+    for a differently coloured copy (`overrides` = {part name: bsdf}), or instance=False for plain shapes."""
+    from scene_kit import xf
+
+    prefix = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in (prefix or f"web_{m.id}"))
+    mats = {}
     for part in m.parts:
         mid = f"{prefix}__{part.name}"
         if mid not in b.d:
             b.material(mid, (overrides or {}).get(part.name, part.bsdf))
-        b.ply(part.ply, matrix, mid, prefix=prefix)
+        mats[part.name] = mid
+    if not instance:
+        for part in m.parts:
+            b.ply(part.ply, matrix, mats[part.name], prefix=prefix)
+        return
+    group = f"sg_{prefix}"
+    if group not in b.d:
+        b.d[group] = {"type": "shapegroup", **{f"part_{i}": {"type": "ply", "filename": part.ply,
+                                                              "bsdf": {"type": "ref", "id": mats[part.name]}}
+                                               for i, part in enumerate(m.parts)}}
+    b.d[b._key(f"inst_{prefix}")] = {"type": "instance", "shapegroup": {"type": "ref", "id": group}, "to_world": xf(matrix)}
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=("search", "pin", "info"))
+    ap.add_argument("cmd", choices=("search", "pin", "stage", "info"))
     ap.add_argument("names", nargs="+")
     ap.add_argument("--res", default="1k")
     ap.add_argument("--textures", action="store_true", help="search textures instead of models")
+    ap.add_argument("--url", help="pin si:<name>: the Smithsonian full-resolution OBJ zip URL")
+    ap.add_argument("--name", help="pin si:<name>: a human-readable title")
     args = ap.parse_args(argv)
     if args.cmd == "search":
         search(args.names, "textures" if args.textures else "models")
     for aid in args.names if args.cmd != "search" else []:
         if args.cmd == "pin":
-            pin(aid, args.res)
+            pin(aid, args.res, args.url, args.name)
+        elif args.cmd == "stage":                 # download only; remote_run.sh syncs web_assets/ to the cluster
+            root, _ = _fetch(aid, args.res)
+            print(f"staged {aid} in {root}")
         elif _read_manifest()["assets"].get(aid, {}).get(args.res, {}).get("kind") == "texture":
             _fetch(aid, args.res)
             print(f"{aid} @ {args.res}: texture fetched")
