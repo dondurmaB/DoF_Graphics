@@ -165,7 +165,7 @@ def run_sample(index, scene_def, bundle, scene, ctx, args, base: Path, fp: str, 
         if drawn is None:
             continue
         origin, target, roll, focal = drawn
-        pose_lens = R.Lens(origin, target, focal, S.SENSOR_HEIGHT_MM, 1e5, 1.0, roll)
+        pose_lens = R.Lens(origin, target, focal, S.SENSOR_HEIGHT_MM, 1e5, 1.0, roll, scene_def.far_clip)
         depth, layers, g_sec = R.render_gbuffer(scene, pose_lens.sensor(w, h, 1, False, "box"), pose_lens,
                                                 int(rng.integers(0, 2 ** 31 - 1)))
         if check_depth(depth, reasons):
@@ -207,7 +207,8 @@ def run_sample(index, scene_def, bundle, scene, ctx, args, base: Path, fp: str, 
     dof_spp = args.dof_spp or max(args.spp, scene_def.spp_hint)
     manifest = []
     for j, lens_spec in enumerate(lenses):
-        lens = R.Lens(origin, target, focal, S.SENSOR_HEIGHT_MM, lens_spec["f_number"], lens_spec["focus"], roll)
+        lens = R.Lens(origin, target, focal, S.SENSOR_HEIGHT_MM, lens_spec["f_number"], lens_spec["focus"], roll,
+                      scene_def.far_clip)
         lens_id = "lens_" + short_hash({"focus": round(lens_spec["focus"], 4), "n": round(lens_spec["f_number"], 4),
                                         "aperture": "disc"})[:8]
         ldir = pdir / lens_id
@@ -271,7 +272,8 @@ def main(argv=None) -> int:
     scene_dict = dict(bundle.scene)
     scene_dict["integrator"] = {"type": "path", "max_depth": scene_def.max_depth, "rr_depth": scene_def.rr_depth}
     first = scene_def.views[scene_def.default_view]
-    scene_dict["sensor"] = R.Lens(first.origin, first.target, 50.0, S.SENSOR_HEIGHT_MM, 1e5, 1.0).sensor(
+    scene_dict["sensor"] = R.Lens(first.origin, first.target, 50.0, S.SENSOR_HEIGHT_MM, 1e5, 1.0,
+                                   far_clip=scene_def.far_clip).sensor(
         args.width, args.height, 1, False)
     scene = mi.load_dict(scene_dict)
     git = R.git_state()

@@ -55,3 +55,5 @@ logs/
 *.swp
 .omx/
 dataset/mitsuba/
+renderer/mitsuba/web_assets/
+renderer/mitsuba/scenes/assets/.web_manifest.lock

@@ -11,6 +11,7 @@ import hashlib
 import importlib.util
 import json
 import math
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -105,7 +106,8 @@ def make_context(scene: SceneDef, root: Path, seed: int | None = None, env: str 
                  rebuild: bool = False) -> BuildContext:
     seed = scene.default_seed if seed is None else int(seed)
     base = Path(root) / scene.id
-    return BuildContext(assets_dir=base / f"s{seed}" / env, shared_dir=base / f"shared_v{scene.asset_version}",
+    return BuildContext(assets_dir=base / f"v{scene.asset_version}" / f"s{seed}" / env,
+                        shared_dir=base / f"shared_v{scene.asset_version}",
                         seed=seed, env=env, rebuild=rebuild)
 
 
@@ -250,7 +252,8 @@ def validate_bundle(s: SceneDef, b: SceneBundle) -> list[str]:
 def fingerprint(scene_dict: dict, roots: list[Path] = ()) -> str:
     """Stable hash of a scene dict. Absolute cache paths are made relative and
     transforms become matrices, so two machines building the same scene agree."""
-    prefixes = sorted((str(Path(r)) + "/" for r in roots), key=len, reverse=True)
+    web_cache = Path(os.environ.get("DOF_WEB_ASSETS", HERE / "web_assets"))   # same default as web_assets.CACHE
+    prefixes = sorted((str(Path(r)) + "/" for r in [*roots, web_cache]), key=len, reverse=True)
 
     def norm(x):
         if isinstance(x, dict):

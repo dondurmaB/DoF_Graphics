@@ -60,10 +60,14 @@ import them, do not copy them.
    work on every `*_ad_rgb` variant and on `scalar_rgb`.
 6. **Stay on the prebuilt wheel.** Stock Mitsuba plugins only. Nothing that needs
    compiling Mitsuba from source.
-7. **Procedural first.** Outside assets (meshes, HDRIs, textures) are allowed if
-   CC0, at most 50 MB per scene, committed under `scenes/assets/<id>/` with a
-   sha256 and source in `scenes/assets/LICENSES.md`. Natural scenes will often
-   need this.
+7. **Real assets come through `web_assets.py`.** Scanned CC0 models from Poly Haven
+   (furniture, tools, plants, trees) usually beat procedural ones, so prefer them for
+   recognisable objects. Pin each one locally (`python renderer/mitsuba/web_assets.py pin
+   <id>`, which writes URLs and md5s to the committed `scenes/assets/web_manifest.json`),
+   then `W.model(id)` downloads, checks and converts it on whatever machine builds the scene
+   and `W.add(b, m, W.place(...))` adds it. The downloads are not committed. Other CC0
+   sources need the same pin-and-verify treatment before use; nothing without a CC0
+   licence. Mitsuba bitmaps put v = 0 at the image top, like glTF (measured).
 8. **Every scene has light**, and each emitter gets a `sampling_weight`
    proportional to its power (see `SceneBuilder._shape`). Uniform picking made
    the cafe sun sparkle among about 40 lamps.
@@ -279,7 +283,7 @@ Crops are free and preserve everything (the CoC does not depend on the crop).
 
 | | Limit |
 |---|---|
-| Triangles | 2M |
+| Triangles | 8M (one scanned tree is about 2M) |
 | Textures | 1 GB total on disk |
 | `build` with a warm shared cache | 60 s |
 | 1920x1080 at 1024 spp, one beauty pass | 30 s |

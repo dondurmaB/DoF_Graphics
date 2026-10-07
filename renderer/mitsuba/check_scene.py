@@ -27,7 +27,7 @@ sys.path.insert(0, str(HERE))
 import scene_api as S  # noqa: E402
 
 MEDIAN_LUMINANCE_BAND = (0.02, 0.5)
-MAX_TRIANGLES = 2_000_000
+MAX_TRIANGLES = 8_000_000
 MAX_WARM_BUILD_S = 60.0
 
 

@@ -45,6 +45,15 @@ def _check(env: str) -> None:
         raise ValueError(f"unknown env {env!r}; choose from {ENVS}")
 
 
+def sunsky_to_world():
+    """Mitsuba 3.9.1's `sunsky` puts the zenith on local +z. Our scenes are y up, so without this
+    rotation the sky is black over the z < 0 half of all directions (and entirely black when the sun
+    has z < 0). `sun_direction` is read in world space either way. Measured on the cluster."""
+    import mitsuba as mi
+
+    return mi.ScalarTransform4f().rotate(axis=[1, 0, 0], angle=-90)
+
+
 def sky(env: str, sun_direction=None, scale: float = 1.0, sampling_weight: float = 1.0) -> dict:
     """One emitter dict for the whole sky. `scale` multiplies sun and sky together."""
     _check(env)
@@ -55,7 +64,7 @@ def sky(env: str, sun_direction=None, scale: float = 1.0, sampling_weight: float
     d = d / np.linalg.norm(d)
     if d[1] <= 0:
         raise ValueError("sun_direction points below the horizon; sunsky renders black there")
-    return {"type": "sunsky", "sun_direction": d.tolist(), "turbidity": _TURBIDITY[env],
+    return {"type": "sunsky", "to_world": sunsky_to_world(), "sun_direction": d.tolist(), "turbidity": _TURBIDITY[env],
             "albedo": {"type": "rgb", "value": list(_GROUND[env]["base"])},
             "sun_scale": float(scale), "sky_scale": float(scale), "sampling_weight": float(sampling_weight)}
 

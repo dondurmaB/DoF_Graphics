@@ -23,6 +23,7 @@ import numpy as np
 
 import mitsuba as mi
 import procedural as G
+import env_kit
 import props as P
 from scene_api import BuildContext, SceneBundle, SceneDef, View
 from scene_kit import Assets, SceneBuilder, bitmap, luminance, principled, rgb, xf
@@ -138,7 +139,7 @@ FLAME = (60.0, 26.0, 6.0)
 def add_sky(b: SceneBuilder) -> None:
     d = np.asarray(SUN_DIRECTION, dtype=float)
     d /= np.linalg.norm(d)
-    b.d["sky"] = {"type": "sunsky", "sun_direction": d.tolist(), "turbidity": 3.0,
+    b.d["sky"] = {"type": "sunsky", "to_world": env_kit.sunsky_to_world(), "sun_direction": d.tolist(), "turbidity": 3.0,
                   "sun_scale": DAYLIGHT_SCALE, "sky_scale": DAYLIGHT_SCALE}
 
 

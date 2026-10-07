@@ -109,11 +109,12 @@ class Lens:
     here is planar z-depth, the same quantity written to depth.exr.
     """
 
-    def __init__(self, origin, target, lens_mm, sensor_mm, f_number, focus_m, roll_deg=0.0):
+    def __init__(self, origin, target, lens_mm, sensor_mm, f_number, focus_m, roll_deg=0.0, far_clip=1000.0):
         self.origin = np.asarray(origin, float)
         self.target = np.asarray(target, float)
         self.forward = (self.target - self.origin) / np.linalg.norm(self.target - self.origin)
         self.roll_deg = float(roll_deg)
+        self.far_clip = float(far_clip)
         self.up = rolled_up(self.forward, self.roll_deg)
         self.lens_m = lens_mm / 1000.0
         self.sensor_m = sensor_mm / 1000.0
@@ -155,7 +156,7 @@ class Lens:
             "fov": self.fov_y,
             "fov_axis": "y",
             "near_clip": 0.01,
-            "far_clip": 1000.0,
+            "far_clip": self.far_clip,
             "to_world": mi.ScalarTransform4f().look_at(origin=self.origin.tolist(),
                                                        target=self.target.tolist(), up=self.up.tolist()),
             "sampler": {"type": "independent", "sample_count": spp},
@@ -268,10 +269,10 @@ def main(argv=None) -> int:
         return 0
     roll = view.roll_deg if args.roll is None else args.roll
     target_name = args.focus_target or view.focus or next(iter(focus_points))
-    probe = Lens(view.origin, view.target, args.lens, args.sensor_height, args.f_number, 1.0, roll)
+    probe = Lens(view.origin, view.target, args.lens, args.sensor_height, args.f_number, 1.0, roll, scene_def.far_clip)
     if args.focus is None:
         args.focus = probe.depth_of(focus_points[target_name][0])
-    lens = Lens(view.origin, view.target, args.lens, args.sensor_height, args.f_number, args.focus, roll)
+    lens = Lens(view.origin, view.target, args.lens, args.sensor_height, args.f_number, args.focus, roll, scene_def.far_clip)
 
     max_depth = args.max_depth or scene_def.max_depth
     scene_dict = dict(bundle.scene)

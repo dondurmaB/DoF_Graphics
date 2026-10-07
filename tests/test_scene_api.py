@@ -68,7 +68,7 @@ def test_focus_points_are_normalised_or_rejected():
 def test_env_gate_and_context():
     s = make_scene()
     ctx = S.make_context(s, Path("/tmp/x"), seed=3, env="clear")
-    assert ctx.assets_dir == Path("/tmp/x/desk/s3/clear") and ctx.shared_dir == Path("/tmp/x/desk/shared_v1")
+    assert ctx.assets_dir == Path("/tmp/x/desk/v1/s3/clear") and ctx.shared_dir == Path("/tmp/x/desk/shared_v1")
     for env in ("snow", "haze"):
         try:
             S.build_checked(s, S.make_context(s, Path("/tmp/x"), 3, env))

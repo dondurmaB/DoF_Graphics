@@ -74,7 +74,8 @@ class ViewerState:
     def lens(self) -> R.Lens:
         """The camera actually path traced: a thin lens only in DoF mode, else a pinhole."""
         f_no = self.f_number if self.mode == "dof" else 1e5
-        return R.Lens(self.position, self.position + self.forward(), self.lens_mm, 24.0, f_no, self.focus_m)
+        return R.Lens(self.position, self.position + self.forward(), self.lens_mm, 24.0, f_no, self.focus_m,
+                      far_clip=self.scene.far_clip)
 
     def optics(self) -> R.Lens:
         """The lens the user dialled in, for CoC maps and the traditional gather."""
