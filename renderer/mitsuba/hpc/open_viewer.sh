@@ -4,6 +4,7 @@
 #   renderer/mitsuba/hpc/open_viewer.sh <scene> [env] [port]      prints http://localhost:<port>/?t=<token>
 #   renderer/mitsuba/hpc/open_viewer.sh --stop <scene>            stops that viewer (the GPU allocation stays)
 #   renderer/mitsuba/hpc/open_viewer.sh --reconnect               reopens tunnels to all running viewers, prints links
+#   renderer/mitsuba/hpc/open_viewer.sh --keepalive               holds one auto-reconnecting tunnel for all viewers
 #
 # The viewer is an `srun --overlap` step inside your allocation (see _remote_lib.sh; the cluster caps jobs per user), listens with a random per-run token, and is reached through `ssh -L`. Each scene gets its own port
 # (default 8800 + checksum(scene) % 100) so several viewers can run side by side. If the link stops working,
@@ -40,6 +41,27 @@ if [ "${1:-}" = "--reconnect" ]; then  # reopen tunnels for every running viewer
     printf '%-14s %s   [HTTP %s]\n' "$scene" "$URL" "$code"
   done
   exit 0
+fi
+
+if [ "${1:-}" = "--keepalive" ]; then  # one ssh carrying every viewer port, re-established whenever it drops
+  while true; do
+    srv=$(ensure_server) && [ -n "$srv" ] || { sleep 30; continue; }
+    read -r JOB NODE <<<"$srv"
+    fwd=()
+    for scene in $("${SSH[@]}" "squeue -s -j $JOB -h -o '%j'" | sed -n 's/^viewer-//p' | sort); do
+      port=$("${SSH[@]}" "grep -o 'http://localhost:[0-9]*' $REMOTE/logs/viewer-$scene.out | tail -1" | sed 's|.*:||')
+      [ -n "$port" ] || continue
+      for pid in $(lsof -ti "tcp:$port" -sTCP:LISTEN 2>/dev/null || true); do
+        ps -p "$pid" -o comm= | grep -q '^ssh$' && kill "$pid"
+      done
+      fwd+=(-L "$port:$NODE:$port")
+    done
+    echo "$(date '+%H:%M:%S') forwarding $((${#fwd[@]} / 2)) ports to $NODE" >&2
+    [ ${#fwd[@]} -gt 0 ] && ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=3 \
+      "${fwd[@]}" "$HOST" || true
+    echo "$(date '+%H:%M:%S') tunnel dropped, reconnecting" >&2
+    sleep 5
+  done
 fi
 
 if [ "${1:-}" = "--stop" ]; then
