@@ -241,6 +241,30 @@ def write_gbuffer(path: Path, layers: dict) -> None:
                                  "albedo.B", "shape_index.Y"]).write(str(path))
 
 
+def _ply_faces(path) -> int:
+    with open(path, "rb") as f:
+        for line in f:
+            line = line.decode("ascii", "ignore").strip()
+            if line.startswith("element face"):
+                return int(line.split()[-1])
+            if line == "end_header":
+                return 0
+    return 0
+
+
+def unique_triangles(scene, scene_dict: dict) -> int:
+    """Triangles stored in the scene: loaded meshes plus each shapegroup's geometry once.
+
+    Instances report face_count 0 (measured), so instanced web assets would otherwise vanish
+    from the budget; repeated instances cost no extra geometry, so they are counted once."""
+    tris = sum(int(s.face_count()) for s in scene.shapes() if hasattr(s, "face_count"))
+    for v in scene_dict.values():
+        if isinstance(v, dict) and v.get("type") == "shapegroup":
+            tris += sum(_ply_faces(c["filename"]) for c in v.values()
+                        if isinstance(c, dict) and c.get("type") == "ply")
+    return tris
+
+
 def git_state() -> dict:
     try:
         run = lambda *c: subprocess.run(["git", *c], cwd=REPO, capture_output=True, text=True, check=True).stdout.strip()
@@ -280,7 +304,7 @@ def main(argv=None) -> int:
     scene_dict["sensor"] = lens.sensor(args.width, args.height, 1, thin_lens=False)
     scene = mi.load_dict(scene_dict)
     shapes = len(scene.shapes())
-    tris = sum(int(s.face_count()) for s in scene.shapes() if hasattr(s, "face_count"))
+    tris = unique_triangles(scene, scene_dict)
     print(f"variant {variant} | {shapes} shapes, {tris:,} triangles | load {time.time() - t0:.1f}s")
     print(f"lens {args.lens:.0f} mm f/{args.f_number:g} | focus {lens.focus_m:.3f} m ({target_name}) | roll {roll:g} deg | "
           f"CoC at infinity {lens.metadata(args.width, args.height)['coc_diameter_px_at_infinity']:.1f} px")

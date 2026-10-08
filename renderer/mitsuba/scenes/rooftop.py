@@ -43,7 +43,7 @@ from scene_api import BuildContext, SceneBundle, SceneDef, View
 from scene_kit import Assets, SceneBuilder, bitmap, luminance, principled, rgb
 from scenes import _rooftop_props as R
 
-ASSET_VERSION = 6
+ASSET_VERSION = 8
 TY = 42.0                                     # deck level
 BX, BZ = 10.0, 8.0                            # half extents of our building / terrace
 SUN = env_kit.default_sun_direction(10.5, -40.0)
@@ -52,7 +52,8 @@ SKY_SCALE = {"clear": 2.5, "overcast": 2.6}
 # horizon radiance (per unit sky scale) that the far city fades toward
 HAZE_L = {"clear": (0.105, 0.100, 0.105), "overcast": (env_kit.OVERCAST_RADIANCE,) * 3}
 BULB = (26.0, 15.0, 5.5)
-WINDOW_L = 0.55                               # radiance of a lit window at level 1 (warm interior light)
+WINDOW_L = 0.55
+SHOP_L = 0.45                                 # radiance of lit shop interiors and signs                               # radiance of a lit window at level 1 (warm interior light)
 FLAME = (9.0, 4.2, 1.1)
 CAR_COLOURS = [((0.62, 0.62, 0.60), 0.0), ((0.015, 0.015, 0.017), 0.0), ((0.30, 0.31, 0.32), 0.6),
                ((0.42, 0.03, 0.02), 0.0), ((0.03, 0.06, 0.20), 0.0), ((0.12, 0.12, 0.12), 0.3)]
@@ -116,41 +117,61 @@ def exr(A: Assets, name: str, fn) -> str:
 # --------------------------------------------------------------------------
 # Materials
 # --------------------------------------------------------------------------
+def facade_bsdf(As: Assets, kind: str) -> dict:
+    spec = R.FACADES[kind]
+    tid, tint, size = spec["tex"]
+    wall = W.surface(tid, tint=tint, uv_scale=(1 / size[0], 1 / size[1]) if size else None)
+    if spec["layout"] is None:
+        return wall
+    alb, rough, mask, _, (tw, th) = facade_maps(kind)
+    sc = (1 / tw, 1 / th)
+    win = principled(bitmap(As.texture(f"facade_{kind}", lambda: R.srgb(alb)), uv_scale=sc),
+                     bitmap(As.texture(f"facade_{kind}_rough", lambda: rough, gray=True), raw=True, uv_scale=sc), specular=0.5)
+    return {"type": "blendbsdf", "bsdf_0": wall, "bsdf_1": win,
+            "weight": bitmap(As.texture(f"facade_{kind}_mask", lambda: mask, gray=True), raw=True, uv_scale=sc)}
+
+
+def base_color_path(spec: dict) -> str:
+    return (spec["bsdf"] if spec["type"] == "normalmap" else spec)["base_color"]["filename"]
+
+
 def add_materials(b: SceneBuilder, As: Assets, Ad: Assets, env: str) -> None:
     for kind in R.FACADE_KINDS:
-        alb, rough, mask, _, (tw, th) = facade_maps(kind)
-        sc = (1 / tw, 1 / th)
-        win = principled(bitmap(As.texture(f"facade_{kind}", lambda: R.srgb(alb)), uv_scale=sc),
-                         bitmap(As.texture(f"facade_{kind}_rough", lambda: rough, gray=True), raw=True, uv_scale=sc),
-                         specular=0.5)
-        tex = R.FACADES[kind]["tex"]
-        if tex is None:
-            base = win
-        else:
-            base = {"type": "blendbsdf", "bsdf_0": W.surface(tex[0], tint=tex[1]), "bsdf_1": win,
-                    "weight": bitmap(As.texture(f"facade_{kind}_mask", lambda: mask, gray=True), raw=True, uv_scale=sc)}
+        base = facade_bsdf(As, kind)
         for t in range(5):
             b.material(f"walls_{kind}_t{t}", hazed(base, t))
-    roof = W.surface("bitumen", tint=(0.9, 0.88, 0.85))
-    spire = principled((0.50, 0.51, 0.52), 0.35, metallic=0.5)
+    alb, rough, _, (tw, th) = shop_maps()
+    sc = (1 / tw, 1 / th)
+    shop = principled(bitmap(As.texture("shop", lambda: R.srgb(alb)), uv_scale=sc),
+                      bitmap(As.texture("shop_rough", lambda: rough, gray=True), raw=True, uv_scale=sc), specular=0.5)
+    roofs = {"roof": W.surface("bitumen", tint=(1.25, 1.22, 1.18)), "roofclay": W.surface("clay_roof_tiles_02"),
+             "roofmetal": W.surface("box_profile_metal_sheet", tint=(0.55, 0.62, 0.66)),
+             "parapet": W.surface("brushed_concrete"),
+             "spire": principled((0.50, 0.51, 0.52), 0.35, metallic=0.5)}
     for t in range(5):
-        b.material(f"roof_t{t}", hazed(roof, t))
-        b.material(f"spire_t{t}", hazed(spire, t))
+        b.material(f"shop_t{t}", hazed(shop, t))
+        for name, spec in roofs.items():
+            b.material(f"{name}_t{t}", hazed(spec, t))
+    for i, c in enumerate([(0.05, 0.16, 0.10), (0.40, 0.05, 0.04), (0.04, 0.06, 0.16), (0.62, 0.58, 0.50)]):
+        b.material(f"awning_{i}", thin(c, 0.8, 0.15))
     t_park = R.tier_of(1380.0)
     b.material("park", hazed(principled((0.06, 0.12, 0.035), 0.9), t_park))
     b.material("park_tree", hazed(principled((0.04, 0.085, 0.025), 0.85), t_park))
     b.material("water", hazed(principled((0.012, 0.025, 0.03), 0.04, specular=0.6), t_park))
     b.material("bridge", hazed(principled((0.45, 0.43, 0.40), 0.8), t_park))
-    b.material("roofstuff", principled((0.42, 0.41, 0.39), 0.8))
     b.material("tank", W.surface("dark_planks", uv_scale=(5.0, 3.0), tint=(1.1, 0.95, 0.85)))
-    b.material("steel", principled((0.06, 0.06, 0.06), 0.6, metallic=0.5))
+    b.material("steel", W.surface("rusty_metal_03", uv_scale=(2.0, 2.0)))
     b.material("canopy", principled((0.045, 0.10, 0.03), 0.85))
     b.material("trunk", principled((0.10, 0.08, 0.06), 0.9))
     for i, (c, met) in enumerate(CAR_COLOURS):
         b.material(f"car_{i}", principled(c, 0.3, metallic=met, clearcoat=0.6, clearcoat_gloss=0.8))
     b.material("car_glass", principled((0.01, 0.012, 0.014), 0.08, specular=0.5))
     b.material("tyre", principled((0.02, 0.02, 0.02), 0.8))
-    b.material("street", principled(albedo_tex(As, "street", R.street_tile, (1 / R.STREET_PITCH, 1 / R.STREET_PITCH)), 0.85))
+    pitch = (1 / R.STREET_PITCH, 1 / R.STREET_PITCH)
+    b.material("street", {"type": "blendbsdf",
+                          "bsdf_0": principled(albedo_tex(As, "street", R.street_tile, pitch), 0.85),
+                          "bsdf_1": W.surface("asphalt_02"),
+                          "weight": data_tex(As, "street_mask", R.street_mask, pitch)})
     # far ground and hills: continuous haze along the log-distance v coordinate
     weight = data_tex(As, "haze_weight", R.haze_weight)
     for name, fn in (("far_ground", R.far_ground_albedo), ("hills", R.hills_albedo)):
@@ -158,37 +179,41 @@ def add_materials(b: SceneBuilder, As: Assets, Ad: Assets, env: str) -> None:
                           "bsdf_0": principled(albedo_tex(As, name, fn), 0.9),
                           "bsdf_1": {"type": "diffuse", "reflectance": rgb(0.0, 0.0, 0.0)}})
     # terrace
-    deck = {}
-    b.material("deck", W.surface("wood_floor_deck", tint=(0.92, 0.9, 0.9)))
+    b.material("deck", W.surface("brown_planks_09", tint=(1.0, 0.98, 0.95)))
     b.material("pavers", W.surface("concrete_tiles"))
-    b.material("concrete", W.surface("brushed_concrete_04"))
-    b.material("hut", W.surface("beige_wall_001"))
-    b.material("door", principled((0.035, 0.09, 0.065), 0.45, metallic=0.3))
-    b.material("corten", principled(albedo_tex(As, "corten", R.corten_texture), 0.85))
-    b.material("soil", principled((0.05, 0.04, 0.03), 0.95))
+    b.material("upstand", W.surface("concrete_block_wall_02"))
+    b.material("coping", W.surface("chipped_concrete"))
+    b.material("hut", W.surface("concrete_block_wall"))
+    b.material("hut_roof", W.surface("bitumen"))
+    b.material("door", W.surface("painted_metal_shutter"))
+    b.material("corten", W.surface("rusty_metal_02"))
+    b.material("soil", W.surface("bark_brown_02"))
+    b.material("olive_soil", W.surface("brown_mud_dry"))
     b.material("black_steel", principled((0.025, 0.025, 0.027), 0.55, metallic=0.6))
     b.material("cable", principled((0.62, 0.62, 0.64), 0.5, metallic=1.0))
     b.material("teak", principled((0.30, 0.16, 0.075), 0.6))
-    b.material("pergola_wood", principled((0.20, 0.12, 0.065), 0.7))
-    b.material("cushion", principled(albedo_tex(As, "fabric_oat", lambda: R.fabric_texture((0.60, 0.57, 0.50), 73)), 0.9))
-    b.material("cushion_accent", principled(albedo_tex(As, "fabric_teal", lambda: R.fabric_texture((0.06, 0.20, 0.21), 74)), 0.9))
-    b.material("rug", principled(albedo_tex(As, "fabric_rug", lambda: R.fabric_texture((0.30, 0.25, 0.19), 75), (1.0, 1.0)), 0.95))
-    b.material("marble", principled(albedo_tex(As, "marble", R.marble_texture, (0.8, 0.8)), 0.2, specular=0.5))
+    b.material("teak_veneer", W.surface("teak_veneer"))
+    b.material("backbar", W.surface("dark_wooden_planks"))
+    b.material("kick", W.surface("metal_plate_02"))
+    b.material("brass", W.surface("metal_plate", tint=(1.0, 0.78, 0.45)))
+    b.material("pergola_wood", W.surface("weathered_brown_planks"))
+    b.material("linen", W.surface("rough_linen", uv_scale=3.0))
+    b.material("rug", W.surface("acg:Carpet012", uv_scale=(0.8, 0.8)))
+    b.material("marble", W.surface("marble_01"))
     b.material("glass", {"type": "dielectric", "int_ior": 1.5, "ext_ior": 1.0})
     b.material("wax", principled((0.75, 0.70, 0.60), 0.6))
     b.material("wick", principled((0.02, 0.02, 0.02), 0.9))
-    for i, c in enumerate(BOTTLE_COLOURS):
-        b.material(f"bottle_{i}", principled(c, 0.08, specular=0.6))
-    b.material("canvas", thin((0.80, 0.75, 0.64), 0.9, 0.3))
-    b.material("white_metal", principled((0.70, 0.70, 0.68), 0.5, metallic=0.3))
-    b.material("hvac", principled((0.58, 0.58, 0.56), 0.55, metallic=0.3))
-    b.material("fan", principled((0.03, 0.03, 0.03), 0.7))
+    hess = W.surface("hessian_380", uv_scale=(1 / 0.27, 1 / 0.27))
+    cream = thin((0.80, 0.76, 0.66), 0.9, 0.3)
+    b.material("canvas", {"type": "normalmap", "normalmap": hess["normalmap"], "bsdf": cream} if hess["type"] == "normalmap" else cream)
+    b.material("umbrella_pole", W.surface("metal_plate", tint=(0.85, 0.84, 0.80)))
+    b.material("umbrella_base", W.surface("brushed_concrete"))
     b.material("bulb", {"type": "diffuse", "reflectance": rgb(0.8, 0.78, 0.72)})
     b.material("leaf", thin(albedo_tex(As, "leaf_atlas", R.leaf_atlas), 0.55, 0.35))
     b.material("stem", principled((0.15, 0.17, 0.09), 0.7))
     b.material("lavender_flower", principled((0.22, 0.12, 0.40), 0.7))
     b.material("plume", thin((0.55, 0.48, 0.32), 0.9, 0.4))
-    b.material("bark", principled((0.19, 0.16, 0.12), 0.85))
+    b.material("bark", W.surface("bark_willow_02", uv_scale=(1.0, 5.0), tint=(0.85, 0.85, 0.82)))
 
 
 def ply_points(path: str) -> np.ndarray:
@@ -212,6 +237,9 @@ def surface_y(m, matrix, x: float, z: float, r: float = 0.12) -> float:
         sel = (np.abs(p[:, 0] - x) < r) & (np.abs(p[:, 2] - z) < r)
         if sel.any():
             best = max(best, float(p[sel, 1].max()))
+    if not np.isfinite(best):                       # no vertex near the centre (e.g. a lid with only rim vertices)
+        best = max(float((ply_points(part.ply) @ np.asarray(matrix)[:3, :3].T + np.asarray(matrix)[:3, 3])[:, 1].max())
+                   for part in m.parts)
     return best
 
 
@@ -223,6 +251,24 @@ def long_axis_yaw(m, along: str = "x") -> float:
 
 
 _MAPS = {}
+_SHOP = []
+
+
+def shop_maps():
+    if not _SHOP:
+        _SHOP.append(R.shop_texture())
+    return _SHOP[0]
+
+
+def shop_emission(As: Assets, t: int, env: str):
+    T = 1.0 if t == 0 else float(R.transmittance(R.tier_distance(t)))
+    haze = np.zeros(3) if t == 0 else (1.0 - T) * SKY_SCALE[env] * np.asarray(HAZE_L[env])
+    lit, (tw, th) = shop_maps()[2], shop_maps()[3]
+    path = exr(As, f"shop_em_t{t}_{env}", lambda: haze[None, None, :] + T * SHOP_L * lit[::4, ::4])
+    import mitsuba as mi
+
+    return {"type": "bitmap", "filename": path, "raw": True, "filter_type": "bilinear",
+            "to_uv": mi.ScalarTransform4f().scale([1 / tw, 1 / th, 1.0])}
 
 
 def facade_maps(kind: str, ppm: float = 42.0):
@@ -232,13 +278,34 @@ def facade_maps(kind: str, ppm: float = 42.0):
 
 
 def wall_emission(As: Assets, kind: str, t: int, env: str):
-    """Lit windows (scaled by the haze transmittance) plus the haze in-scatter, as one emission bitmap."""
+    """Lit windows (scaled by the haze transmittance, none from tier 3 on) plus the haze in-scatter, as one
+    emission bitmap. Photographed facades derive their lit windows from their brightest warm pixels."""
     T = 1.0 if t == 0 else float(R.transmittance(R.tier_distance(t)))
     haze = np.zeros(3) if t == 0 else (1.0 - T) * SKY_SCALE[env] * np.asarray(HAZE_L[env])
-    lit, (tw, th) = facade_maps(kind, 10.0)[3], facade_maps(kind, 10.0)[4]
-    path = exr(As, f"facade_em_{kind}_t{t}_{env}", lambda: haze[None, None, :] + T * WINDOW_L * lit)
+    spec = R.FACADES[kind]
+    lit_on = 0.0 if t >= 3 else 1.0
     import mitsuba as mi
 
+    if spec["layout"] is None:
+        if spec.get("lit") != "lum" or t >= 3:
+            return tuple(haze) if t else None
+        from PIL import Image
+
+        size = spec["tex"][2]
+        src = base_color_path(W.surface(spec["tex"][0]))
+
+        def em():
+            a = np.asarray(Image.open(src).convert("RGB").resize((256, 256)), np.float32) / 255.0
+            lum = a @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+            warm = (a[..., 0] > a[..., 2] * 1.15)
+            k = np.clip((lum - 0.45) / 0.4, 0, 1) * warm
+            return haze[None, None, :] + T * WINDOW_L * 1.4 * a * k[..., None]
+
+        path = exr(As, f"facade_em_{kind}_t{t}_{env}", em)
+        return {"type": "bitmap", "filename": path, "raw": True, "filter_type": "bilinear",
+                "to_uv": mi.ScalarTransform4f().scale([1 / size[0], 1 / size[1], 1.0])}
+    lit, (tw, th) = facade_maps(kind, 10.0)[3], facade_maps(kind, 10.0)[4]
+    path = exr(As, f"facade_em_{kind}_t{t}_{env}", lambda: haze[None, None, :] + lit_on * T * WINDOW_L * lit)
     return {"type": "bitmap", "filename": path, "raw": True, "filter_type": "bilinear",
             "to_uv": mi.ScalarTransform4f().scale([1 / tw, 1 / th, 1.0])}
 
@@ -246,51 +313,48 @@ def wall_emission(As: Assets, kind: str, t: int, env: str):
 # --------------------------------------------------------------------------
 # City
 # --------------------------------------------------------------------------
-NEIGHBOURS = [((12, 44, -44, -10), 27.0, "render_a"), ((12, 44, -8, 44), 33.0, "brick_b"),
-              ((-44, -12, -44, 4), 36.0, "render_b"), ((-44, -12, 6, 44), 39.0, "concrete_a"),
-              ((-10, 10, 10, 44), 38.0, "stone"), ((-10, 10, -44, -10), 14.0, "render_c")]
+NEIGHBOURS = [((12, 44, -44, -10), 27.0, "render_a", "podium"), ((12, 44, -8, 44), 33.0, "brick_b", "box"),
+              ((-44, -12, -44, 4), 36.0, "render_b", "box"), ((-44, -12, 6, 44), 39.0, "concrete_a", "stepped"),
+              ((-10, 10, 10, 44), 38.0, "stone", "box"), ((-10, 10, -44, -10), 14.0, "render_c", "prewar")]
+
+
+def city_specs(seed: int) -> list:
+    rng = np.random.default_rng([seed, 11])
+    specs = R.city_layout(rng)
+    for (bx, h, kind, profile) in NEIGHBOURS:
+        cx, cz = (bx[0] + bx[1]) / 2, (bx[2] + bx[3]) / 2
+        specs.append(R.massing(rng, {"box": bx, "h": h, "kind": kind, "d": math.hypot(cx, cz), "u0": rng.uniform(0, 20)},
+                               profile))
+    return specs
 
 
 def add_city(b: SceneBuilder, As: Assets, Ad: Assets, seed: int, env: str, focus: dict) -> None:
-    def city():
-        rng = np.random.default_rng([seed, 11])
-        specs = R.city_layout(rng)
-        for (bx, h, kind) in NEIGHBOURS:
-            cx, cz = (bx[0] + bx[1]) / 2, (bx[2] + bx[3]) / 2
-            specs.append({"box": bx, "h": h, "kind": kind, "d": math.hypot(cx, cz), "setback": False, "u0": rng.uniform(0, 20)})
-        return R.city_groups(rng, specs).meshes()
-
-    parts = Ad.meshes("city", city)
+    specs = city_specs(seed)
+    parts = Ad.meshes("city", lambda: R.city_groups(np.random.default_rng([seed, 12]), specs).meshes())
     life = Ad.meshes("street", lambda: R.street_life(np.random.default_rng([seed, 12])).meshes())
     river = Ad.meshes("river", lambda: R.river_park(np.random.default_rng([seed, 13])).meshes())
     t_park = R.tier_of(1380.0)
     I = np.eye(4)
     for part in sorted(parts):
+        tier = int(part.rsplit("_t", 1)[1]) if "_t" in part and part.rsplit("_t", 1)[1].isdigit() else None
         if part.startswith("walls_"):
-            t = int(part.rsplit("_t", 1)[1])
             kind = part[len("walls_"):part.rindex("_t")]
-            b.ply(parts[part], I, part, emission=wall_emission(As, kind, t, env), prefix="city", power=1e-3)
-        elif part.startswith("roof_t") or part.startswith("spire_t"):
-            t = int(part.rsplit("_t", 1)[1])
-            em = haze_emission(env, t)
-            b.ply(parts[part], I, part, emission=em, prefix="city", power=1e-3)
+            b.ply(parts[part], I, part, emission=wall_emission(As, kind, tier, env), prefix="city", power=1e-3)
+        elif part.startswith("shop_t"):
+            b.ply(parts[part], I, part, emission=shop_emission(As, tier, env), prefix="city", power=1e-3)
+        elif tier is not None:
+            b.ply(parts[part], I, part, emission=haze_emission(env, tier), prefix="city", power=1e-3)
         else:
             b.ply(parts[part], I, part, prefix="city")
     for part in sorted(life):
         b.ply(life[part], I, part, prefix="street")
     for part in sorted(river):
         b.ply(river[part], I, part, emission=haze_emission(env, t_park), prefix="river", power=1e-3)
-    # scanned AC units on the nearer roofs (same layout as the city cache: the rng sequence starts identically)
-    ac = W.model("exterior_aircon_unit")
-    arng, n_ac = np.random.default_rng([seed, 14]), 0
-    for s in R.city_layout(np.random.default_rng([seed, 11])):
-        if s["d"] > 320 or s["setback"] or "spire" in s or "stepped" in s or arng.random() < 0.45 or n_ac >= 40:
-            continue
-        x0, x1, z0, z1 = s["box"]
-        for _ in range(int(arng.integers(1, 3))):
-            W.add(b, ac, W.place(ac, at=(arng.uniform(x0 + 2, x1 - 2), s["h"], arng.uniform(z0 + 2, z1 - 2)),
-                                 yaw=float(arng.choice([0, 90, 180, 270]))), prefix="city_ac")
-            n_ac += 1
+    # scanned roof plant on flat roofs within 450 m (instanced); farther roofs keep procedural overruns
+    models = {}
+    for mid, (x, y, z), yaw in R.roof_clutter(specs, seed):
+        m = models.setdefault(mid, W.model(mid))
+        W.add(b, m, W.place(m, at=(x, y, z), yaw=yaw + long_axis_yaw(m, "x")), prefix=f"city_{mid}")
     # ground: near streets, far ground and hills with continuous haze
     near = As.mesh("near_ground", lambda: R.quad((-640, 0.03, -640), (640, 0.03, -640), (640, 0.03, 640), (-640, 0.03, 640),
                                                   (0, 1, 0), [(-585, -585), (695, -585), (695, 695), (-585, 695)]))
@@ -318,17 +382,35 @@ def add_terrace(b: SceneBuilder, As: Assets, Ad: Assets, seed: int, focus: dict)
     I = np.eye(4)
     T = G.translate
     # our building below the deck, the deck, pavers, parapet upstand
-    b.ply(As.mesh("our_walls", lambda: R.walls(-BX, BX, -BZ, BZ, 0.0, TY, 7.0)), I, "walls_brick_a_t0", prefix="ours")
-    b.ply(As.mesh("deck", lambda: R.quad((-BX, TY, -BZ), (BX, TY, -BZ), (BX, TY, 4.4), (-BX, TY, 4.4), (0, 1, 0),
-                                          [(-BX, -BZ), (BX, -BZ), (BX, 4.4), (-BX, 4.4)])), I, "deck", prefix="deck")
+    b.ply(As.mesh("our_walls", lambda: R.walls(-BX, BX, -BZ, BZ, 0.0, TY, 7.0)), I, "walls_brick_e_t0", prefix="ours")
+
+    def deck_zone(x0, x1, z0, z1, rotate):
+        uv = [(z0, x0), (z0, x1), (z1, x1), (z1, x0)] if rotate else [(x0, z0), (x1, z0), (x1, z1), (x0, z1)]
+        return R.quad((x0, TY, z0), (x1, TY, z0), (x1, TY, z1), (x0, TY, z1), (0, 1, 0), uv)
+
+    # three board-direction zones so the deck is not one tiled plane; boards turn 90 degrees under the lounge
+    b.ply(As.mesh("deck", lambda: R.merge([deck_zone(-BX, BX, -BZ, -2.5, False), deck_zone(-2.4, BX, -2.5, 4.4, False)])),
+          I, "deck", prefix="deck")
+    b.ply(As.mesh("deck_lounge", lambda: deck_zone(-BX, -2.4, -2.5, 4.4, True)), I, "deck", prefix="deck")
     b.ply(As.mesh("pavers", lambda: R.quad((-BX, TY, 4.4), (BX, TY, 4.4), (BX, TY, BZ), (-BX, TY, BZ), (0, 1, 0),
                                             [(-BX, 4.4), (BX, 4.4), (BX, BZ), (-BX, BZ)])), I, "pavers", prefix="deck")
-    b.ply(As.mesh("upstand", lambda: R.parapet(-BX, BX, -BZ, BZ, TY, 0.3, 0.25)), I, "concrete", prefix="deck")
+    def upstand(coping: bool):
+        acc, h, w = R.Acc(), 0.3, 0.25
+        for (sx, sz, cx, cz) in ((2 * BX, w, 0, -BZ + w / 2), (2 * BX, w, 0, BZ - w / 2),
+                                 (w, 2 * BZ - 2 * w, -BX + w / 2, 0), (w, 2 * BZ - 2 * w, BX - w / 2, 0)):
+            if coping:   # coping with a 3 cm overhang each side (the drip edge)
+                acc.add(R.box((sx + (0.06 if sx > w else 0.06), 0.05, sz + 0.06), (cx, TY + h + 0.025, cz)))
+            else:
+                acc.add(R.box((sx, h, sz), (cx, TY + h / 2, cz)))
+        return acc.mesh()
+
+    b.ply(As.mesh("upstand", lambda: upstand(False)), I, "upstand", prefix="deck")
+    b.ply(As.mesh("coping", lambda: upstand(True)), I, "coping", prefix="deck")
     # cable railing on the upstand (not along the hut)
     runs = [((-BX + 0.12, -BZ + 0.12), (BX - 0.12, -BZ + 0.12)), ((-BX + 0.12, -BZ + 0.12), (-BX + 0.12, BZ - 0.12)),
             ((BX - 0.12, -BZ + 0.12), (BX - 0.12, HUT[2])), ((-BX + 0.12, BZ - 0.12), (HUT[0], BZ - 0.12))]
     for i, (a, c) in enumerate(runs):
-        parts = As.meshes(f"railing_{i}", lambda a=a, c=c: R.railing((a[0], 0, a[1]), (c[0], 0, c[1]), TY + 0.3))
+        parts = As.meshes(f"railing_{i}", lambda a=a, c=c: R.railing((a[0], 0, a[1]), (c[0], 0, c[1]), TY + 0.35))
         mats = {"post": "black_steel", "cable": "cable", "handrail": "teak"}
         for part in sorted(parts):
             b.ply(parts[part], I, mats[part], prefix="railing")
@@ -369,7 +451,7 @@ def add_terrace(b: SceneBuilder, As: Assets, Ad: Assets, seed: int, focus: dict)
     um = As.meshes("umbrella", R.umbrella)
     for i, (x, z) in enumerate(UMBRELLAS):
         m = G.compose(T((x, TY, z)), G.rotate((0, 1, 0), rng.uniform(0, 45)))
-        for part, mat in (("canvas", "canvas"), ("pole", "white_metal"), ("base", "black_steel")):
+        for part, mat in (("canvas", "canvas"), ("valance", "canvas"), ("pole", "umbrella_pole"), ("base", "umbrella_base")):
             b.ply(um[part], m, mat, prefix="umbrella")
         focus[f"umbrella_{i}"] = [x + 1.0, TY + 2.2, z]
 
@@ -378,20 +460,24 @@ def add_terrace(b: SceneBuilder, As: Assets, Ad: Assets, seed: int, focus: dict)
     for i, (x0, x1, z0, z1) in enumerate(troughs):
         b.ply(As.mesh(f"trough_{i}", lambda x0=x0, x1=x1, z0=z0, z1=z1: R.merge([
             R.box((x1 - x0, 0.6, 0.02), ((x0 + x1) / 2, TY + 0.3, z0)), R.box((x1 - x0, 0.6, 0.02), ((x0 + x1) / 2, TY + 0.3, z1)),
-            R.box((0.02, 0.6, z1 - z0), (x0, TY + 0.3, (z0 + z1) / 2)), R.box((0.02, 0.6, z1 - z0), (x1, TY + 0.3, (z0 + z1) / 2))])),
+            R.box((0.02, 0.6, z1 - z0), (x0, TY + 0.3, (z0 + z1) / 2)), R.box((0.02, 0.6, z1 - z0), (x1, TY + 0.3, (z0 + z1) / 2)),
+            # 3 cm rolled lip round the top edge
+            R.box((x1 - x0 + 0.03, 0.025, 0.05), ((x0 + x1) / 2, TY + 0.6, z0)), R.box((x1 - x0 + 0.03, 0.025, 0.05), ((x0 + x1) / 2, TY + 0.6, z1)),
+            R.box((0.05, 0.025, z1 - z0), (x0, TY + 0.6, (z0 + z1) / 2)), R.box((0.05, 0.025, z1 - z0), (x1, TY + 0.6, (z0 + z1) / 2))])),
             I, "corten", prefix="planter")
         b.ply(As.mesh(f"trough_soil_{i}", lambda x0=x0, x1=x1, z0=z0, z1=z1: R.quad(
             (x0, TY + 0.55, z0), (x1, TY + 0.55, z0), (x1, TY + 0.55, z1), (x0, TY + 0.55, z1), (0, 1, 0),
-            [(0, 0), (1, 0), (1, 1), (0, 1)])), I, "soil", prefix="planter")
+            [(x0, z0), (x1, z0), (x1, z1), (x0, z1)])), I, "soil", prefix="planter")
+    box3 = W.model("planter_box_03")
     for i, (x, z) in enumerate(OLIVES):
-        b.ply(As.mesh("olive_planter", lambda: R.merge([R.box((1.15, 0.75, 0.025), (0, 0.375, -0.5625)),
-                                                        R.box((1.15, 0.75, 0.025), (0, 0.375, 0.5625)),
-                                                        R.box((0.025, 0.75, 1.15), (-0.5625, 0.375, 0)),
-                                                        R.box((0.025, 0.75, 1.15), (0.5625, 0.375, 0))])),
-              T((x, TY, z)), "corten", prefix="planter")
-        b.ply(As.mesh("olive_soil", lambda: R.quad((-0.55, 0.7, -0.55), (0.55, 0.7, -0.55), (0.55, 0.7, 0.55), (-0.55, 0.7, 0.55),
-                                                   (0, 1, 0), [(0, 0), (1, 0), (1, 1), (0, 1)])),
-              T((x, TY, z)), "soil", prefix="planter")
+        m = W.place(box3, at=(x, TY, z), yaw=0.0, height=0.75)
+        W.add(b, box3, m)
+        (lx0, _, lz0), (lx1, _, lz1) = box3.bounds
+        s = 0.75 / (box3.bounds[1][1] - box3.bounds[0][1])
+        hw, hd = 0.5 * s * (lx1 - lx0) - 0.06, 0.5 * s * (lz1 - lz0) - 0.06
+        b.ply(As.mesh("olive_soil", lambda hw=hw, hd=hd: R.quad((-hw, 0.68, -hd), (hw, 0.68, -hd), (hw, 0.68, hd), (-hw, 0.68, hd),
+                                                                 (0, 1, 0), [(-hw, -hd), (hw, -hd), (hw, hd), (-hw, hd)])),
+              T((x, TY, z)), "olive_soil", prefix="planter")
 
     # pergola: posts, beams, rafters; lounge under it
     px0, px1, pz0, pz1 = PERGOLA
@@ -411,17 +497,27 @@ def add_terrace(b: SceneBuilder, As: Assets, Ad: Assets, seed: int, focus: dict)
     focus["pergola"] = [(px0 + px1) / 2, TY + 2.7, pz0]
     lx, lz = (px0 + px1) / 2, 4.3
     sofa = W.model("sofa_02")
-    fabric = b.d["cushion"]
-    W.add(b, sofa, W.place(sofa, at=(lx, TY, 6.15), yaw=180.0), overrides={p.name: fabric for p in sofa.parts})
-    chair2 = As.meshes("armchair", lambda: R.sofa(0.95, 0.85))
-    for part, mat in (("teak", "teak"), ("cushion", "cushion_accent")):
-        b.ply(chair2[part], G.compose(T((px0 + 0.85, TY, lz)), G.rotate((0, 1, 0), 90 + rng.uniform(-8, 8))), mat, prefix="lounge")
-        b.ply(chair2[part], G.compose(T((px1 - 0.85, TY, lz)), G.rotate((0, 1, 0), -90 + rng.uniform(-8, 8))), mat, prefix="lounge")
+    linen = b.d["linen"]
+    W.add(b, sofa, W.place(sofa, at=(lx, TY, 6.15), yaw=180.0), overrides={p.name: linen for p in sofa.parts})
+    pillows = W.model("throw_pillows_01")
+    W.add(b, pillows, W.place(pillows, at=(lx, TY + 0.42, 6.02), yaw=180.0 + long_axis_yaw(pillows, "x")))
+    arm = W.model("modern_arm_chair_01")
+    fabric_parts = {p.name: linen for p in arm.parts if not any(w in p.name.lower() for w in ("leg", "wood", "metal", "frame"))}
+    W.add(b, arm, W.place(arm, at=(px0 + 0.9, TY, lz), yaw=90 + rng.uniform(-8, 8)), prefix="armchair", overrides=fabric_parts)
+    W.add(b, arm, W.place(arm, at=(px1 - 0.9, TY, lz), yaw=-90 + rng.uniform(-8, 8)), prefix="armchair", overrides=fabric_parts)
+    side = W.model("side_table_tall_01")
+    W.add(b, side, W.place(side, at=(px0 + 0.9, TY, lz + 0.85)))
     lantern = W.model("wooden_lantern_01")
-    b.ply(As.mesh("coffee_table", R.coffee_table), T((lx, TY, lz)), "teak", prefix="lounge")
-    b.ply(As.mesh("rug", lambda: R.quad((-2.0, 0.006, -1.4), (2.0, 0.006, -1.4), (2.0, 0.006, 1.4), (-2.0, 0.006, 1.4), (0, 1, 0),
-                                         [(0, 0), (4, 0), (4, 2.8), (0, 2.8)])), T((lx, TY, lz + 0.3)), "rug", prefix="lounge")
-    W.add(b, lantern, W.place(lantern, at=(lx + 0.25, TY + 0.4, lz), yaw=rng.uniform(0, 360), height=0.32))
+    ctab = W.model("modern_coffee_table_01")
+    mct = W.place(ctab, at=(lx, TY, lz), yaw=long_axis_yaw(ctab, "x"))
+    W.add(b, ctab, mct)
+    cty = surface_y(ctab, mct, lx, lz, 0.2)
+    rug_h = 0.01
+    b.ply(As.mesh("rug", lambda: R.box((4.0, rug_h, 2.8), (0, rug_h / 2, 0))), T((lx, TY, lz + 0.3)), "rug", prefix="lounge")
+    W.add(b, lantern, W.place(lantern, at=(lx + 0.35, cty, lz), yaw=rng.uniform(0, 360), height=0.32))
+    jug, mjug = W.model("jug_01"), W.model("metal_jug")
+    W.add(b, jug, W.place(jug, at=(lx - 0.2, cty, lz + 0.05), yaw=rng.uniform(0, 360)))
+    W.add(b, mjug, W.place(mjug, at=(lx - 0.42, cty, lz - 0.08), yaw=rng.uniform(0, 360)))
     pot = W.model("potted_plant_02")
     for (x, z) in ((px0 + 0.45, 6.35), (px1 - 0.45, 6.35)):
         W.add(b, pot, W.place(pot, at=(x, TY, z), yaw=rng.uniform(0, 360)))
@@ -436,11 +532,13 @@ def add_terrace(b: SceneBuilder, As: Assets, Ad: Assets, seed: int, focus: dict)
             acc.add(R.box((0.025, 1.0, 0.06), (BAR_X[0] - 0.012, TY + 0.5, z)))
         return acc.mesh()
 
-    b.ply(As.mesh("bar_counter", counter), I, "teak", prefix="bar")
+    b.ply(As.mesh("bar_counter", counter), I, "teak_veneer", prefix="bar")
+    b.ply(As.mesh("bar_kick", lambda: R.box((0.012, 0.15, BAR_Z[1] - BAR_Z[0]), (BAR_X[0] - 0.032, TY + 0.075, (BAR_Z[0] + BAR_Z[1]) / 2))),
+          I, "kick", prefix="bar")
     b.ply(As.mesh("bar_top", lambda: R.box((0.85, 0.04, BAR_Z[1] - BAR_Z[0] + 0.1),
                                             ((BAR_X[0] + BAR_X[1]) / 2 - 0.08, TY + 1.07, (BAR_Z[0] + BAR_Z[1]) / 2))), I, "marble", prefix="bar")
     b.ply(As.mesh("foot_rail", lambda: R.tube([(BAR_X[0] - 0.18, TY + 0.22, BAR_Z[0]), (BAR_X[0] - 0.18, TY + 0.22, BAR_Z[1])], 0.022, 10)),
-          I, "white_metal", prefix="bar")
+          I, "brass", prefix="bar")
     bbx = 9.3
 
     def back_bar():
@@ -451,11 +549,7 @@ def add_terrace(b: SceneBuilder, As: Assets, Ad: Assets, seed: int, focus: dict)
         acc.add(R.box((0.03, 1.5, 5.2), (bbx + 0.24, TY + 1.65, 0.2)))
         return acc.mesh()
 
-    b.ply(As.mesh("back_bar", back_bar), I, "teak", prefix="bar")
-    bottles = Ad.meshes("bottles", lambda: R.bottle_rows(np.random.default_rng([seed, 32]), bbx + 0.08, -2.3, 2.7,
-                                                         [TY + 1.265, TY + 1.635]))
-    for part in sorted(bottles):
-        b.ply(bottles[part], I, part, prefix="bottle")
+    b.ply(As.mesh("back_bar", back_bar), I, "backbar", prefix="bar")
     focus["bar_bottles"] = [bbx + 0.08, TY + 1.75, 0.3]
     stool = W.model("bar_chair_round_01")
     for k, z in enumerate(np.linspace(BAR_Z[0] + 0.5, BAR_Z[1] - 0.5, 5)):
@@ -468,11 +562,28 @@ def add_terrace(b: SceneBuilder, As: Assets, Ad: Assets, seed: int, focus: dict)
         a_ = rng.uniform(0, 2 * math.pi)
         W.add(b, lime, W.place(lime, at=(5.62 + 0.06 * math.cos(a_), bar_y + 0.02 + 0.02 * (k > 2), -1.6 + 0.06 * math.sin(a_)),
                                yaw=rng.uniform(0, 360)))
-    W.add(b, lantern, W.place(lantern, at=(5.6, bar_y, 1.2), yaw=rng.uniform(0, 360), height=0.4))
+    W.add(b, lantern, W.place(lantern, at=(5.6, bar_y, 1.3), yaw=rng.uniform(0, 360), height=0.4))
     W.add(b, succ, W.place(succ, at=(5.6, bar_y, 2.5), yaw=rng.uniform(0, 360), height=0.2))
     wb = W.model("wine_bottles_01")
-    for zc in (-1.4, 0.4, 2.0):
-        W.add(b, wb, W.place(wb, at=(bbx + 0.08, TY + 2.025, zc), yaw=long_axis_yaw(wb, "z")))
+    for ys in (TY + 1.265, TY + 1.635, TY + 2.005):                  # scanned bottle rows on every back-bar shelf
+        for zc in (-1.7, -0.9, -0.1, 0.7, 1.5, 2.3):
+            if rng.random() < 0.8:
+                W.add(b, wb, W.place(wb, at=(bbx + 0.08, ys, zc + rng.uniform(-0.05, 0.05)), yaw=long_axis_yaw(wb, "z") + rng.choice([0, 180])))
+    diya, basket, lemon = W.model("brass_diya_lantern"), W.model("wicker_basket_01"), W.model("lemon")
+    W.add(b, diya, W.place(diya, at=(5.62, bar_y, -0.4), yaw=rng.uniform(0, 360)))
+    W.add(b, basket, W.place(basket, at=(5.6, bar_y, 0.3), yaw=long_axis_yaw(basket, "z")))
+    for k in range(4):
+        W.add(b, lemon, W.place(lemon, at=(5.6 + rng.uniform(-0.06, 0.06), bar_y + 0.03, 0.3 + rng.uniform(-0.1, 0.1)), yaw=rng.uniform(0, 360)))
+    W.add(b, W.model("propane_tank"), W.place(W.model("propane_tank"), at=(6.35, TY, 3.4)))
+    chalk = W.model("standing_chalkboard_01")
+    W.add(b, chalk, W.place(chalk, at=(4.4, TY, -3.4), yaw=120.0))
+    barrel = W.model("wine_barrel_01")
+    mbar = W.place(barrel, at=(3.4, TY, -0.8), yaw=rng.uniform(0, 360))
+    W.add(b, barrel, mbar)
+    by = surface_y(barrel, mbar, 3.4, -0.8, 0.15)
+    for k in range(2):
+        b.ply(wine, T((3.4 + rng.uniform(-0.15, 0.15), by, -0.8 + rng.uniform(-0.15, 0.15))), "glass", prefix="glass")
+    focus["barrel"] = [3.4, by, -0.8]
     W.add(b, pot, W.place(pot, at=(BAR_X[0] - 0.2, TY, BAR_Z[1] + 0.55), yaw=rng.uniform(0, 360)))
     focus["stool"] = [BAR_X[0] - 0.55, TY + 0.78, BAR_Z[0] + 0.5]
 
@@ -487,7 +598,7 @@ def add_terrace(b: SceneBuilder, As: Assets, Ad: Assets, seed: int, focus: dict)
 
     b.ply(As.mesh("hut", hut), I, "hut", prefix="hut")
     b.ply(As.mesh("hut_roof", lambda: R.box((hx1 - hx0 + 0.3, 0.18, hz1 - hz0 + 0.3), ((hx0 + hx1) / 2, TY + 2.99, (hz0 + hz1) / 2))),
-          I, "concrete", prefix="hut")
+          I, "hut_roof", prefix="hut")
     b.ply(As.mesh("hut_door", lambda: R.box((0.06, 2.1, 1.0), (hx0 - 0.02, TY + 1.05, 6.2))), I, "door", prefix="hut")
     tank, steel = R.water_tank(((hx0 + hx1) / 2 + 0.6, (hz0 + hz1) / 2), TY + 3.08, np.random.default_rng(5))
     b.ply(As.mesh("hut_tank", lambda: tank), I, "tank", prefix="hut")
@@ -496,6 +607,25 @@ def add_terrace(b: SceneBuilder, As: Assets, Ad: Assets, seed: int, focus: dict)
     b.ply(As.mesh("mast", lambda: R.tube([(mx, TY + 2.9, mz), (mx, my + 0.4, mz)], 0.04, 8)), I, "black_steel", prefix="pole")
     focus["water_tank"] = [(hx0 + hx1) / 2 + 0.6, TY + 5.5, (hz0 + hz1) / 2]
     focus["hut_door"] = [hx0, TY + 1.4, 6.2]
+
+    def wall_item(mid, x, y, z, face):
+        """Mount a scanned wall item (thin along its local z, front +z) on a hut face: 'w' (x = hx0) or 's' (z = hz0)."""
+        m = W.model(mid)
+        dz = m.bounds[1][2] - m.bounds[0][2]
+        if face == "w":
+            W.add(b, m, W.place(m, at=(hx0 - dz / 2, y, z), yaw=-90.0))
+        else:
+            W.add(b, m, W.place(m, at=(x, y, hz0 - dz / 2), yaw=180.0))
+
+    wall_item("industrial_wall_lamp", 0, TY + 2.3, 6.2, "w")
+    wall_item("fire_alarm", 5.55, TY + 1.45, 0, "s")
+    wall_item("wall_clock", 6.5, TY + 2.15, 0, "s")
+    wall_item("garden_hose_wall_mounted_01", 9.0, TY + 0.75, 0, "s")
+    pipes = W.model("modular_industrial_pipes_01")
+    W.add(b, pipes, W.place(pipes, at=(hx0 - 0.17, TY, 7.35), yaw=-90.0))
+    cans, bag = W.model("metal_trash_can"), W.model("trashbag")
+    W.add(b, cans, W.place(cans, at=(7.55, TY, hz0 - 0.32), yaw=long_axis_yaw(cans, "x")))
+    W.add(b, bag, W.place(bag, at=(8.75, TY, hz0 - 0.35), yaw=rng.uniform(0, 360)))
     vx0, vx1, vz0, vz1 = HVAC
 
     ac, duct = W.model("exterior_aircon_unit"), W.model("modular_airduct_circular_01")
@@ -503,7 +633,16 @@ def add_terrace(b: SceneBuilder, As: Assets, Ad: Assets, seed: int, focus: dict)
         W.add(b, ac, W.place(ac, at=(cx, TY, 6.7), yaw=180.0 + long_axis_yaw(ac, "x")))
     W.add(b, duct, W.place(duct, at=(vx0 + 2.2, TY, 7.55), yaw=long_axis_yaw(duct, "x")))
     b.ply(As.mesh("screen", lambda: R.merge([R.box((0.07, 1.9, 0.035), (x, TY + 0.95, vz0)) for x in np.arange(vx0, vx1, 0.11)])),
-          I, "teak", prefix="screen")
+          I, "teak_veneer", prefix="screen")
+    sec = W.model("security_light")
+    W.add(b, sec, W.place(sec, at=(2.65, TY + 1.55, vz0 - 0.24), yaw=180.0))
+    shrub3, shrub4 = W.model("shrub_03"), W.model("shrub_04")
+    for mid, x, sh in (("planter_box_02", 1.35, shrub3), ("planter_box_01", 3.35, shrub4)):
+        pm = W.model(mid)
+        mp = W.place(pm, at=(x, TY, vz0 - 0.33), yaw=long_axis_yaw(pm, "x"))
+        W.add(b, pm, mp)
+        top = surface_y(pm, mp, x, vz0 - 0.33, 0.1)
+        W.add(b, sh, W.place(sh, at=(x, top - 0.03, vz0 - 0.33), yaw=long_axis_yaw(sh, "x")))
     # festoon poles and strands
     for name, (x, y, z) in ANCHORS.items():
         if name == "mast":
@@ -536,19 +675,34 @@ def add_terrace(b: SceneBuilder, As: Assets, Ad: Assets, seed: int, focus: dict)
     focus["bulb_near"] = bulbs_all[len(bulbs_all) // 8]
 
 
+TROUGHS = [(-9.75, -9.05, -6.6, 3.2), (9.05, 9.75, -7.0, -3.4)]
+
+
+def trough_slots(seed: int) -> list:
+    """(kind, position) for every planting slot along the troughs: lavender, procedural grass, or a scanned shrub."""
+    rng = np.random.default_rng([seed, 22])
+    out = []
+    for (x0, x1, z0, z1) in TROUGHS:
+        for z in np.arange(z0 + 0.25, z1 - 0.2, 0.42):
+            p = ((x0 + x1) / 2 + rng.uniform(-0.15, 0.15), TY + 0.55, z + rng.uniform(-0.08, 0.08))
+            r = rng.random()
+            out.append(("lavender" if r < 0.55 else "grass" if r < 0.78 else "shrub", p))
+    return out
+
+
 def add_plants(b: SceneBuilder, Ad: Assets, seed: int, focus: dict) -> None:
+    slots = trough_slots(seed)
+
     def plants():
         rng = np.random.default_rng([seed, 21])
         grp = R.Groups()
         for (x, z) in OLIVES:
             R.olive_tree(grp, rng, (x + rng.uniform(-0.08, 0.08), TY + 0.7, z + rng.uniform(-0.08, 0.08)), rng.uniform(2.3, 2.9))
-        for (x0, x1, z0, z1) in [(-9.75, -9.05, -6.6, 3.2), (9.05, 9.75, -7.0, -3.4)]:
-            for z in np.arange(z0 + 0.25, z1 - 0.2, 0.42):
-                p = ((x0 + x1) / 2 + rng.uniform(-0.15, 0.15), TY + 0.55, z + rng.uniform(-0.08, 0.08))
-                if rng.random() < 0.55:
-                    R.lavender(grp, rng, p)
-                else:
-                    R.grass(grp, rng, p, length=rng.uniform(0.55, 0.8))
+        for kind, p in slots:
+            if kind == "lavender":
+                R.lavender(grp, rng, p)
+            elif kind == "grass":
+                R.grass(grp, rng, p, length=rng.uniform(0.55, 0.8))
         # vines up the pergola posts and along the rafters, a few trailing ends
         px0, px1, pz0, pz1 = PERGOLA
         for x in (px0, (px0 + px1) / 2, px1):
@@ -573,6 +727,13 @@ def add_plants(b: SceneBuilder, Ad: Assets, seed: int, focus: dict) -> None:
 
     parts = Ad.meshes("plants", plants)
     I = np.eye(4)
+    srng = np.random.default_rng([seed, 23])
+    shrubs = [W.model("shrub_04"), W.model("shrub_03")]
+    for kind, (x, y, z) in slots:
+        if kind == "shrub":
+            m = shrubs[int(srng.integers(2))]
+            W.add(b, m, W.place(m, at=(x, y - 0.02, z), yaw=long_axis_yaw(m, "z") + srng.uniform(-15, 15),
+                                scale=srng.uniform(0.9, 1.2)))
     for part in sorted(parts):
         b.ply(parts[part], I, part, prefix="plant")
     focus["olive_0"] = [OLIVES[0][0], TY + 2.3, OLIVES[0][1]]
@@ -608,6 +769,9 @@ def _exclusions() -> tuple:
           ((8.6, TY, -2.7), (9.6, TY + 2.4, 3.1)),
           ((PERGOLA[0] - 0.3, TY, 2.6), (PERGOLA[1] + 0.3, TY + 1.25, PERGOLA[3] + 0.3)),
           ((-9.6, TY, -6.9), (-8.6, TY + 1.4, 3.5)), ((8.6, TY, -7.3), (9.6, TY + 1.4, -3.1))]
+    ex += [((3.0, TY, -1.2), (3.8, TY + 1.15, -0.4)),            # barrel table
+           ((4.0, TY, -3.8), (4.8, TY + 1.6, -3.0)),             # chalkboard
+           ((6.4, TY, 3.0), (9.6, TY + 1.2, 4.6))]               # trash cans, propane
     for (x, z) in TABLES:
         ex.append(((x - 1.0, TY, z - 0.75), (x + 1.0, TY + 1.05, z + 0.75)))
     for (x, z) in OLIVES:

@@ -39,6 +39,30 @@ def _fbm(h, w, cells_h, seed, octaves=5, persistence=0.5):
     return G.fbm(h, w, octaves=octaves, base=max(int(cells_h), 1), persistence=persistence, seed=seed)
 
 
+def load_scan(path: str, width_m: float, ppm: float) -> np.ndarray:
+    """A scanned albedo (sRGB), resampled so one texture tile spans width_m at ppm pixels per meter."""
+    from PIL import Image
+
+    n = max(int(round(width_m * ppm)), 8)
+    img = Image.open(path).convert("RGB").resize((n, n), Image.LANCZOS)
+    return np.asarray(img, np.float32) / 255.0
+
+
+def tiled(scan: np.ndarray, h: int, w: int, r0: int = 0, c0: int = 0) -> np.ndarray:
+    """Repeat a tile to (h, w); row 0 / col 0 of the output sits at tile offset (r0, c0)."""
+    th, tw = scan.shape[:2]
+    rows = (np.arange(h) + r0) % th
+    cols = (np.arange(w) + c0) % tw
+    return scan[rows][:, cols]
+
+
+def matched(scan_rgb: np.ndarray, target_rgb: np.ndarray) -> np.ndarray:
+    """Scale a scan per channel so its mean equals the procedural palette's: real surface detail,
+    the colours and exposure the scene was tuned with."""
+    return np.clip(scan_rgb * (target_rgb.reshape(-1, 3).mean(0) / np.maximum(scan_rgb.reshape(-1, 3).mean(0), 1e-3)),
+                   0, 1).astype(np.float32)
+
+
 def _mix(a, b, t):
     t = np.asarray(t, np.float32)
     if t.ndim == 2:
@@ -105,9 +129,12 @@ def _bricks(x, y, rng, pitch=(0.235, 0.077), joint=0.011,
 # --------------------------------------------------------------------------
 # Facades (unique per wall)
 # --------------------------------------------------------------------------
-def facade(kind: str, L: float, H: float, openings, ppm: float, seed: int, wet: bool = False) -> np.ndarray:
+def facade(kind: str, L: float, H: float, openings, ppm: float, seed: int, wet: bool = False,
+           scan: np.ndarray | None = None, scan_brick: np.ndarray | None = None) -> np.ndarray:
     """Weathered facade texture covering the whole wall, `openings` in wall uv (scene_kit-free tuples
-    (u0, u1, v0, v1, arch)). kind: ashlar | limestone | stucco | brick."""
+    (u0, u1, v0, v1, arch)). kind: ashlar | limestone | stucco | brick. `scan` (and `scan_brick` for the
+    spalled stucco) are scanned albedo tiles at `ppm`: they replace the procedural masonry pattern, matched
+    to its colour, and every weathering mask (damp, drips, grime, moss, spalls) is applied on top."""
     rng = np.random.default_rng(seed)
     h, w = int(round(H * ppm)), int(round(L * ppm))
     x, y = _grid(h, w, ppm)
@@ -122,11 +149,17 @@ def facade(kind: str, L: float, H: float, openings, ppm: float, seed: int, wet: 
             rgb, dist = _ashlar(x, y, L, H, rng, course=(0.26, 0.33), block=(0.35, 0.8),
                                 stone_a=(0.74, 0.70, 0.60), stone_b=(0.66, 0.64, 0.58), mortar=(0.76, 0.73, 0.66))
         rgb = rgb * (0.86 + 0.22 * mid[..., None]) * (0.93 + 0.12 * fine[..., None])
-        pits = (_fbm(h, w, H / 0.03, seed + 4, octaves=2) > 0.82)
-        rgb = np.where(pits[..., None], rgb * 0.72, rgb)
+        if scan is not None:
+            rgb = matched(tiled(scan, h, w), rgb) * (0.92 + 0.14 * mid[..., None])
+            dist = np.full((h, w), 1.0, np.float32)
+        else:
+            pits = (_fbm(h, w, H / 0.03, seed + 4, octaves=2) > 0.82)
+            rgb = np.where(pits[..., None], rgb * 0.72, rgb)
     elif kind == "stucco":
         plaster = np.array([0.80, 0.60, 0.38], np.float32)
         rgb = plaster * (0.84 + 0.26 * big[..., None]) * (0.92 + 0.14 * mid[..., None]) * (0.96 + 0.07 * fine[..., None])
+        if scan is not None:
+            rgb = matched(tiled(scan, h, w), rgb) * (0.9 + 0.2 * big[..., None])
         # spalled render: brick shows through, more near the ground and the window corners
         patch_field = _fbm(h, w, H / 1.2, seed + 5, octaves=5)
         near_base = np.exp(-y / 1.1)
@@ -138,6 +171,8 @@ def facade(kind: str, L: float, H: float, openings, ppm: float, seed: int, wet: 
         holes = score > 0.86
         rim = (score > 0.83) & ~holes
         brick = _bricks(x, y, rng)
+        if scan_brick is not None:
+            brick = matched(tiled(scan_brick, h, w), brick)
         rgb = np.where(holes[..., None], brick * 0.92, rgb)
         rgb = np.where(rim[..., None], rgb * 0.78, rgb)
         cracks = np.exp(-((_fbm(h, w, H / 2.0, seed + 6, octaves=3) - 0.5) / 0.004) ** 2) * (mid > 0.55)
@@ -145,6 +180,8 @@ def facade(kind: str, L: float, H: float, openings, ppm: float, seed: int, wet: 
         dist = np.full((h, w), 1.0, np.float32)
     elif kind == "brick":
         rgb = _bricks(x, y, rng) * (0.88 + 0.22 * mid[..., None]) * (0.95 + 0.08 * fine[..., None])
+        if scan is not None:
+            rgb = matched(tiled(scan, h, w), rgb) * (0.92 + 0.14 * mid[..., None])
         wash = _fbm(h, w, H / 1.5, seed + 7, octaves=4)
         lime = np.clip((wash - 0.62) / 0.12, 0, 1) * (y / H)                       # old limewash, upper wall
         rgb = _mix(rgb, np.array([0.80, 0.78, 0.71], np.float32) * (0.9 + 0.1 * fine[..., None]), lime * 0.85)
@@ -389,9 +426,12 @@ def _window(x0, x1, z0, z1, ppm, n):
     return max(r0, 0), min(r1, n), max(c0, 0), min(c1, n)
 
 
-def paving(stones, ppm: int, seed: int, mode: str = "dry", paths=(), puddles=()) -> tuple[np.ndarray, np.ndarray]:
+def paving(stones, ppm: int, seed: int, mode: str = "dry", paths=(), puddles=(),
+           scan: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """Flagstone tops (stone layout from `stones`: list of (x0, x1, z0, z1) in world m). Returns (rgb, rough)
-    where rough is the roughness map (grayscale, raw). mode: dry | wet | snow."""
+    where rough is the roughness map (grayscale, raw). mode: dry | wet | snow. `scan` is a scanned stone
+    albedo tile at `ppm`, world-aligned from (PAVE_X0, PAVE_Z0): it gives every stone real surface detail,
+    tinted per stone with the procedural palette."""
     rng = np.random.default_rng(seed)
     n = int(PAVE_SIZE * ppm)
     x, z = _grid(n, n, ppm, PAVE_X0, PAVE_Z0)
@@ -417,6 +457,10 @@ def paving(stones, ppm: int, seed: int, mode: str = "dry", paths=(), puddles=())
     mid = _fbm(n, n, PAVE_SIZE / 0.35, seed + 2, 4)
     fine = _fbm(n, n, PAVE_SIZE / 0.05, seed + 3, 3)
     rgb = base * (1 + 0.08 * tone[..., None]) * (0.86 + 0.2 * mid[..., None]) * (0.94 + 0.1 * fine[..., None])
+    if scan is not None:
+        detail = tiled(scan, n, n)
+        detail = detail / np.maximum(detail.reshape(-1, 3).mean(0), 1e-3)
+        rgb = base * (1 + 0.08 * tone[..., None]) * np.clip(detail, 0, 2.5)
     rgb = rgb * (0.9 + 0.14 * big[..., None])
     wear = np.zeros((n, n), np.float32)
     for poly in paths:                                         # footfall: smoother, paler, cleaner

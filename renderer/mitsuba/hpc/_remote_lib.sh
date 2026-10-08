@@ -28,11 +28,14 @@ ensure_server() {
   if [ -n "${HPC_JOB:-}" ]; then
     "${SSH[@]}" "squeue -j $HPC_JOB -h -t RUNNING -o '%i %N'"; return
   fi
-  line=$("${SSH[@]}" "squeue -u $USER_NAME -n interactive -h -t RUNNING -o '%i %N'" | head -1)
+  # an ssh failure (VPN down) must not look like "no allocation": fail and let the caller retry
+  line=$("${SSH[@]}" "squeue -u $USER_NAME -n interactive -h -t RUNNING -o '%i %N'") || return 1
+  line=$(head -1 <<<"$line")
   if [ -n "$line" ]; then echo "$line"; return; fi
   until mkdir "$lock" 2>/dev/null; do sleep 1; done
   trap 'rmdir "$lock" 2>/dev/null' RETURN
-  line=$("${SSH[@]}" "squeue -u $USER_NAME -n $SERVER_NAME -h -o '%i %T %N'" | head -1)
+  line=$("${SSH[@]}" "squeue -u $USER_NAME -n $SERVER_NAME -h -o '%i %T %N'") || return 1
+  line=$(head -1 <<<"$line")
   if [ -z "$line" ]; then
     "${SSH[@]}" "cat >| $REMOTE/logs/$SERVER_NAME.sh" <<EOF
 #!/bin/bash
@@ -46,7 +49,7 @@ ensure_server() {
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 sleep infinity
 EOF
-    id=$("${SSH[@]}" "sbatch --parsable $REMOTE/logs/$SERVER_NAME.sh")
+    id=$("${SSH[@]}" "sbatch --parsable $REMOTE/logs/$SERVER_NAME.sh") || return 1
     echo "submitted GPU allocation $SERVER_NAME ($id); waiting for it to start..." >&2
     line="$id PENDING"
   fi

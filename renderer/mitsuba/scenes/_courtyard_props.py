@@ -601,6 +601,41 @@ def lantern_bracket() -> dict[str, G.Mesh]:
     return {"iron": iron.mesh(), "glass": glass.mesh()}
 
 
+def bracket_arm() -> G.Mesh:
+    """Just the scrolled wall bracket of `lantern_bracket` (wall plate, arm, scroll, hook); a scanned lantern
+    hangs from the hook at (0, 0.0, 0.55)."""
+    iron = Acc()
+    iron.add(tube(bezier([(0, 0, 0.0), (0, 0.12, 0.25), (0, 0.06, 0.55)], 20), 0.014, 6))
+    t = np.linspace(0, 2.2 * math.pi, 40)
+    scroll = np.column_stack([np.zeros_like(t), -0.12 + 0.09 * np.exp(-t / 5) * np.sin(t),
+                              0.12 + 0.09 * np.exp(-t / 5) * np.cos(t)])
+    iron.add(tube(np.vstack([[0, -0.25, 0.0], [0, -0.15, 0.06], scroll]), 0.009, 5))
+    iron.add(G.box((0.12, 0.3, 0.02), (0, -0.05, 0.01)))
+    iron.add(tube([(0, 0.06, 0.55), (0, -0.05, 0.55)], 0.006, 5))
+    return iron.mesh()
+
+
+def tv_aerial() -> G.Mesh:
+    """Old Yagi TV aerial on a 1.6 m mast, base at the origin."""
+    acc = Acc()
+    acc.add(tube([(0, 0, 0), (0, 1.6, 0)], 0.022, 8))
+    acc.add(tube([(0, 1.45, -0.55), (0, 1.45, 0.75)], 0.012, 6))
+    for k, z in enumerate(np.linspace(-0.5, 0.7, 9)):
+        half = 0.32 - 0.018 * k
+        acc.add(tube([(-half, 1.45, z), (half, 1.45, z)], 0.006, 4))
+    acc.add(tube([(0, 0.3, 0), (0.5, 0.0, 0.0)], 0.006, 4))
+    acc.add(tube([(0, 0.3, 0), (-0.25, 0.0, 0.43)], 0.006, 4))
+    return acc.mesh()
+
+
+def chain(top, length: float, links: float = 0.04) -> G.Mesh:
+    """A hanging chain (a thin twisted tube) from `top` straight down."""
+    top = np.asarray(top, float)
+    n = max(int(length / links), 2)
+    pts = np.array([top + [0.004 * math.sin(i * 2.1), -length * i / n, 0.004 * math.cos(i * 2.1)] for i in range(n + 1)])
+    return tube(pts, 0.006, 5)
+
+
 def balcony(width: float = 1.9, depth: float = 0.75, rail_h: float = 0.95) -> dict[str, G.Mesh]:
     """Stone slab on two consoles with an iron railing, in wall-local coords: top of the slab at y = 0."""
     stone, iron = Acc(), Acc()

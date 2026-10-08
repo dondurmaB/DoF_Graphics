@@ -108,8 +108,9 @@ def frame(origin, forward, up=UP) -> np.ndarray:
 # Leaf atlas: K colour variants side by side; each leaf picks one through its uv.
 # --------------------------------------------------------------------------
 LEAF_COLOURS = [(0.06, 0.27, 0.07), (0.08, 0.33, 0.09), (0.05, 0.22, 0.06), (0.13, 0.36, 0.08),
-                (0.04, 0.17, 0.07), (0.07, 0.28, 0.17), (0.30, 0.36, 0.07), (0.24, 0.08, 0.07)]
-LEAF_WEIGHTS = np.array([0.22, 0.20, 0.14, 0.14, 0.10, 0.10, 0.06, 0.04])
+                (0.04, 0.17, 0.07), (0.07, 0.28, 0.17), (0.30, 0.36, 0.07), (0.24, 0.08, 0.07),
+                (0.30, 0.19, 0.07), (0.20, 0.17, 0.08)]                     # last two: dying, brown
+LEAF_WEIGHTS = np.array([0.20, 0.18, 0.13, 0.12, 0.10, 0.09, 0.06, 0.04, 0.05, 0.03])
 N_VARIANTS = len(LEAF_COLOURS)
 
 
@@ -574,7 +575,7 @@ def climber_on_rib(grp, rng, z, s0, s1, offset=0.07, wobble=0.04, **kw):
     vine(grp, rng, np.column_stack([xy[:, 0], xy[:, 1], zz]), **kw)
 
 
-def hanging_basket(grp, rng, anchor, drop=1.7, radius=0.2, trail=0.9):
+def hanging_basket(grp, rng, anchor, drop=1.7, radius=0.2, trail=0.9, fill=True):
     """Moss-lined wire basket on three chains, with flowers and trailing vines. Returns the basket centre."""
     anchor = np.asarray(anchor, float)
     centre = anchor - [0, drop, 0]
@@ -585,11 +586,15 @@ def hanging_basket(grp, rng, anchor, drop=1.7, radius=0.2, trail=0.9):
     prof = [(0.0, -0.1), (0.06, -0.095), (0.14, -0.06), (radius, 0.0), (radius + 0.015, 0.06), (radius - 0.01, 0.07),
             (0.0, 0.04)]
     grp["basket"].add(G.lathe(prof, 24), G.translate(centre))
-    for k in range(5):
+    liner = [(0.0, -0.085), (0.13, -0.05), (radius - 0.012, 0.01), (radius - 0.02, 0.06), (0.0, 0.05)]
+    grp["moss"].add(G.lathe(liner, 24), G.translate(centre))
+    for k in range(5 if fill else 3):
         a = rng.uniform(0, TAU)
         start = centre + [0.7 * radius * math.cos(a), 0.06, 0.7 * radius * math.sin(a)]
         end = start + [0.15 * math.cos(a), -trail * rng.uniform(0.4, 1.0), 0.15 * math.sin(a)]
         vine(grp, rng, bezier([start, start + [0.18 * math.cos(a), 0.0, 0.18 * math.sin(a)], end], 16), leaf_len=0.06, every=0.07)
+    if not fill:
+        return centre
     key = str(rng.choice(FLOWER_KEYS))
     for k in range(16):
         a, r = rng.uniform(0, TAU), radius * math.sqrt(rng.uniform(0, 0.85))
@@ -630,7 +635,7 @@ def lily_pad(grp, rng, centre, radius):
     """Flat disc with a notch, floating at the water line."""
     n = 18
     a = np.linspace(0.12, TAU - 0.12, n) + rng.uniform(0, TAU)
-    rim = np.stack([radius * np.cos(a), np.zeros(n), radius * np.sin(a)], 1)
+    rim = np.stack([radius * np.cos(a), rng.uniform(0.002, 0.012, n) + 0.006 * np.sin(2 * a), radius * np.sin(a)], 1)
     p = np.vstack([[0, 0, 0], rim])
     f = np.array([[0, i + 1, i + 2] for i in range(n - 1)])
     nrm = np.tile([0.0, 1.0, 0.0], (len(p), 1))
@@ -726,3 +731,44 @@ def hedge(grp, rng, centre, size, density: float = 150.0):
             out[axis] = sign
             d = unit(out * 0.8 + rng.normal(0, 0.6, 3))
             grp["leaf"].add(make_leaf(rng, 0.075, 0.045, curl=0.2, fold=0.2, rows=3, cols=3), frame(p, d))
+
+
+# --------------------------------------------------------------------------
+# Wear and working clutter
+# --------------------------------------------------------------------------
+def pane_grime(h: int = 256, w: int = 256) -> np.ndarray:
+    """Shading-paint pane albedo: algae and dirt collecting along the bars, run-off streaks down the pane."""
+    u = np.linspace(0, 1, w)[None, :]
+    v = np.linspace(0, 1, h)[:, None]
+    edge = np.exp(-np.minimum(np.minimum(u, 1 - u), np.minimum(v, 1 - v)) / 0.05)
+    streaks = G.fbm(h, w, octaves=4, base=3, seed=91, aspect=8.0) ** 3
+    blotch = G.fbm(h, w, octaves=5, base=5, seed=92)
+    base = np.array([0.66, 0.70, 0.62])
+    algae = np.array([0.22, 0.30, 0.12])
+    mix = np.clip(0.75 * edge + 0.35 * streaks + 0.2 * (blotch - 0.5), 0, 1)[..., None]
+    return np.clip(base * (1 - mix) + algae * mix, 0, 1).astype(np.float32)
+
+
+def label(grp, rng, at, yaw):
+    """White plastic plant label stuck in soil, slightly tilted."""
+    m = G.box((0.016, 0.075, 0.002))
+    grp["label"].add(m, G.compose(G.translate(at), G.rotate((0, 1, 0), yaw), G.rotate((1, 0, 0), rng.uniform(-12, 12)),
+                                  G.translate((0, 0.03, 0))))
+
+
+def coiled_hose(grp, centre, turns=4.5, r0=0.16, r1=0.34, tube=0.011):
+    a = np.linspace(0, TAU * turns, 260)
+    r = np.linspace(r0, r1, len(a))
+    path = np.column_stack([centre[0] + r * np.cos(a), centre[1] + tube + 0.004 * np.sin(a * 3), centre[2] + r * np.sin(a)])
+    tail = bezier([path[-1], path[-1] + [0.4, 0, 0.1], path[-1] + [0.9, 0, -0.3]], 30)
+    grp["hose"].add(G.sweep(np.vstack([path, tail[1:]]), tube, 8))
+
+
+def blob(rng, centre, radius, n=24, y=0.0015) -> G.Mesh:
+    """Irregular flat patch (puddle, soil spill) lying on the floor; uv in meters."""
+    a = np.linspace(0, TAU, n, endpoint=False)
+    r = radius * (0.7 + 0.3 * G.fbm(1, n, octaves=2, base=3, seed=int(rng.integers(1 << 30)))[0]) * rng.uniform(0.8, 1.2, n)
+    rim = np.stack([centre[0] + r * np.cos(a), np.full(n, y), centre[2] + r * np.sin(a)], 1)
+    p = np.vstack([[centre[0], y, centre[2]], rim])
+    f = np.array([[0, 1 + (i + 1) % n, 1 + i] for i in range(n)])
+    return G.Mesh(p, np.tile([0.0, 1.0, 0.0], (len(p), 1)), p[:, [0, 2]].copy(), f).oriented()

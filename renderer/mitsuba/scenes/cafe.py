@@ -25,6 +25,8 @@ import mitsuba as mi
 import procedural as G
 import env_kit
 import props as P
+import web_assets as W
+from scenes._cafe_props import NULL, add_street, box, put
 from scene_api import BuildContext, SceneBundle, SceneDef, View
 from scene_kit import Assets, SceneBuilder, bitmap, luminance, principled, rgb, xf
 
@@ -44,33 +46,23 @@ DAYLIGHT_SCALE = 60.0
 
 def add_materials(b: SceneBuilder) -> None:
     A = b.assets
-    floor_rgb, floor_rough = G.wood_planks(3072, 2048, planks=48, board_len=0.16, seed=1)
-    fa = A.texture("floor_albedo", lambda: floor_rgb)
-    fr = A.texture("floor_rough", lambda: floor_rough, gray=True)
-    b.material("floor", principled(bitmap(fa), bitmap(fr, raw=True), specular=0.5, clearcoat=0.15,
-                                   clearcoat_gloss=0.3))
-
-    b.material("wall", {"type": "diffuse", "reflectance": bitmap(A.texture(
-        "plaster_warm", lambda: G.plaster(1024, 2048, (0.72, 0.64, 0.53), seed=7)))})
-    b.material("wall_green", {"type": "diffuse", "reflectance": bitmap(A.texture(
-        "plaster_green", lambda: G.plaster(1024, 2048, (0.30, 0.40, 0.34), seed=8)))})
-    b.material("ceiling", {"type": "diffuse", "reflectance": bitmap(A.texture(
-        "plaster_ceiling", lambda: G.plaster(1024, 1024, (0.80, 0.77, 0.71), seed=9, strength=0.04)))})
-
-    oak = A.texture("oak", lambda: G.straight_wood(1024, 1024, seed=3)[0])
-    walnut = A.texture("walnut", lambda: G.straight_wood(1024, 1024, seed=4, base=(0.22, 0.12, 0.06),
-                                                         dark=(0.09, 0.045, 0.02))[0])
-    b.material("table_wood", principled(bitmap(oak), 0.3, clearcoat=0.5, clearcoat_gloss=0.5))
-    b.material("dark_wood", principled(bitmap(walnut, uv_scale=(0.6, 0.6)), 0.45))
-    b.material("shelf_wood", principled(bitmap(oak, uv_scale=(0.5, 0.5)), 0.5))
-
-    marble_path = A.texture("marble", lambda: G.marble(512, 2560, seed=5))
-    b.material("marble", principled(bitmap(marble_path), 0.2, specular=0.6))
-    b.material("marble_counter", principled(bitmap(marble_path, uv_scale=(1 / 5.0, 1 / 1.0)), 0.2, specular=0.6))
+    # Big surfaces: scanned CC0 textures (Poly Haven, ambientCG) at real-world scale on uv-in-meters boxes.
+    b.material("floor", W.surface("old_wood_floor"))
+    b.material("wall", W.surface("painted_plaster_wall", tint=(1.45, 1.28, 1.02)))
+    b.material("wall_green", W.surface("green_rough_planks", tint=(1.25, 1.4, 1.3)))
+    b.material("ceiling", W.surface("white_stucco", tint=(0.98, 0.95, 0.88)))
+    b.material("dark_wood", W.surface("dark_wood"))
+    b.material("shelf_wood", W.surface("oak_wood_planks"))
+    b.material("marble_counter", W.surface("marble_01"))
+    # Counter front stays the procedural green subway tile: long_white_tiles read as a dull grey grid.
     tile_rgb, tile_rough = G.subway_tiles(512, 1024, 1.2, 0.6, seed=9)
     b.material("tiles", principled(bitmap(A.texture("tiles", lambda: tile_rgb), uv_scale=(1 / 1.2, 1 / 0.6)),
                                    bitmap(A.texture("tiles_rough", lambda: tile_rough, gray=True), raw=True,
                                           uv_scale=(1 / 1.2, 1 / 0.6)), specular=0.6))
+    b.material("window_frame", W.surface("acg:PaintedWood007A", tint=(0.32, 0.5, 0.42)))
+    # Disc table tops have planar uv spanning the diameter (0.72-0.8 m), so scale to the texture width.
+    b.material("table_wood", W.surface("mocha_oak_veneer", uv_scale=0.8 / 1.0))
+    b.material("marble", W.surface("marble_01", uv_scale=0.72 / 1.5))
 
     b.material("iron", principled((0.025, 0.025, 0.025), 0.4, specular=0.4))
     b.material("bentwood", principled((0.13, 0.065, 0.03), 0.32, clearcoat=0.5))
@@ -119,10 +111,6 @@ def add_materials(b: SceneBuilder) -> None:
     b.material("art_b", {"type": "diffuse", "reflectance": bitmap(A.texture(
         "art_b", lambda: G.abstract_art(576, 768, [(0.2, 0.3, 0.28), (0.85, 0.82, 0.7),
                                                     (0.55, 0.2, 0.2), (0.3, 0.45, 0.6)], seed=17)))})
-    b.material("street", {"type": "diffuse", "reflectance": bitmap(A.texture(
-        "street", lambda: G.plaster(512, 512, (0.38, 0.36, 0.34), seed=19, strength=0.2)))})
-    b.material("facade", {"type": "diffuse", "reflectance": bitmap(A.texture(
-        "facade", lambda: G.plaster(512, 1024, (0.72, 0.58, 0.44), seed=23, strength=0.15)))})
     b.material("emitter_backing", {"type": "diffuse", "reflectance": rgb(0.0, 0.0, 0.0)})
 
 
@@ -183,22 +171,19 @@ def string_lights(b: SceneBuilder, z: float, y_top: float, sag: float, x0: float
 # ----------------------------------------------------------------------------
 
 def add_room(b: SceneBuilder) -> None:
-    cx, cz = 0.0, 0.5 * (ROOM_Z0 + ROOM_Z1)
-    hx, hz = ROOM_X, 0.5 * (ROOM_Z1 - ROOM_Z0)
-    b.rect(G.compose(G.translate((cx, 0, cz)), G.rotate((1, 0, 0), -90), G.scale((hx, hz, 1))), "floor")
-    b.rect(G.compose(G.translate((cx, ROOM_H, cz)), G.rotate((1, 0, 0), 90), G.scale((hx, hz, 1))), "ceiling")
-    # Back wall: green wainscot below, warm plaster above.
-    b.rect(G.compose(G.translate((0, 0.55, ROOM_Z0)), G.scale((hx, 0.55, 1))), "wall_green")
-    b.rect(G.compose(G.translate((0, 0.5 * (ROOM_H + 1.1), ROOM_Z0)), G.scale((hx, 0.5 * (ROOM_H - 1.1), 1))),
-           "wall")
-    b.rect(G.compose(G.translate((0, 0.5 * ROOM_H, ROOM_Z1)), G.rotate((0, 1, 0), 180),
-                     G.scale((hx, 0.5 * ROOM_H, 1))), "wall")
-    b.rect(G.compose(G.translate((ROOM_X, 0.5 * ROOM_H, cz)), G.rotate((0, 1, 0), -90),
-                     G.scale((hz, 0.5 * ROOM_H, 1))), "wall")
-    # Skirting and dado rail along the back and right walls.
-    b.cube((0, 0.06, ROOM_Z0 + 0.01), (2 * ROOM_X, 0.12, 0.02), "dark_wood")
-    b.cube((0, 1.1, ROOM_Z0 + 0.012), (2 * ROOM_X, 0.04, 0.025), "dark_wood")
-    b.cube((ROOM_X - 0.01, 0.06, cz), (0.02, 0.12, 2 * hz), "dark_wood")
+    cz, dz = 0.5 * (ROOM_Z0 + ROOM_Z1), ROOM_Z1 - ROOM_Z0
+    W2 = 2 * ROOM_X
+    box(b, (0, -0.01, cz), (W2, 0.02, dz), "floor")
+    box(b, (0, ROOM_H + 0.01, cz), (W2, 0.02, dz), "ceiling")
+    # Back and front walls: green plank wainscot below a dado rail, warm plaster above.
+    for zw, sgn in ((ROOM_Z0, 1), (ROOM_Z1, -1)):
+        box(b, (0, 0.55, zw + sgn * 0.01), (W2, 1.1, 0.02), "wall_green")
+        box(b, (0, 0.5 * (ROOM_H + 1.1), zw - sgn * 0.01), (W2, ROOM_H - 1.1, 0.02), "wall")
+        box(b, (0, 0.06, zw + sgn * 0.03), (W2, 0.12, 0.02), "dark_wood")
+        box(b, (0, 1.1, zw + sgn * 0.032), (W2, 0.04, 0.025), "dark_wood")
+    box(b, (ROOM_X + 0.01, 0.5 * ROOM_H, cz), (0.02, ROOM_H, dz), "wall")
+    box(b, (ROOM_X - 0.01, 0.06, cz), (0.02, 0.12, dz), "dark_wood")
+    box(b, (ROOM_X - 0.012, 1.1, cz), (0.025, 0.04, dz), "dark_wood")
 
     # Left wall with two window openings, built from thick blocks so the
     # openings have real reveals that shape the sun patches.
@@ -208,31 +193,51 @@ def add_room(b: SceneBuilder) -> None:
     edges = [ROOM_Z1] + [z for w in reversed(WINDOWS) for z in (w[1], w[0])] + [ROOM_Z0]
     for i in range(0, len(edges), 2):
         z_hi, z_lo = edges[i], edges[i + 1]
-        b.cube((wx, 0.5 * ROOM_H, 0.5 * (z_hi + z_lo)), (t, ROOM_H, z_hi - z_lo), "wall")
+        box(b, (wx, 0.5 * ROOM_H, 0.5 * (z_hi + z_lo)), (t, ROOM_H, z_hi - z_lo), "wall")
+        box(b, (-ROOM_X + 0.01, 0.06, 0.5 * (z_hi + z_lo)), (0.02, 0.12, z_hi - z_lo), "dark_wood")
     for z_lo, z_hi in WINDOWS:
         zc, zw = 0.5 * (z_lo + z_hi), z_hi - z_lo
-        b.cube((wx, 0.5 * y0, zc), (t, y0, zw), "wall")
-        b.cube((wx, 0.5 * (y1 + ROOM_H), zc), (t, ROOM_H - y1, zw), "wall")
+        box(b, (wx, 0.5 * y0, zc), (t, y0, zw), "wall")
+        box(b, (wx, 0.5 * (y1 + ROOM_H), zc), (t, ROOM_H - y1, zw), "wall")
         # Frame, mullion, transom, and a deep sill.
         f = 0.05
         for z in (z_lo + f / 2, z_hi - f / 2, zc):
-            b.cube((wx, 0.5 * (y0 + y1), z), (0.07, y1 - y0, f if z != zc else 0.035), "window_frame")
+            box(b, (wx, 0.5 * (y0 + y1), z), (0.07, y1 - y0, f if z != zc else 0.035), "window_frame")
         for y in (y0 + f / 2, y1 - f / 2, y1 - 0.45):
-            b.cube((wx, y, zc), (0.07, f if y != y1 - 0.45 else 0.035, zw), "window_frame")
-        b.cube((-ROOM_X + 0.08, y0 - 0.02, zc), (0.36, 0.04, zw + 0.12), "shelf_wood")
-
-    # The street outside: pavement and a facade across the road bounce warm
-    # light back in and give the windows something to show.
-    # Both run far past the windows' view cone: sunsky is black below the
-    # horizon, so any gap would show as a black band through the glass.
-    b.rect(G.compose(G.translate((-44.0, -0.02, -2.0)), G.rotate((1, 0, 0), -90), G.scale((40.0, 80.0, 1))),
-           "street")
-    # Kept low (two storeys) so it never shades the windows from the sun.
-    b.cube((-19.0, 2.8, -2.0), (2.0, 5.6, 160.0), "facade")
+            box(b, (wx, y, zc), (0.07, f if y != y1 - 0.45 else 0.035, zw), "window_frame")
+        box(b, (-ROOM_X + 0.08, y0 - 0.02, zc), (0.36, 0.04, zw + 0.12), "shelf_wood")
 
     # Ceiling beams.
     for z in np.arange(ROOM_Z1 - 0.8, ROOM_Z0, -1.9):
-        b.cube((0, ROOM_H - 0.09, z), (2 * ROOM_X, 0.18, 0.16), "dark_wood")
+        box(b, (0, ROOM_H - 0.09, z), (W2, 0.18, 0.16), "dark_wood")
+
+
+def add_entrance(b: SceneBuilder) -> None:
+    """Front wall (z = ROOM_Z1, facing the room): panelled door, coat stand, radiator, clock, art."""
+    zf = ROOM_Z1
+    dx, dw, dh = 2.3, 1.0, 2.2
+    box(b, (dx, dh / 2, zf - 0.03), (dw, dh, 0.05), "dark_wood")                     # door leaf
+    for py in (0.55, 1.5):                                                         # raised panels
+        box(b, (dx, py, zf - 0.06), (dw - 0.3, 0.7, 0.02), "dark_wood")
+    for sx, w in ((-1, 0.08), (1, 0.08)):                                          # architrave
+        box(b, (dx + sx * (dw / 2 + w / 2), (dh + 0.08) / 2, zf - 0.035), (w, dh + 0.08, 0.06), "window_frame")
+    box(b, (dx, dh + 0.08, zf - 0.035), (dw + 0.16, 0.08, 0.06), "window_frame")
+    b.sphere((dx - 0.4, 1.02, zf - 0.09), 0.025, "brass")                           # knob
+    box(b, (dx, 0.006, zf - 0.55), (1.0, 0.012, 0.6), "dark_wood")                   # door mat
+    # Coat stand by the door: pole, base, hooks.
+    cs = (1.35, zf - 0.35)
+    box(b, (cs[0], 0.9, cs[1]), (0.045, 1.8, 0.045), "dark_wood")
+    box(b, (cs[0], 0.02, cs[1]), (0.4, 0.04, 0.4), "dark_wood", yaw=45)
+    for k in range(4):
+        box(b, (cs[0], 1.72, cs[1]), (0.34, 0.03, 0.03), "brass", yaw=45 * k)
+    # Cast-iron radiator under the left half of the front wall.
+    rx = -1.6
+    for k in range(14):
+        box(b, (rx - 0.65 + 0.1 * k, 0.45, zf - 0.09), (0.06, 0.62, 0.12), "iron")
+    box(b, (rx, 0.12, zf - 0.09), (1.42, 0.05, 0.05), "iron")
+    put(b, "vintage_telephone_wall_clock", at=(0.0, 2.15, zf - 0.02), yaw=180)
+    put(b, "hanging_picture_frame_03", at=(-1.6, 1.45, zf - 0.02), yaw=180, scale=1.4)
+    b.focus_points["door"] = [dx, 1.1, zf - 0.05]
 
 
 # ----------------------------------------------------------------------------
@@ -247,6 +252,8 @@ def table(b: SceneBuilder, x: float, z: float, top_material: str, radius: float 
 
 
 def chair(b: SceneBuilder, x: float, z: float, yaw: float) -> None:
+    # Kept procedural: the scanned dining chairs (dining_chair_02 and kin) are upholstered dining-room
+    # chairs and lose the bentwood bistro look in renders.
     parts = b.assets.meshes("bistro_chair", P.bistro_chair)
     b.part_set(parts, G.compose(G.translate((x, 0, z)), G.rotate((0, 1, 0), yaw)),
                {"frame": "bentwood", "seat": "cane"})
@@ -320,14 +327,14 @@ def add_hero_table(b: SceneBuilder) -> None:
     b.focus_points["glass"] = [x - 0.22, TABLE_H + 0.12, z + 0.17]
 
     pl = b.assets.mesh("plate", lambda: P.plate(0.1))
-    cr = b.assets.mesh("croissant", P.croissant)
     b.ply(pl, G.translate((x + 0.18, TABLE_H, z - 0.2)), "ceramic_white")
-    b.ply(cr, G.compose(G.translate((x + 0.18, TABLE_H + 0.0085, z - 0.2)), G.rotate((0, 1, 0), 35)), "pastry")
+    put(b, "croissant", at=(x + 0.18, TABLE_H + 0.0085, z - 0.2), yaw=35, scale=0.8)
 
-    vase = b.assets.meshes("vase", P.vase_with_flowers)
+    vase = dict(b.assets.meshes("vase", P.vase_with_flowers))
+    vase.pop("vase")
     b.part_set(vase, G.translate((x - 0.2, TABLE_H, z - 0.24)),
-               {"vase": "ceramic_sage", "stems": "stem", "petals": "petal", "hearts": "flower_heart",
-                "leaves": "leaf"})
+               {"stems": "stem", "petals": "petal", "hearts": "flower_heart", "leaves": "leaf"})
+    put(b, "ceramic_vase_02", at=(x - 0.2, TABLE_H, z - 0.24), height=0.215)
     b.focus_points["flowers"] = [x - 0.2, TABLE_H + 0.38, z - 0.24]
 
 
@@ -358,16 +365,13 @@ def add_midground(b: SceneBuilder, rng) -> None:
     candle(b, -0.95, -4.15)
 
     # Plants: a big floor plant, one by the right wall, and sill plants.
-    big = lambda: P.potted_plant(31, stems=9, height=1.3, leaf_len=0.26, leaf_w=0.12,
-                                 leaves_per_stem=9, pot_radius=0.2, pot_height=0.38, spread=0.5)
-    plant(b, "plant_big", big, G.translate((-3.25, 0, -6.45)), pot="ceramic_white", leaf="leaf_dark")
-    mid = lambda: P.potted_plant(37, stems=7, height=0.8, leaf_len=0.2, leaf_w=0.09,
-                                 leaves_per_stem=8, pot_radius=0.15, pot_height=0.3, spread=0.35)
-    plant(b, "plant_mid", mid, G.translate((3.3, 0, -1.3)))
-    small = lambda: P.potted_plant(41, stems=5, height=0.32, leaf_len=0.09, leaf_w=0.045,
-                                   leaves_per_stem=6, pot_radius=0.07, pot_height=0.11, spread=0.15)
+    put(b, "potted_plant_01", at=(-3.2, 0.0, -6.4), yaw=float(rng.uniform(0, 360)))
+    put(b, "potted_plant_02", at=(3.3, 0.0, -1.3), yaw=float(rng.uniform(0, 360)))
+    put(b, "potted_plant_01", at=(3.25, 0.0, 2.9), yaw=float(rng.uniform(0, 360)), scale=0.85)
     for z_lo, z_hi in WINDOWS:
-        plant(b, "plant_small", small, G.translate((-ROOM_X + 0.1, WINDOW_Y[0], 0.5 * (z_lo + z_hi) + 0.35)))
+        zc = 0.5 * (z_lo + z_hi)
+        put(b, "potted_plant_04", at=(-ROOM_X + 0.1, WINDOW_Y[0], zc + 0.35), yaw=float(rng.uniform(0, 360)))
+    put(b, "standing_picture_frame_01", at=(-ROOM_X + 0.1, WINDOW_Y[0], -4.9), yaw=90)
 
 
 def add_counter(b: SceneBuilder, rng) -> None:
@@ -387,7 +391,10 @@ def add_counter(b: SceneBuilder, rng) -> None:
     b.focus_points["espresso"] = [0.3, top + 0.3, -5.75]
 
     dome = b.assets.meshes("cake_dome", P.cake_dome)
-    b.part_set(dome, G.translate((1.35, top, -5.8)), {"dome": "glass", "stand": "ceramic_white", "cake": "cake"})
+    dome = dict(dome)
+    dome.pop("cake")
+    b.part_set(dome, G.translate((1.35, top, -5.8)), {"dome": "glass", "stand": "ceramic_white"})
+    put(b, "strawberry_chocolate_cake", at=(1.35, top + 0.092, -5.8), yaw=float(rng.uniform(0, 360)), scale=0.85)
     b.focus_points["cake"] = [1.35, top + 0.15, -5.8]
     jar = b.assets.meshes("jar", P.jar)
     for i, x in enumerate((1.9, 2.1)):
@@ -395,12 +402,19 @@ def add_counter(b: SceneBuilder, rng) -> None:
         for k in range(5):
             c = (x + rng.uniform(-0.03, 0.03), top + 0.015 + 0.012 * k, -5.85 - 0.08 * i + rng.uniform(-0.03, 0.03))
             b.cube(c, (0.05, 0.01, 0.05), "pastry", rng.uniform(0, 90))
-    bowl = b.assets.mesh("bowl", P.bowl)
-    b.ply(bowl, G.translate((2.75, top, -5.8)), "ceramic_sage")
-    for k in range(5):
-        ang = 2 * np.pi * k / 5
-        b.sphere((2.75 + 0.045 * np.cos(ang), top + 0.07, -5.8 + 0.045 * np.sin(ang)), 0.035, "orange")
-    b.sphere((2.75, top + 0.11, -5.8), 0.035, "orange")
+    put(b, "wooden_bowl_01", at=(2.75, top, -5.8), scale=0.8)
+    fruit = ["lemon", "food_apple_01", "food_pears_asian_01", "lemon", "food_apple_01"]
+    for k, fid in enumerate(fruit):
+        ang = 2 * np.pi * k / 5 + rng.uniform(-0.2, 0.2)
+        put(b, fid, at=(2.75 + 0.06 * np.cos(ang), top + 0.025, -5.8 + 0.06 * np.sin(ang)),
+            yaw=float(rng.uniform(0, 360)), scale=0.85)
+    put(b, "lemon", at=(2.75, top + 0.07, -5.8), yaw=float(rng.uniform(0, 360)))
+    put(b, "CashRegister_01", at=(3.15, top, -5.95), yaw=180, scale=0.55)
+    put(b, "vintage_electric_kettle", at=(0.95, top, -6.05), yaw=150)
+    put(b, "potted_plant_04", at=(-0.75, top, -5.75), yaw=float(rng.uniform(0, 360)))
+    for x in (1.9, 2.55, 3.2):
+        put(b, "bar_chair_round_01", at=(x, 0.0, -5.15), yaw=float(rng.uniform(0, 360)))
+    b.focus_points["register"] = [3.15, top + 0.2, -5.95]
     for k in range(4):
         b.ply(b.assets.mesh("saucer", P.saucer), G.translate((-0.45, top + 0.009 * k, -5.8)), "ceramic_white")
     b.ply(b.assets.mesh("tumbler", P.tumbler), G.translate((-0.2, top, -5.7)), "glass")
@@ -409,11 +423,11 @@ def add_counter(b: SceneBuilder, rng) -> None:
     bottle = b.assets.mesh("bottle", P.bottle)
     glass_kinds = ["glass_green", "glass_amber", "glass", "glass_green", "glass_amber"]
     for level, y in enumerate((1.45, 1.85, 2.25)):
-        b.cube((1.3, y - 0.02, -6.85), (4.2, 0.04, 0.26), "shelf_wood")
+        box(b, (1.3, y - 0.02, -6.85), (4.2, 0.04, 0.26), "shelf_wood")
         for bx in (-0.6, 1.3, 3.2):
             b.cube((bx, y - 0.1, -6.95), (0.03, 0.16, 0.06), "brass")
         x = -0.72
-        while x < 3.3:
+        while x < 2.6:
             kind = rng.random()
             if kind < 0.6:
                 b.ply(bottle, G.compose(G.translate((x, y, -6.85 + rng.uniform(-0.04, 0.04))),
@@ -431,30 +445,27 @@ def add_counter(b: SceneBuilder, rng) -> None:
                 x += 0.12
             x += rng.uniform(0.0, 0.05)
 
+    put(b, "book_encyclopedia_set_01", at=(3.05, 1.45, -6.85), yaw=0, scale=0.9)
+    put(b, "jug_01", at=(3.05, 1.85, -6.85), yaw=30)
+    put(b, "brass_vase_02", at=(3.05, 2.25, -6.85), height=0.36)
+
     # Chalkboard menu and the back-wall string lights.
     board_c, board_w, board_h = (-2.35, 1.95, ROOM_Z0 + 0.02), 1.5, 1.0
     b.rect(G.compose(G.translate(board_c), G.scale((board_w / 2, board_h / 2, 1))), "chalkboard")
     for dx, dy, w, hh in ((0, board_h / 2, board_w + 0.06, 0.05), (0, -board_h / 2, board_w + 0.06, 0.05),
                           (board_w / 2, 0, 0.05, board_h), (-board_w / 2, 0, 0.05, board_h)):
-        b.cube((board_c[0] + dx, board_c[1] + dy, board_c[2] + 0.015), (w, hh, 0.03), "dark_wood")
+        box(b, (board_c[0] + dx, board_c[1] + dy, board_c[2] + 0.015), (w, hh, 0.03), "dark_wood")
     b.focus_points["menu"] = list(board_c)
     string_lights(b, ROOM_Z0 + 0.08, 2.75, 0.22, -3.6, 3.6, 4)
 
 
 def add_walls_decor(b: SceneBuilder) -> None:
-    # Round mirror and two framed paintings on the right wall.
-    mirror_c = (ROOM_X - 0.02, 1.75, -3.6)
-    face_left = G.rotate((0, 1, 0), -90)
-    b._shape("mirror", {"type": "disk", "to_world": xf(G.compose(G.translate(mirror_c), face_left, G.scale(0.45)))},
-             "mirror")
-    ring = b.assets.mesh("mirror_ring", lambda: P.frame_ring(0.46, 0.022))
-    b.ply(ring, G.compose(G.translate(mirror_c), face_left), "brass")
-    for art, zc, w, h in (("art_a", -0.6, 0.6, 0.8), ("art_b", -5.9, 0.75, 0.56)):
-        c = (ROOM_X - 0.03, 1.7, zc)
-        b.rect(G.compose(G.translate(c), face_left, G.scale((w / 2, h / 2, 1))), art)
-        for dz, dy, ww, hh in ((0, h / 2, w + 0.05, 0.035), (0, -h / 2, w + 0.05, 0.035),
-                               (w / 2, 0, 0.035, h), (-w / 2, 0, 0.035, h)):
-            b.cube((c[0] - 0.005, c[1] + dy, c[2] + dz), (0.03, hh, ww), "black")
+    """Scanned framed mirror, framed paintings and a wall clock on the right wall (facing -x)."""
+    put(b, "ornate_mirror_01", at=(ROOM_X - 0.02, 1.3, -3.6), yaw=-90, scale=1.2)
+    put(b, "hanging_picture_frame_01", at=(ROOM_X - 0.02, 1.3, -0.6), yaw=-90)
+    put(b, "hanging_picture_frame_02", at=(ROOM_X - 0.02, 1.45, -5.9), yaw=-90)
+    put(b, "wall_clock", at=(ROOM_X - 0.02, 2.3, -2.05), yaw=-90)
+    b.focus_points["mirror"] = [ROOM_X - 0.03, 1.75, -3.6]
 
 
 def add_lights(b: SceneBuilder) -> None:
@@ -465,6 +476,9 @@ def add_lights(b: SceneBuilder) -> None:
     pendant(b, -1.0, -4.35, 1.3, "enamel_cream")
     for x in (-0.3, 0.7, 1.7, 2.7):
         globe_bulb(b, x, -5.85, 1.0)
+    # The entrance end gets its own light so the front wall reads in random poses.
+    for x, z, drop in ((-1.6, 3.15, 1.45), (0.6, 3.15, 1.45), (2.3, 2.95, 0.9)):
+        globe_bulb(b, x, z, drop)
 
 
 def build(ctx: BuildContext) -> SceneBundle:
@@ -476,6 +490,8 @@ def build(ctx: BuildContext) -> SceneBundle:
     add_midground(b, rng)
     add_counter(b, rng)
     add_walls_decor(b)
+    add_entrance(b)
+    add_street(b, rng)
     add_lights(b)
     # Daylight gets as many light samples as all the lamps together: it lights
     # most of the room, but lamp-lit corners it cannot reach still converge.
@@ -494,10 +510,17 @@ SCENE = SceneDef(
         "close": View((0.12, 0.98, 0.95), (-0.25, 0.86, -2.0), focus="teapot"),
         # From the front corner, taking in the windows and most of the room.
         "wide": View((2.6, 1.55, 2.9), (-1.2, 1.0, -3.0), focus="teapot"),
+        # Through the second window onto the street and the buildings across the road.
+        "window": View((-1.0, 1.4, -0.4), (-3.75, 1.65, -1.45), focus="facade"),
+        # Back toward the entrance wall: door, coat stand, radiator, clock.
+        "entrance": View((-0.4, 1.3, 1.1), (2.0, 1.05, 3.45), focus="door"),
     },
     default_view="home",
-    camera_box=((-3.6, 0.15, -6.8), (3.6, 3.0, 3.3)),
-    target_box=((-3.8, 0.0, -7.0), (3.8, 3.2, 3.5)),
+    # Cameras stay 0.6 m off the walls and in front of the counter, at seated-to-standing height;
+    # targets sit at table-to-eye level, so random poses frame the room rather than beams or blank wall.
+    camera_box=((-3.2, 0.6, -5.3), (3.2, 2.2, 2.95)),
+    target_box=((-3.8, 0.4, -7.0), (3.8, 2.0, 3.5)),
     tags=("indoor", "day", "artificial_light", "clutter", "glass", "metal", "bokeh"),
     default_seed=7,
+    asset_version=2,
 )

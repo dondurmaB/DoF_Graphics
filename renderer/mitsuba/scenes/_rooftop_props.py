@@ -141,21 +141,43 @@ def _rect(U, V, x0, x1, y0, y1):
 # --------------------------------------------------------------------------
 # Facade kinds. Real kinds put a scanned Poly Haven wall texture (id, tint) everywhere except the window layer,
 # which stays procedural (glass, frames, sills, shutters, interiors). `layout` picks the window pattern.
+# Facade kinds. `tex` is (asset id, tint, tile size in meters or None for the asset's own size).
+# Kinds with a `layout` keep a procedural window layer (glass, frames, sills, shutters) blended over the scanned
+# wall; kinds with layout None are photographed facades with their windows built in (ambientCG), and
+# `lit: "lum"` derives lit windows from the bright pixels of the photo.
 FACADES = {
-    "glass":      {"layout": "glass", "tex": None},
-    "dark":       {"layout": "dark", "tex": None},
-    "brick_a":    {"layout": "brick", "tex": ("exterior_wall_cladding_02", None)},
-    "brick_b":    {"layout": "brick", "tex": ("patterned_brick_wall_03", None)},
-    "brick_c":    {"layout": "brick", "tex": ("red_brick_plaster_patch_02", None)},
-    "brick_d":    {"layout": "brick", "tex": ("exterior_wall_cladding_02", (0.78, 0.72, 0.66))},
-    "stone":      {"layout": "stone", "tex": ("rough_block_wall", None)},
-    "render_a":   {"layout": "render0", "tex": ("beige_wall_001", None)},
-    "render_b":   {"layout": "render1", "tex": ("plastered_wall_02", (1.0, 0.86, 0.70))},
-    "render_c":   {"layout": "render2", "tex": ("blue_plaster_weathered", None)},
-    "render_d":   {"layout": "render1", "tex": ("beige_wall_001", (1.0, 0.80, 0.66))},
-    "concrete_a": {"layout": "concrete", "tex": ("concrete_tile_facade", None)},
-    "concrete_b": {"layout": "concrete", "tex": ("concrete_slab_wall_02", None)},
-    "tiles":      {"layout": "concrete", "tex": ("rectangular_facade_tiles", None)},
+    "glass_a":    {"layout": None, "tex": ("acg:Facade001", None, (18.0, 18.0)), "type": "glass"},
+    "glass_b":    {"layout": None, "tex": ("acg:Facade005", None, (18.0, 18.0)), "type": "glass"},
+    "glass_c":    {"layout": None, "tex": ("acg:Facade002", None, (18.0, 18.0)), "type": "glass"},
+    "glass_d":    {"layout": None, "tex": ("acg:Facade004", None, (18.0, 18.0)), "type": "glass"},
+    "ribbon":     {"layout": None, "tex": ("acg:Facade006", None, (25.0, 25.0)), "type": "office"},
+    "sky_a":      {"layout": None, "tex": ("acg:Facade012", None, (70.0, 150.0)), "type": "glass"},
+    "sky_b":      {"layout": None, "tex": ("acg:Facade014", None, (70.0, 150.0)), "type": "glass"},
+    "sky_c":      {"layout": None, "tex": ("acg:Facade015", None, (70.0, 150.0)), "type": "glass"},
+    "sky_lit":    {"layout": None, "tex": ("acg:Facade016", None, (70.0, 150.0)), "type": "glass", "lit": "lum"},
+    "office_lit": {"layout": None, "tex": ("acg:Facade017", None, (18.0, 49.0)), "type": "office", "lit": "lum"},
+    "office_a":   {"layout": None, "tex": ("acg:Facade018A", None, None), "type": "office"},
+    "office_b":   {"layout": None, "tex": ("acg:Facade019A", None, None), "type": "office"},
+    "office_c":   {"layout": None, "tex": ("acg:Facade020A", None, None), "type": "office"},
+    "brick_a":    {"layout": "brick", "tex": ("exterior_wall_cladding_02", None, None), "type": "brick"},
+    "brick_b":    {"layout": "brick", "tex": ("patterned_brick_wall_03", None, None), "type": "brick"},
+    "brick_c":    {"layout": "brick", "tex": ("red_brick_plaster_patch_02", None, None), "type": "brick"},
+    "brick_d":    {"layout": "brick", "tex": ("exterior_wall_cladding_02", (0.78, 0.72, 0.66), None), "type": "brick"},
+    "brick_e":    {"layout": "brick", "tex": ("brick_wall_02", None, None), "type": "brick"},
+    "brick_f":    {"layout": "brick", "tex": ("acg:Bricks047", None, (2.0, 2.0)), "type": "brick"},
+    "stone":      {"layout": "stone", "tex": ("rough_block_wall", None, None), "type": "brick"},
+    "render_a":   {"layout": "render0", "tex": ("beige_wall_001", None, None), "type": "render"},
+    "render_b":   {"layout": "render1", "tex": ("plastered_wall_02", (1.0, 0.86, 0.70), None), "type": "render"},
+    "render_c":   {"layout": "render2", "tex": ("blue_plaster_weathered", None, None), "type": "render"},
+    "render_d":   {"layout": "render1", "tex": ("beige_wall_001", (1.0, 0.80, 0.66), None), "type": "render"},
+    "render_e":   {"layout": "render1", "tex": ("acg:PaintedPlaster010", None, (2.5, 2.5)), "type": "render"},
+    "render_f":   {"layout": "render0", "tex": ("acg:PaintedPlaster015", None, (2.5, 2.5)), "type": "render"},
+    "render_g":   {"layout": "render2", "tex": ("acg:PaintedPlaster012", None, (2.5, 2.5)), "type": "render"},
+    "concrete_a": {"layout": "concrete", "tex": ("concrete_tile_facade", None, None), "type": "office"},
+    "concrete_b": {"layout": "concrete", "tex": ("concrete_slab_wall_02", None, None), "type": "brutal"},
+    "brutal":     {"layout": "concrete", "tex": ("concrete_panels", None, None), "type": "brutal"},
+    "tiles":      {"layout": "concrete", "tex": ("rectangular_facade_tiles", None, None), "type": "office"},
+    "tiles_b":    {"layout": "concrete", "tex": ("rectangular_facade_tiles_02", None, None), "type": "office"},
 }
 FACADE_KINDS = list(FACADES)
 RENDER_COLOURS = [(0.60, 0.40, 0.21), (0.66, 0.60, 0.49), (0.52, 0.26, 0.16)]
@@ -190,6 +212,8 @@ def facade_texture(kind: str, ppm: float = 42.0):
     """(window-layer albedo, roughness, window mask, lit-window radiance map, (tile_w, tile_h) m) for a kind."""
     layout = FACADES[kind]["layout"]
     rng = np.random.default_rng(FACADE_KINDS.index(kind) * 17 + 3)
+    if layout is None:
+        return None
     if layout == "glass":
         tw, th = 6.0, 7.2
         U, V = _grid(tw, th, ppm)
@@ -375,7 +399,7 @@ def marble_texture():
 
 
 # leaf atlas: olive (dark sage top), lavender foliage (grey-green), vine (fresh green), grass (green-straw)
-LEAF_COLOURS = [(0.11, 0.14, 0.08), (0.15, 0.18, 0.11), (0.21, 0.24, 0.17), (0.17, 0.21, 0.15),
+LEAF_COLOURS = [(0.10, 0.13, 0.07), (0.27, 0.30, 0.24), (0.33, 0.36, 0.30), (0.17, 0.21, 0.15),
                 (0.08, 0.20, 0.05), (0.12, 0.26, 0.06), (0.30, 0.30, 0.12), (0.18, 0.25, 0.08)]
 OLIVE, LAV, VINE, GRASS = (0, 1, 2), (3,), (4, 5), (6, 7)
 N_VARIANTS = len(LEAF_COLOURS)
@@ -513,13 +537,73 @@ LANDMARK_A = (-110.0, -880.0)      # tall glass tower with a spire
 LANDMARK_B = (440.0, -1870.0)      # stepped stone tower beyond the river
 
 
+KINDS_BY_TYPE = {}
+for _k, _v in FACADES.items():
+    KINDS_BY_TYPE.setdefault(_v["type"], []).append(_k)
+
+
 def _kind_for(rng, d, cbd: bool, tall: bool) -> str:
+    """Building type first (glass tower, office, brutalist, brick or render residential), then a facade of it."""
     if cbd or tall:
-        return str(rng.choice(["glass", "glass", "glass", "dark", "dark", "concrete_a", "concrete_b", "tiles", "stone"]))
-    kinds = ["glass", "dark", "brick_a", "brick_b", "brick_c", "brick_d", "stone", "render_a", "render_b", "render_c",
-             "render_d", "concrete_a", "concrete_b", "tiles"]
-    w = np.array([0.05, 0.03, 0.10, 0.09, 0.08, 0.08, 0.10, 0.09, 0.08, 0.06, 0.07, 0.07, 0.05, 0.05])
-    return str(rng.choice(kinds, p=w / w.sum()))
+        btype = str(rng.choice(["glass", "glass", "glass", "office", "office", "brutal"]))
+    else:
+        btype = str(rng.choice(["brick", "brick", "brick", "render", "render", "office", "office", "brutal", "glass"]))
+    return str(rng.choice(KINDS_BY_TYPE[btype]))
+
+
+PROFILES = ("box", "podium", "stepped", "prewar", "slender")
+
+
+def massing(rng, s: dict, profile: str | None = None) -> dict:
+    """Give a building spec a massing profile: wall tiers (box, y0, y1, kind), the top roof rectangle, a roof
+    type, chamfered corners, a ground-floor shop band and a lift overrun. Deterministic in `rng`."""
+    x0, x1, z0, z1 = s["box"]
+    h, kind = s["h"], s["kind"]
+    w, dd = x1 - x0, z1 - z0
+    btype = FACADES[kind]["type"]
+    if profile is None:
+        r = rng.random()
+        profile = ("box" if r < 0.40 else "podium" if r < 0.65 else "stepped" if r < 0.80 else
+                   "prewar" if r < 0.95 else "slender")
+        if profile == "prewar" and (btype not in ("brick", "render") or h > 36):
+            profile = "box"
+        if profile in ("podium", "stepped") and (h < 18 or min(w, dd) < 18):
+            profile = "box"
+        if profile == "slender" and min(w, dd) < 24:
+            profile = "box"
+    if profile == "podium":
+        hp = float(rng.integers(3, 6)) * 3.4
+        ins = rng.uniform(3, 6)
+        pk = str(rng.choice(KINDS_BY_TYPE["office"] + KINDS_BY_TYPE["brick"])) if btype == "glass" else kind
+        tiers = [((x0, x1, z0, z1), 0.0, hp, pk), ((x0 + ins, x1 - ins, z0 + ins, z1 - ins), hp, h, kind)]
+    elif profile == "stepped":
+        n = int(rng.integers(2, 4))
+        ys = [0.0] + list(np.sort(rng.uniform(0.45, 0.85, n - 1)) * h) + [h]
+        tiers, ins = [], 0.0
+        for i in range(n):
+            if min(w, dd) - 2 * ins < 10:
+                break
+            tiers.append(((x0 + ins, x1 - ins, z0 + ins, z1 - ins), ys[i], ys[i + 1], kind))
+            ins += rng.uniform(2.5, 5.0)
+        tiers[-1] = (tiers[-1][0], tiers[-1][1], h, kind)
+    elif profile == "slender":
+        side = rng.uniform(20, 26)
+        cx, cz = (x0 + x1) / 2, (z0 + z1) / 2
+        if btype != "glass":
+            kind = str(rng.choice(KINDS_BY_TYPE["glass"]))
+        if s["d"] > 600:
+            h = max(h, rng.uniform(80, 150))
+        tiers = [((x0, x1, z0, z1), 0.0, 10.2, str(rng.choice(KINDS_BY_TYPE["office"]))),
+                 ((cx - side / 2, cx + side / 2, cz - side / 2, cz + side / 2), 10.2, h, kind)]
+    else:
+        tiers = [((x0, x1, z0, z1), 0.0, h, kind)]
+    roof = "hip" if profile == "prewar" else ("shed" if h < 15 and w * dd > 1500 and btype in ("brutal", "office") else "flat")
+    s.update({"profile": profile, "tiers": tiers, "h": tiers[-1][2], "roof": (*tiers[-1][0], tiers[-1][2]),
+              "roof_type": roof, "kind": tiers[-1][3],
+              "chamfer": profile in ("box", "slender") and h > 40 and rng.random() < 0.10,
+              "shops": s["d"] < 600 and btype != "glass" and profile != "slender",
+              "overrun": roof == "flat" and rng.random() < 0.5, "seed": int(rng.integers(1 << 30))})
+    return s
 
 
 def city_layout(rng) -> list[dict]:
@@ -570,15 +654,15 @@ def city_layout(rng) -> list[dict]:
                     if -420 < cz < -30 and abs(cx) < 260:
                         h = min(h, rng.uniform(16, 36))
                     kind = _kind_for(rng, d, cbd, tall or h > 60)
-                    specs.append({"box": (x0, x1, z0, z1), "h": h, "kind": kind, "d": d,
-                                  "setback": h > 50 and rng.random() < 0.6, "u0": float(rng.uniform(0, 40))})
+                    specs.append(massing(rng, {"box": (x0, x1, z0, z1), "h": h, "kind": kind, "d": d,
+                                               "u0": float(rng.uniform(0, 40))}))
     # landmarks
     ax, az = LANDMARK_A
-    specs.append({"box": (ax - 21, ax + 21, az - 21, az + 21), "h": 262.0, "kind": "glass", "d": math.hypot(ax, az),
-                  "setback": False, "u0": 3.0, "spire": 48.0})
+    specs.append({"box": (ax - 21, ax + 21, az - 21, az + 21), "h": 262.0, "kind": "glass_b", "d": math.hypot(ax, az),
+                  "u0": 3.0, "spire": 48.0})
     bx, bz = LANDMARK_B
     specs.append({"box": (bx - 26, bx + 26, bz - 26, bz + 26), "h": 120.0, "kind": "stone", "d": math.hypot(bx, bz),
-                  "setback": False, "u0": 1.0, "stepped": (155.0, 186.0)})
+                  "u0": 1.0, "stepped": (155.0, 186.0)})
     # drop ordinary buildings overlapping the landmarks
     def clear(s):
         x0, x1, z0, z1 = s["box"]
@@ -589,30 +673,94 @@ def city_layout(rng) -> list[dict]:
     return [s for s in specs if clear(s)]
 
 
-def walls(x0, x1, z0, z1, y0, y1, u0=0.0) -> G.Mesh:
-    """Four outward-facing wall quads; uv = (meters along the perimeter + u0, meters above ground)."""
-    corners = [(x0, z1), (x1, z1), (x1, z0), (x0, z0)]         # counter-clockwise seen from above
-    normals = [(0, 0, 1), (1, 0, 0), (0, 0, -1), (-1, 0, 0)]
+def footprint(x0, x1, z0, z1, chamfer: float = 0.0):
+    """Convex footprint, counter-clockwise seen from above, optionally with chamfered corners."""
+    if chamfer <= 0:
+        return [(x0, z1), (x1, z1), (x1, z0), (x0, z0)]
+    c = chamfer
+    return [(x0 + c, z1), (x1 - c, z1), (x1, z1 - c), (x1, z0 + c), (x1 - c, z0), (x0 + c, z0), (x0, z0 + c), (x0, z1 - c)]
+
+
+def walls_poly(pts, y0, y1, u0=0.0) -> G.Mesh:
+    """Outward-facing wall quads around a footprint; uv = (meters along the perimeter + u0, meters above ground)."""
     out, u = Acc(), u0
-    for k in range(4):
-        (ax, az), (bx, bz) = corners[k], corners[(k + 1) % 4]
+    n = len(pts)
+    for k in range(n):
+        (ax, az), (bx, bz) = pts[k], pts[(k + 1) % n]
         L = math.hypot(bx - ax, bz - az)
-        out.add(quad((ax, y0, az), (bx, y0, bz), (bx, y1, bz), (ax, y1, az), normals[k],
+        out.add(quad((ax, y0, az), (bx, y0, bz), (bx, y1, bz), (ax, y1, az), (-(bz - az), 0.0, bx - ax),
                      [(u, y0), (u + L, y0), (u + L, y1), (u, y1)]))
         u += L
     return out.mesh()
 
 
+def walls(x0, x1, z0, z1, y0, y1, u0=0.0) -> G.Mesh:
+    return walls_poly(footprint(x0, x1, z0, z1), y0, y1, u0)
+
+
+def cap_poly(pts, y) -> G.Mesh:
+    p = np.array([(x, y, z) for x, z in pts], float)
+    f = np.array([[0, i, i + 1] for i in range(1, len(pts) - 1)])
+    m = G.Mesh(p, np.tile([0.0, 1.0, 0.0], (len(p), 1)), p[:, [0, 2]].copy(), f)
+    return m.oriented()
+
+
 def roof_cap(x0, x1, z0, z1, y) -> G.Mesh:
-    return quad((x0, y, z0), (x1, y, z0), (x1, y, z1), (x0, y, z1), (0, 1, 0), [(x0, z0), (x1, z0), (x1, z1), (x0, z1)])
+    return cap_poly(footprint(x0, x1, z0, z1), y)
+
+
+def _faces(faces, uvf):
+    acc = Acc()
+    for f in faces:
+        p = np.array(f, float)
+        tri = np.array([[0, 1, 2]] if len(f) == 3 else [[0, 1, 2], [0, 2, 3]])
+        nrm = np.cross(p[1] - p[0], p[2] - p[0])
+        acc.add(G.Mesh(p, np.tile(unit(nrm), (len(p), 1)), uvf(p), tri))
+    return acc.mesh()
+
+
+def hip_roof(x0, x1, z0, z1, y, pitch=0.6) -> G.Mesh:
+    """Hipped roof over a rectangle, ridge along the longer side; uv planar in meters (x + z, z + y)."""
+    w, d = x1 - x0, z1 - z0
+    rise = pitch * min(w, d) / 2
+    cx, cz = (x0 + x1) / 2, (z0 + z1) / 2
+    c = [(x0, y, z0), (x1, y, z0), (x1, y, z1), (x0, y, z1)]
+    if w >= d:
+        r0, r1 = (x0 + d / 2, y + rise, cz), (x1 - d / 2, y + rise, cz)
+        faces = [(c[0], r0, r1, c[1]), (c[2], r1, r0, c[3]), (c[3], r0, c[0]), (c[1], r1, c[2])]
+    else:
+        r0, r1 = (cx, y + rise, z0 + w / 2), (cx, y + rise, z1 - w / 2)
+        faces = [(c[1], r0, r1, c[2]), (c[3], r1, r0, c[0]), (c[0], r0, c[1]), (c[2], r1, c[3])]
+    m = _faces(faces, lambda p: np.column_stack([p[:, 0] + 0.3 * p[:, 2], p[:, 2] + p[:, 1]]))
+    if m.n[:, 1].mean() < 0:
+        m.n, m.f = -m.n, m.f[:, ::-1]
+    return m
+
+
+def shed_roof(x0, x1, z0, z1, y, rise=1.6):
+    """Low industrial gable, ridge along the longer side: (slopes, gable ends)."""
+    w, d = x1 - x0, z1 - z0
+    cx, cz = (x0 + x1) / 2, (z0 + z1) / 2
+    if w >= d:
+        sl = [((x0, y, z0), (x0, y + rise, cz), (x1, y + rise, cz), (x1, y, z0)),
+              ((x1, y, z1), (x1, y + rise, cz), (x0, y + rise, cz), (x0, y, z1))]
+        gb = [((x0, y, z1), (x0, y + rise, cz), (x0, y, z0)), ((x1, y, z0), (x1, y + rise, cz), (x1, y, z1))]
+    else:
+        sl = [((x1, y, z0), (cx, y + rise, z0), (cx, y + rise, z1), (x1, y, z1)),
+              ((x0, y, z1), (cx, y + rise, z1), (cx, y + rise, z0), (x0, y, z0))]
+        gb = [((x0, y, z0), (cx, y + rise, z0), (x1, y, z0)), ((x1, y, z1), (cx, y + rise, z1), (x0, y, z1))]
+    slopes = _faces(sl, lambda p: np.column_stack([p[:, 0], p[:, 2] + p[:, 1]]))
+    gables = _faces(gb, lambda p: np.column_stack([p[:, 0] + p[:, 2], p[:, 1]]))
+    return slopes, gables
 
 
 def parapet(x0, x1, z0, z1, y, h=0.9, t=0.25) -> G.Mesh:
+    """Parapet wall with a wider coping on top."""
     acc = Acc()
-    acc.add(box((x1 - x0, h, t), ((x0 + x1) / 2, y + h / 2, z0 + t / 2)))
-    acc.add(box((x1 - x0, h, t), ((x0 + x1) / 2, y + h / 2, z1 - t / 2)))
-    acc.add(box((t, h, z1 - z0 - 2 * t), (x0 + t / 2, y + h / 2, (z0 + z1) / 2)))
-    acc.add(box((t, h, z1 - z0 - 2 * t), (x1 - t / 2, y + h / 2, (z0 + z1) / 2)))
+    for (sx, sz, cx, cz) in (((x1 - x0), t, (x0 + x1) / 2, z0 + t / 2), ((x1 - x0), t, (x0 + x1) / 2, z1 - t / 2),
+                             (t, z1 - z0 - 2 * t, x0 + t / 2, (z0 + z1) / 2), (t, z1 - z0 - 2 * t, x1 - t / 2, (z0 + z1) / 2)):
+        acc.add(box((sx, h, sz), (cx, y + h / 2, cz)))
+        acc.add(box((sx + (0.08 if sx > t else 0.08), 0.06, sz + 0.08), (cx, y + h + 0.03, cz)))
     return acc.mesh()
 
 
@@ -630,55 +778,152 @@ def water_tank(centre, y, rng) -> tuple[G.Mesh, G.Mesh]:
     return tank, steel.mesh()
 
 
-def city_groups(rng, specs, detail_radius: float = 500.0) -> dict[str, G.Mesh]:
-    """Merge the city per material: walls_<kind>_t<tier>, roof_t<tier>, roofstuff, tank, steel, cars, trees."""
+SHOP_H = 4.5
+
+
+def awnings(rng, pts) -> list:
+    """Sloping shop awnings on random stretches of each face, at 3.65 m dropping outward."""
+    out = []
+    n = len(pts)
+    for k in range(n):
+        (ax, az), (bx, bz) = pts[k], pts[(k + 1) % n]
+        L = math.hypot(bx - ax, bz - az)
+        if L < 6:
+            continue
+        dx, dz = (bx - ax) / L, (bz - az) / L
+        nx, nz = -dz, dx                                        # outward normal of this footprint ordering
+        for s0 in np.arange(1.0, L - 4.0, 9.0):
+            if rng.random() > 0.35:
+                continue
+            ln = rng.uniform(3.0, 6.0)
+            p0 = np.array([ax + dx * s0, 3.65, az + dz * s0])
+            p1 = p0 + np.array([dx * ln, 0.0, dz * ln])
+            o = np.array([nx * 1.3, -0.55, nz * 1.3])
+            m = _faces([(p0, p0 + o, p1 + o, p1)], lambda p: np.array([[0, 0], [0, 1.3], [ln, 1.3], [ln, 0]]))
+            if m.n[0, 1] < 0:
+                m.n, m.f = -m.n, m.f[:, ::-1]
+            out.append((f"awning_{int(rng.integers(4))}", m))
+    return out
+
+
+def city_groups(rng, specs, detail_radius: float = 450.0) -> dict:
+    """Merge the city per material: walls_<kind>_t<tier>, shop_t<tier>, roof_t / roofclay_t / roofmetal_t /
+    parapet_t <tier>, tank, steel and awning_<k>. Scanned roof plant near the terrace is placed by the scene."""
     grp = Groups()
     for s in specs:
         x0, x1, z0, z1 = s["box"]
         h, t, k = s["h"], tier_of(s["d"]), s["kind"]
-        wkey = f"walls_{k}_t{t}"
-        if s.get("stepped"):
-            y = 0.0
-            tiers = [(0.0, h, 0.0), (h, s["stepped"][0], 6.0), (s["stepped"][0], s["stepped"][1], 13.0)]
-            for (ya, yb, inset) in tiers:
-                grp[wkey].add(walls(x0 + inset, x1 - inset, z0 + inset, z1 - inset, ya, yb, s["u0"]))
-                grp[f"roof_t{t}"].add(roof_cap(x0 + inset, x1 - inset, z0 + inset, z1 - inset, yb))
-            top = s["stepped"][1]
+        if "tiers" not in s:                                   # the two landmarks keep their hand-built massing
+            wkey = f"walls_{k}_t{t}"
             cx, cz = (x0 + x1) / 2, (z0 + z1) / 2
-            grp[f"spire_t{t}"].add(G.lathe([(0, top), (7.0, top), (5.5, top + 10), (2.0, top + 22), (0.3, top + 34), (0, top + 36)], 24),
-                                   G.translate((cx, 0, cz)))
+            if s.get("stepped"):
+                for (ya, yb, inset) in [(0.0, h, 0.0), (h, s["stepped"][0], 6.0), (s["stepped"][0], s["stepped"][1], 13.0)]:
+                    grp[wkey].add(walls(x0 + inset, x1 - inset, z0 + inset, z1 - inset, ya, yb, s["u0"]))
+                    grp[f"roof_t{t}"].add(roof_cap(x0 + inset, x1 - inset, z0 + inset, z1 - inset, yb))
+                top = s["stepped"][1]
+                grp[f"spire_t{t}"].add(G.lathe([(0, top), (7.0, top), (5.5, top + 10), (2.0, top + 22), (0.3, top + 34),
+                                                (0, top + 36)], 24), G.translate((cx, 0, cz)))
+            else:
+                grp[wkey].add(walls(x0, x1, z0, z1, 0.0, h, s["u0"]))
+                grp[f"roof_t{t}"].add(roof_cap(x0, x1, z0, z1, h))
+                grp[f"spire_t{t}"].add(box((14.0, 9.0, 14.0), (cx, h + 4.5, cz)))
+                grp[f"spire_t{t}"].add(G.lathe([(0, h + 9), (1.6, h + 9), (0.9, h + 9 + s["spire"] * 0.6),
+                                                (0.25, h + 9 + s["spire"]), (0, h + 9.5 + s["spire"])], 16),
+                                       G.translate((cx, 0, cz)))
             continue
-        if s["setback"]:
-            yb = h * rng.uniform(0.55, 0.8)
-            inset = min(x1 - x0, z1 - z0) * rng.uniform(0.12, 0.22)
-            grp[wkey].add(walls(x0, x1, z0, z1, 0.0, yb, s["u0"]))
-            grp[f"roof_t{t}"].add(roof_cap(x0, x1, z0, z1, yb))
-            grp[wkey].add(walls(x0 + inset, x1 - inset, z0 + inset, z1 - inset, yb, h, s["u0"]))
-            rx0, rx1, rz0, rz1 = x0 + inset, x1 - inset, z0 + inset, z1 - inset
-        else:
-            grp[wkey].add(walls(x0, x1, z0, z1, 0.0, h, s["u0"]))
-            rx0, rx1, rz0, rz1 = x0, x1, z0, z1
-        grp[f"roof_t{t}"].add(roof_cap(rx0, rx1, rz0, rz1, h))
-        if s.get("spire"):
-            cx, cz = (rx0 + rx1) / 2, (rz0 + rz1) / 2
-            grp[f"spire_t{t}"].add(box((14.0, 9.0, 14.0), (cx, h + 4.5, cz)))
-            grp[f"spire_t{t}"].add(G.lathe([(0, h + 9), (1.6, h + 9), (0.9, h + 9 + s["spire"] * 0.6),
-                                            (0.25, h + 9 + s["spire"]), (0, h + 9.5 + s["spire"])], 16), G.translate((cx, 0, cz)))
-        if s["d"] < detail_radius:
-            grp["roofstuff"].add(parapet(rx0, rx1, rz0, rz1, h, rng.uniform(0.6, 1.1)))
-            for _ in range(int(rng.integers(1, 4))):
-                w, dd, hh = rng.uniform(1.5, 4.0), rng.uniform(1.2, 3.0), rng.uniform(1.0, 2.2)
-                cx, cz = rng.uniform(rx0 + w, rx1 - w), rng.uniform(rz0 + dd, rz1 - dd)
-                grp["roofstuff"].add(box((w, hh, dd), (cx, h + hh / 2, cz)))
-            if rng.random() < 0.35:
-                cx, cz = rng.uniform(rx0 + 3, rx1 - 3), rng.uniform(rz0 + 3, rz1 - 3)
-                tank, steel = water_tank((cx, cz), h, rng)
-                grp["tank"].add(tank)
-                grp["steel"].add(steel)
-            if rng.random() < 0.3:
-                cx, cz = rng.uniform(rx0 + 2, rx1 - 2), rng.uniform(rz0 + 2, rz1 - 2)
-                grp["roofstuff"].add(box((3.0, 2.8, 3.4), (cx, h + 1.4, cz)))
+        lr = np.random.default_rng(s["seed"])
+        n_t = len(s["tiers"])
+        for i, ((a0, a1, b0, b1), ya, yb, kind) in enumerate(s["tiers"]):
+            ch = min(a1 - a0, b1 - b0) * 0.12 if s["chamfer"] and i == n_t - 1 else 0.0
+            pts = footprint(a0, a1, b0, b1, ch)
+            if i == 0 and s["shops"]:
+                grp[f"shop_t{t}"].add(walls_poly(pts, 0.0, SHOP_H, s["u0"]))
+                ya = SHOP_H
+                if s["d"] < 400:
+                    for key, m in awnings(lr, pts):
+                        grp[key].add(m)
+            grp[f"walls_{kind}_t{t}"].add(walls_poly(pts, ya, yb, s["u0"]))
+            if i < n_t - 1:                                     # terrace roof of a lower tier
+                grp[f"roof_t{t}"].add(cap_poly(pts, yb))
+                grp[f"parapet_t{t}"].add(parapet(a0, a1, b0, b1, yb, 1.0, 0.25))
+            elif s["roof_type"] == "hip":
+                grp[f"roofclay_t{t}"].add(hip_roof(a0 - 0.3, a1 + 0.3, b0 - 0.3, b1 + 0.3, yb, lr.uniform(0.5, 0.8)))
+            elif s["roof_type"] == "shed":
+                slopes, gables = shed_roof(a0, a1, b0, b1, yb)
+                grp[f"roofmetal_t{t}"].add(slopes)
+                grp[f"walls_{kind}_t{t}"].add(gables)
+            else:
+                grp[f"roof_t{t}"].add(cap_poly(pts, yb))
+                if ch == 0:
+                    grp[f"parapet_t{t}"].add(parapet(a0, a1, b0, b1, yb, lr.uniform(0.6, 1.2), 0.25))
+                if s["overrun"]:
+                    w, dd = min(lr.uniform(2.5, 4.5), (a1 - a0) / 3), min(lr.uniform(3.0, 5.0), (b1 - b0) / 3)
+                    cx, cz = lr.uniform(a0 + w, a1 - w), lr.uniform(b0 + dd, b1 - dd)
+                    grp[f"parapet_t{t}"].add(box((w, 3.0, dd), (cx, yb + 1.5, cz)))
+                if s["d"] < detail_radius and lr.random() < 0.35 and min(a1 - a0, b1 - b0) > 7:
+                    cx, cz = lr.uniform(a0 + 3, a1 - 3), lr.uniform(b0 + 3, b1 - 3)
+                    tank, steel = water_tank((cx, cz), yb, lr)
+                    grp["tank"].add(tank)
+                    grp["steel"].add(steel)
     return grp
+
+
+def roof_clutter(specs, seed: int, radius: float = 450.0, cap: int = 420) -> list:
+    """Scanned rooftop plant on flat roofs nearer than `radius`: [(model id, position, yaw)]."""
+    rng = np.random.default_rng([seed, 77])
+    out = []
+    for s in sorted(specs, key=lambda s: s["d"]):
+        if s["d"] > radius or "tiers" not in s or s["roof_type"] != "flat" or len(out) >= cap:
+            continue
+        x0, x1, z0, z1, h = s["roof"]
+        if x1 - x0 < 10 or z1 - z0 < 10:
+            continue
+        for _ in range(int(rng.integers(1, 4))):
+            mid = str(rng.choice(["exterior_aircon_unit", "exterior_aircon_unit", "exterior_aircon_unit",
+                                  "modular_airduct_rectangular_01", "small_lpg_tank", "modular_pipes"]))
+            m = 5.0 if mid in ("modular_airduct_rectangular_01", "modular_pipes") else 2.0
+            if min(x1 - x0, z1 - z0) < 2 * m + 1:
+                mid, m = "exterior_aircon_unit", 2.0
+            out.append((mid, (float(rng.uniform(x0 + m, x1 - m)), float(h), float(rng.uniform(z0 + m, z1 - m))),
+                        float(rng.choice([0, 90, 180, 270]))))
+    return out
+
+
+def shop_texture(ppm: float = 40.0):
+    """Ground-floor retail band, 12 m x 4.5 m: storefront glazing in frames, a fascia sign band, piers.
+    Returns (albedo, roughness, lit radiance map, (12, 4.5))."""
+    tw, th = 12.0, SHOP_H
+    U, V = _grid(tw, th, ppm)
+    rng = np.random.default_rng(91)
+    tone = rng.random(8)[np.floor(U / 4.0).astype(int)]
+    pier = (U % 4.0) < 0.35
+    fascia = (V > 3.55) & (V < 4.25)
+    glass = ~pier & (V > 0.25) & (V < 3.35)
+    frame = ~pier & ~glass & (V <= 3.55)
+    signs = np.array([(0.55, 0.08, 0.06), (0.05, 0.18, 0.12), (0.08, 0.10, 0.22), (0.62, 0.48, 0.12), (0.08, 0.08, 0.08)])
+    sign = signs[(tone * 5).astype(int) % 5]
+    interior = np.where((tone < 0.6)[..., None], np.array([0.30, 0.22, 0.14]) * (0.6 + 0.6 * tone[..., None]),
+                        np.array([0.03, 0.03, 0.035]))
+    alb = np.where(pier[..., None], np.array([0.30, 0.29, 0.27]), np.array([0.05, 0.05, 0.05]))
+    alb = np.where(glass[..., None], interior * 0.5, alb)
+    alb = np.where(frame[..., None], np.array([0.06, 0.06, 0.065]), alb)
+    alb = np.where((fascia & ~pier)[..., None], sign, alb)
+    alb = np.where((V >= 4.25)[..., None], np.array([0.28, 0.27, 0.25]), alb)
+    rough = np.where(glass, 0.05, 0.5)
+    lit = np.where((glass & (tone < 0.6))[..., None], WARM * (0.5 + 0.5 * tone[..., None]), 0.0)
+    lit = lit + np.where((fascia & ~pier & (tone > 0.3))[..., None], sign * 2.0, 0.0)
+    return alb.astype(np.float32), rough.astype(np.float32), lit.astype(np.float32), (tw, th)
+
+
+def street_mask(ppm: float = 12.0) -> np.ndarray:
+    """1 on plain carriageway (scanned asphalt goes there), 0 on markings, kerbs, pavements and block interiors."""
+    alb = street_tile(ppm)
+    P = STREET_PITCH
+    U, V = _grid(P, P, ppm)
+    half = STREET_W / 2
+    du, dv = np.minimum(U, P - U), np.minimum(V, P - V)
+    road = (du < half - 3.0) | (dv < half - 3.0)
+    return (road & (alb.mean(-1) < 0.3)).astype(np.float32)
 
 
 def _at_crossing(s: float) -> bool:
@@ -816,29 +1061,54 @@ def bar_stool() -> dict[str, G.Mesh]:
     return {"seat": seat, "metal": legs.mesh()}
 
 
-def umbrella(radius=1.45, height=2.45, ribs=8) -> dict[str, G.Mesh]:
-    """Open market parasol: pole, a shallow octagonal canvas cone, ribs and a heavy base."""
-    pole = tube([(0, 0.05, 0), (0, height + 0.25, 0)], 0.022, 10)
-    pts = []
-    canvas = Acc()
+def umbrella(radius=1.5, height=2.45, ribs=8) -> dict[str, G.Mesh]:
+    """Market parasol: fabric draped between `ribs` ribs (sagging between them, curving down to the rim), a
+    scalloped valance, struts, a runner/crank collar on a two-piece pole, a finial and a heavy base.
+    Canvas uv is in meters (radial distance, arc length) so a scanned fabric tiles at real scale."""
+    apex_y, rim_y = height + 0.18, height - 0.30
+    nr, na = 10, 6
+    canvas, val = Acc(), Acc()
     for i in range(ribs):
         a0, a1 = TAU * i / ribs, TAU * (i + 1) / ribs
-        c0 = (radius * math.cos(a0), height - 0.28, radius * math.sin(a0))
-        c1 = (radius * math.cos(a1), height - 0.28, radius * math.sin(a1))
-        apex = (0, height + 0.12, 0)
-        canvas.add(G.Mesh(np.array([apex, c0, c1]), np.tile([0, 1, 0], (3, 1)), np.array([[0.5, 1], [0, 0], [1, 0]]),
-                          np.array([[0, 2, 1]])))
-        # valance flap
-        canvas.add(quad((c0[0], c0[1], c0[2]), (c1[0], c1[1], c1[2]), (c1[0], c1[1] - 0.16, c1[2]), (c0[0], c0[1] - 0.16, c0[2]),
-                        (math.cos((a0 + a1) / 2), 0, math.sin((a0 + a1) / 2)), [(0, 1), (1, 1), (1, 0), (0, 0)]))
-        pts.append(c0)
-    m = canvas.mesh()
-    ribs_m = Acc()
-    for c in pts:
-        ribs_m.add(tube([(0, height + 0.08, 0), c], 0.008, 5))
-        ribs_m.add(tube([(0, height - 0.55, 0), (c[0] * 0.5, height - 0.12, c[2] * 0.5)], 0.006, 5))
-    base = G.lathe([(0, 0), (0.32, 0), (0.32, 0.05), (0.05, 0.09), (0, 0.09)], 32)
-    return {"canvas": m, "pole": merge([pole, ribs_m.mesh()]), "base": base}
+        rr = np.linspace(0.02, 1.0, nr)
+        ss = np.linspace(0.0, 1.0, na)
+        R_, S_ = np.meshgrid(rr, ss, indexing="ij")
+        ang = a0 + (a1 - a0) * S_
+        sag = 0.07 * np.sin(np.pi * S_) * R_ ** 1.5                     # fabric sags between ribs
+        r = radius * R_ * (1 - 0.03 * np.sin(np.pi * S_))
+        y = apex_y - (apex_y - rim_y) * R_ ** 1.25 - sag
+        p = np.stack([r * np.cos(ang), y, r * np.sin(ang)], -1).reshape(-1, 3)
+        uv = np.stack([radius * R_, (a1 - a0) * radius * R_ * S_], -1).reshape(-1, 2)
+        f = G._grid_faces(nr, na)
+        m = G.Mesh(p, G.vertex_normals(p, f), uv, f)
+        if m.n[:, 1].mean() < 0:
+            m.n, m.f = -m.n, m.f[:, ::-1]
+        canvas.add(m)
+        # scalloped valance hanging from the rim of this panel
+        s = np.linspace(0, 1, 9)
+        angs = a0 + (a1 - a0) * s
+        top = np.stack([radius * np.cos(angs), np.full_like(s, rim_y), radius * np.sin(angs)], -1)
+        drop = 0.16 + 0.06 * np.cos(np.pi * (2 * s - 1)) * -1 + 0.06
+        bot = top - np.stack([np.zeros_like(s), drop, np.zeros_like(s)], -1)
+        vp = np.vstack([top, bot])
+        vf = np.array([[k, k + 9, k + 1] for k in range(8)] + [[k + 1, k + 9, k + 10] for k in range(8)])
+        vuv = np.column_stack([np.concatenate([s, s]) * (a1 - a0) * radius, np.concatenate([np.zeros(9), drop])])
+        val.add(G.Mesh(vp, G.vertex_normals(vp, vf), vuv, vf))
+    metal = Acc()
+    for i in range(ribs):
+        a = TAU * i / ribs
+        rp = [(radius * u * math.cos(a), apex_y - (apex_y - rim_y) * u ** 1.25 - 0.012, radius * u * math.sin(a))
+              for u in np.linspace(0.03, 1.0, 8)]
+        metal.add(tube(rp, 0.007, 5))
+        metal.add(tube([(0.03 * math.cos(a), height - 0.75, 0.03 * math.sin(a)), rp[4]], 0.005, 5))     # struts
+    metal.add(tube([(0, 0.08, 0), (0, height * 0.55, 0)], 0.024, 12))
+    metal.add(tube([(0, height * 0.55, 0), (0, apex_y + 0.02, 0)], 0.019, 12))
+    metal.add(G.lathe([(0, 0), (0.034, 0), (0.034, 0.10), (0, 0.10)], 16), G.translate((0, height - 0.80, 0)))   # runner
+    metal.add(G.lathe([(0, 0), (0.03, 0), (0.035, 0.03), (0.03, 0.06), (0, 0.06)], 16), G.translate((0, height * 0.55 - 0.03, 0)))  # joint
+    metal.add(tube([(0.03, 1.15, 0), (0.12, 1.15, 0)], 0.008, 6))                                               # crank arm
+    metal.add(G.lathe([(0, 0), (0.025, 0), (0.022, 0.05), (0.012, 0.09), (0, 0.10)], 12), G.translate((0, apex_y, 0)))  # finial
+    base = G.lathe([(0, 0), (0.34, 0), (0.35, 0.015), (0.33, 0.07), (0.08, 0.10), (0.05, 0.16), (0, 0.16)], 40)
+    return {"canvas": canvas.mesh(), "valance": val.mesh(), "pole": metal.mesh(), "base": base}
 
 
 def bottle_rows(rng, x, z0, z1, y_shelves, n_per=14) -> dict[str, G.Mesh]:

@@ -17,65 +17,65 @@ Rows below gather families with the same decision. The instance and triangle cou
 
 ## Object groups
 
-| object group | instances | tris | decision | asset id(s) | size check | notes |
-|---|---|---|---|---|---|---|
+| object group | instances | tris | decision | asset id(s) | size check | notes | status |
+|---|---|---|---|---|---|---|---|
 | climbers ivy_leaf, creeper_leaf, stem | 3 | 527k | KEEP | – | – | User liked the ivy. Poly Haven has no ivy or creeper model. |
 | plants citrus_leaf, stem, bark (5 potted citrus) | 3 | 61k | KEEP | – | – | No citrus or lemon-tree scan exists. They are a signature element. |
 | plants lemon (fruit) | 1 | 20k | KEEP | (`lemon` as an option) | `lemon` is 0.07×0.10 m | Scan fruit only on the 2 citrus nearest the default views if ever needed. |
 | plants flower_red/pink/salmon/white, geranium_leaf | 5 | 31k | KEEP | – | – | Window-box geraniums. Poly Haven's flowers are wild South African species, not geraniums. |
-| plants grass (bed edges) | 1 | 4.5k | SUBSTITUTE | `shrub_04` (pinned) + `weed_plant_02` | 0.75×0.19×0.28 m, 2.1×0.3×0.08 m | Low ground cover along beds; weeds along wall bases. |
+| plants grass (bed edges) | 1 | 4.5k | SUBSTITUTE | `shrub_04` (pinned) + `weed_plant_02` | 0.75×0.19×0.28 m, 2.1×0.3×0.08 m | Low ground cover along beds; weeds along wall bases. | DONE (weed_plant_02 strips along the wall bases, shrub_04 in the tree bed; procedural grass removed) |
 | plants fallen_leaf | 1 | 2.7k | KEEP | – | – | Procedural scatter, fine at ground level. |
-| roof_n, roof_e, roof_s, roof_w | 4 | 99k | RETEXTURE | `clay_roof_tiles_02` (else `clay_roof_tiles`, pinned) | texture 2.5 m / 4.0 m | Keep the barrel-tile geometry. Swap the procedural tile texture for scanned albedo, roughness and normal. Check the UV pitch matches the tile pitch (currently 2.1×2.16 m), otherwise use `uv_scale`. Snow env stays snow. |
-| chimney | 4 | 0.4k | RETEXTURE | `red_brick_plaster_patch_02` (pinned) | 1.5 m | Weathered rendered brick. |
-| eave_n/e/s/w gutter | 4 | 0.2k | RETEXTURE | `rusty_painted_metal` (pinned) | 2.2 m | Visible in every upward audit pose. |
-| eave_n/e/s/w fascia | 4 | 48 | RETEXTURE | `weathered_brown_planks` | 1.8 m | |
-| downpipe | 2 | 0.1k | RETEXTURE | `rusty_painted_metal` (pinned) | – | Add 2 more, at the NE and SW corners (see Additions). |
-| wall_n.face (ashlar) | 1 | 0.7k | RETEXTURE | `white_sandstone_blocks_02` or `large_sandstone_blocks_01` | 2.0 m / 3.0 m | The facade bakes openings and weathering into a per-wall texture. Composite the scanned albedo, normal and roughness at real scale with the existing procedural stain masks, so window drips and base grime stay. |
-| wall_e.face (ochre stucco spalling to brick) | 1 | 0.1k | RETEXTURE | `yellow_plaster_02` + `red_brick_plaster_patch_02` (pinned) for spalled patches | 2.0 m / 1.5 m | Blend by the existing spall mask. |
-| wall_w.face (cloister / arcade) | 1 | 0.8k | RETEXTURE | `old_sandstone_02` (pinned) | 1.5 m | |
-| wall_s.face (brick wing) | 1 | 0.1k | RETEXTURE | `medieval_red_brick` (or `brick_wall_02`, pinned) | 2.0 m | A close brick wall was a blank tile in the audit (tile 22). Real brick normals fix that. |
-| wall_n/e/s/w.reveal, .cap | 8 | 0.9k | RETEXTURE | stone of the matching face | – | Reveals are seen in every oblique pose. |
-| wall_n/e/s/w.back | 4 | 1.7k | KEEP | – | – | Outside faces, never visible from the camera box. |
-| trim_n/e/s/w.stone (sills, surrounds) | 4 | 3.5k | RETEXTURE | `old_sandstone_02` (pinned) | 1.5 m | |
-| trim_n/e/s/w.frame (window frames) | 4 | 3.9k | RETEXTURE | aCG `PaintedWood004` (cream, tinted) | – | Fitted to each opening, so keep the geometry. |
-| trim_n/e.iron (window grilles) | 2 | 0.8k | RETEXTURE | aCG `Rust004` / `rusty_painted_metal` (pinned) | – | |
-| trim_n/e/s/w.glass | 4 | 0.1k | KEEP | – | – | Dark reflective glass, tuned for sun glints. |
-| trim_n.door (main door, north) | 1 | 0.1k | SUBSTITUTE | `large_castle_door` | 2.01×0.34×2.96 m | Fits an arched doorway of about 2×3 m. Scale to the opening; if it is narrower than 1.8 m, RETEXTURE with `rough_pine_door` instead. |
-| trim_e.door | 1 | 32 | RETEXTURE | `rough_pine_door` | 2.0 m | |
-| shutters n/e/s/w | 4 | 26k | RETEXTURE | `distressed_painted_planks` tinted per `PAINTS` (`W.surface(..., tint=)`) | 1.6 m | Louvres are sized per window, so keep the geometry. No louvred-shutter scan exists. |
-| walk_doors.door (3 cloister doors) | 1 | 0.3k | RETEXTURE | `rough_pine_door` | 2.0 m | |
-| walk_doors.iron | 1 | 1.2k | RETEXTURE | `rusty_painted_metal` (pinned) | – | |
-| walk_back.face (cloister back wall) | 1 | 0.3k | RETEXTURE | `worn_plaster_wall` | 1.8 m | Was flat plaster. |
-| walk_back.reveal | 1 | 0.2k | RETEXTURE | `old_sandstone_02` (pinned) | – | |
-| walk.plaster (cloister soffit) | 1 | 6 | RETEXTURE | `white_rough_plaster` | 1.0 m | |
-| walk.beams | 1 | 0.2k | RETEXTURE | `weathered_brown_planks` | 1.8 m | |
-| walk.floor | 1 | 2 | RETEXTURE | `terracotta_floor_tiles` (or `patterned_terracotta_tiling`, pinned) | 2.1 m | |
-| passage.vault | 1 | 64 | RETEXTURE | `worn_cracked_plaster` | 1.8 m | Dark arch interiors were bland in the audit (tiles 2, 3, 4, 21). |
-| passage.wall | 1 | 4 | RETEXTURE | `old_stone_wall` (pinned) | 2.0 m | |
-| passage.floor | 1 | 2 | RETEXTURE | `cobblestone_floor_08` (or `cobblestone_02`, pinned) | 2.0 m | Wet env keeps the clearcoat override. |
-| street_wall face/reveal/back | 3 | 0.2k | RETEXTURE | `old_stone_wall` (pinned) | 2.0 m | Seen through the arch and from the passage. |
-| street_ground | 1 | 2 | RETEXTURE | `cobblestone_pavement` (road) + `concrete_pavement` (pinned) pavement strip | 2.5 m / 1.8 m | Replaces the flat `env_kit.ground`. |
-| street_facade (flat 40×14 m painted quad) | 1 | 2 | SUBSTITUTE | `modular_urban_apartments_facade` | 51.5×6.7×17 m, 118k tris | Real 3D facade with depth. Place at z≈24 facing north. It is what the archway view shows. |
-| gate (open carriage-gate leaf) | 1 | 16 | SUBSTITUTE | `large_castle_door` | scale ×0.81 to the 2.4 m arch | One leaf swung flat against the passage's west wall, as now. |
-| paving_s (court flagstones) | 1 | 6.7k | RETEXTURE | `monastery_stone_floor` (or `stone_tiles_02`) as the albedo and normal base | 1.8 m | Keep the procedural stone layout, moss joints, worn paths and wet puddle and roughness masks; use the scan for stone surface detail. |
-| ground (joint plane under paving) | 1 | 2 | KEEP | – | – | Mortar under the stones. |
-| kerb | 1 | 1.7k | RETEXTURE | `old_sandstone_02` (pinned) | – | |
-| bed_soil, pot_*_soil, trough_soil | 4 | 0.6k | RETEXTURE | `farm_soil` (pinned) | – | Snow env stays snow. |
-| fountain.stone | 1 | 5.1k | RETEXTURE | `mossy_sandstone` | 1.9 m | No fountain scan exists on Poly Haven, so keep the lathe geometry. |
-| fountain.water_low, water_high | 2 | 10k | KEEP | – | – | Rough dielectric, tuned against caustic fireflies. |
-| fountain.lining | 1 | 1.2k | KEEP | – | – | Dark lining for the noise trick. |
-| pot_small (6) | 1 | 4.6k | SUBSTITUTE | `planter_pot_clay` (pinned) | 0.27×0.26×0.22 m vs procedural r 0.14, h 0.20 m | Near-exact size match. |
-| pot_big (5 citrus pots) | 1 | 3.8k | RETEXTURE | `terracotta` → `patterned_terracotta_tiling`'s plain clay albedo, or aCG `Plaster006` tinted terracotta | – | `ceramic_pot` (0.66×0.37 m) is too squat for a citrus tree, so keep the lathe pot. |
-| trough (window boxes) | 2 | 0.1k | RETEXTURE | same clay as the pots | – | `planter_box_01/02` are 0.41–0.47 m tall, too tall for ledges. |
-| bench.iron, bench.wood | 2 | 0.4k | SUBSTITUTE | `painted_wooden_bench` (pinned) | 1.16×0.50×0.89 m | Same footprint as the current bench. Recolour via `overrides` if needed. |
-| bicycle rubber, chrome, paint, leather, dark | 5 | 7.6k | KEEP | – | – | No bicycle scan on Poly Haven. The procedural bike reads well. |
-| lantern.iron + lantern.glass | 2 | 1.6k | SUBSTITUTE | `Lantern_01` (pinned) | 0.12×0.10×0.29 m | Hang the scanned lantern from the existing iron bracket arm (keep the arm). Scale ×1.3 to read as a wall lantern. |
-| balcony.stone | 1 | 36 | RETEXTURE | `old_sandstone_02` (pinned) | – | |
-| balcony.iron | 1 | 0.3k | RETEXTURE | `rusty_painted_metal` (pinned) | – | |
-| laundry rope | 1 | 0.3k | KEEP | – | – | |
-| laundry cloth | 2 | 0.2k | RETEXTURE | aCG `Fabric004`, `Fabric026` and `Fabric045`, tinted per `CLOTH` | – | Woven texture instead of flat colour. |
-| line_bracket | 2 | 24 | KEEP | – | – | |
-| web:tree_small_02 | 3 | 2.06M | KEEP | (already scanned) | 7.0 m | |
+| roof_n, roof_e, roof_s, roof_w | 4 | 99k | RETEXTURE | `clay_roof_tiles_02` (else `clay_roof_tiles`, pinned) | texture 2.5 m / 4.0 m | Keep the barrel-tile geometry. Swap the procedural tile texture for scanned albedo, roughness and normal. Check the UV pitch matches the tile pitch (currently 2.1×2.16 m), otherwise use `uv_scale`. Snow env stays snow. | DONE (clay_roof_tiles_02 at real scale; snow keeps snow) |
+| chimney | 4 | 0.4k | RETEXTURE | `red_brick_plaster_patch_02` (pinned) | 1.5 m | Weathered rendered brick. | DONE |
+| eave_n/e/s/w gutter | 4 | 0.2k | RETEXTURE | `rusty_painted_metal` (pinned) | 2.2 m | Visible in every upward audit pose. | DONE (rusty_painted_metal 2k, recoloured to weathered grey: raw rust read orange from every upward pose) |
+| eave_n/e/s/w fascia | 4 | 48 | RETEXTURE | `weathered_brown_planks` | 1.8 m | | DONE |
+| downpipe | 2 | 0.1k | RETEXTURE | `rusty_painted_metal` (pinned) | – | Add 2 more, at the NE and SW corners (see Additions). | DONE (retextured; 2 added at NW and SE, because NE and SW already had one) |
+| wall_n.face (ashlar) | 1 | 0.7k | RETEXTURE | `white_sandstone_blocks_02` or `large_sandstone_blocks_01` | 2.0 m / 3.0 m | The facade bakes openings and weathering into a per-wall texture. Composite the scanned albedo, normal and roughness at real scale with the existing procedural stain masks, so window drips and base grime stay. | DONE (scan base composited under the procedural drips, damp and grime, colour-matched to the old palette; scan normal and roughness at 2 m) |
+| wall_e.face (ochre stucco spalling to brick) | 1 | 0.1k | RETEXTURE | `yellow_plaster_02` + `red_brick_plaster_patch_02` (pinned) for spalled patches | 2.0 m / 1.5 m | Blend by the existing spall mask. | DONE (spall mask kept) |
+| wall_w.face (cloister / arcade) | 1 | 0.8k | RETEXTURE | `old_sandstone_02` (pinned) | 1.5 m | | DONE |
+| wall_s.face (brick wing) | 1 | 0.1k | RETEXTURE | `medieval_red_brick` (or `brick_wall_02`, pinned) | 2.0 m | A close brick wall was a blank tile in the audit (tile 22). Real brick normals fix that. | DONE |
+| wall_n/e/s/w.reveal, .cap | 8 | 0.9k | RETEXTURE | stone of the matching face | – | Reveals are seen in every oblique pose. | DONE (each wall's scan, matched to its facade colour) |
+| wall_n/e/s/w.back | 4 | 1.7k | KEEP | – | – | Outside faces, never visible from the camera box. | KEEP |
+| trim_n/e/s/w.stone (sills, surrounds) | 4 | 3.5k | RETEXTURE | `old_sandstone_02` (pinned) | 1.5 m | | DONE (recoloured to the old stone palette: raw old_sandstone_02 read bright ochre) |
+| trim_n/e/s/w.frame (window frames) | 4 | 3.9k | RETEXTURE | aCG `PaintedWood004` (cream, tinted) | – | Fitted to each opening, so keep the geometry. | DONE |
+| trim_n/e.iron (window grilles) | 2 | 0.8k | RETEXTURE | aCG `Rust004` / `rusty_painted_metal` (pinned) | – | | DONE (rusty_painted_metal 2k, recoloured dark) |
+| trim_n/e/s/w.glass | 4 | 0.1k | KEEP | – | – | Dark reflective glass, tuned for sun glints. | KEEP |
+| trim_n.door (main door, north) | 1 | 0.1k | SUBSTITUTE | `large_castle_door` | 2.01×0.34×2.96 m | Fits an arched doorway of about 2×3 m. Scale to the opening; if it is narrower than 1.8 m, RETEXTURE with `rough_pine_door` instead. | DONE as the plan's fallback: the opening is 1.5 m (< 1.8 m), so RETEXTURE with rough_pine_door |
+| trim_e.door | 1 | 32 | RETEXTURE | `rough_pine_door` | 2.0 m | | DONE |
+| shutters n/e/s/w | 4 | 26k | RETEXTURE | `distressed_painted_planks` tinted per `PAINTS` (`W.surface(..., tint=)`) | 1.6 m | Louvres are sized per window, so keep the geometry. No louvred-shutter scan exists. | DONE (tinted per PAINTS) |
+| walk_doors.door (3 cloister doors) | 1 | 0.3k | RETEXTURE | `rough_pine_door` | 2.0 m | | DONE |
+| walk_doors.iron | 1 | 1.2k | RETEXTURE | `rusty_painted_metal` (pinned) | – | | DONE |
+| walk_back.face (cloister back wall) | 1 | 0.3k | RETEXTURE | `worn_plaster_wall` | 1.8 m | Was flat plaster. | DONE |
+| walk_back.reveal | 1 | 0.2k | RETEXTURE | `old_sandstone_02` (pinned) | – | | DONE |
+| walk.plaster (cloister soffit) | 1 | 6 | RETEXTURE | `white_rough_plaster` | 1.0 m | | DONE |
+| walk.beams | 1 | 0.2k | RETEXTURE | `weathered_brown_planks` | 1.8 m | | DONE |
+| walk.floor | 1 | 2 | RETEXTURE | `terracotta_floor_tiles` (or `patterned_terracotta_tiling`, pinned) | 2.1 m | | DONE |
+| passage.vault | 1 | 64 | RETEXTURE | `worn_cracked_plaster` | 1.8 m | Dark arch interiors were bland in the audit (tiles 2, 3, 4, 21). | DONE |
+| passage.wall | 1 | 4 | RETEXTURE | `old_stone_wall` (pinned) | 2.0 m | | DONE |
+| passage.floor | 1 | 2 | RETEXTURE | `cobblestone_floor_08` (or `cobblestone_02`, pinned) | 2.0 m | Wet env keeps the clearcoat override. | DONE (wet keeps the clearcoat) |
+| street_wall face/reveal/back | 3 | 0.2k | RETEXTURE | `old_stone_wall` (pinned) | 2.0 m | Seen through the arch and from the passage. | DONE |
+| street_ground | 1 | 2 | RETEXTURE | `cobblestone_pavement` (road) + `concrete_pavement` (pinned) pavement strip | 2.5 m / 1.8 m | Replaces the flat `env_kit.ground`. | DONE (cobblestone_pavement road between two concrete_pavement pavements with 0.12 m kerbs; snow env uses snow) |
+| street_facade (flat 40×14 m painted quad) | 1 | 2 | SUBSTITUTE | `modular_urban_apartments_facade` | 51.5×6.7×17 m, 118k tris | Real 3D facade with depth. Place at z≈24 facing north. It is what the archway view shows. | DONE (51.5 m wide, so it spans the whole arch frustum) |
+| gate (open carriage-gate leaf) | 1 | 16 | SUBSTITUTE | `large_castle_door` | scale ×0.81 to the 2.4 m arch | One leaf swung flat against the passage's west wall, as now. | DONE |
+| paving_s (court flagstones) | 1 | 6.7k | RETEXTURE | `monastery_stone_floor` (or `stone_tiles_02`) as the albedo and normal base | 1.8 m | Keep the procedural stone layout, moss joints, worn paths and wet puddle and roughness masks; use the scan for stone surface detail. | DONE (scan detail per stone, procedural layout, moss, wear, puddles kept; scan normal map in dry envs only) |
+| ground (joint plane under paving) | 1 | 2 | KEEP | – | – | Mortar under the stones. | KEEP |
+| kerb | 1 | 1.7k | RETEXTURE | `old_sandstone_02` (pinned) | – | | DONE (colour-matched like the trims) |
+| bed_soil, pot_*_soil, trough_soil | 4 | 0.6k | RETEXTURE | `farm_soil` (pinned) | – | Snow env stays snow. | DONE (snow stays snow) |
+| fountain.stone | 1 | 5.1k | RETEXTURE | `mossy_sandstone` | 1.9 m | No fountain scan exists on Poly Haven, so keep the lathe geometry. | DONE |
+| fountain.water_low, water_high | 2 | 10k | KEEP | – | – | Rough dielectric, tuned against caustic fireflies. | KEEP |
+| fountain.lining | 1 | 1.2k | KEEP | – | – | Dark lining for the noise trick. | KEEP |
+| pot_small (6) | 1 | 4.6k | SUBSTITUTE | `planter_pot_clay` (pinned) | 0.27×0.26×0.22 m vs procedural r 0.14, h 0.20 m | Near-exact size match. | DONE |
+| pot_big (5 citrus pots) | 1 | 3.8k | RETEXTURE | `terracotta` → `patterned_terracotta_tiling`'s plain clay albedo, or aCG `Plaster006` tinted terracotta | – | `ceramic_pot` (0.66×0.37 m) is too squat for a citrus tree, so keep the lathe pot. | DONE (acg:Plaster006 tinted terracotta) |
+| trough (window boxes) | 2 | 0.1k | RETEXTURE | same clay as the pots | – | `planter_box_01/02` are 0.41–0.47 m tall, too tall for ledges. | DONE |
+| bench.iron, bench.wood | 2 | 0.4k | SUBSTITUTE | `painted_wooden_bench` (pinned) | 1.16×0.50×0.89 m | Same footprint as the current bench. Recolour via `overrides` if needed. | DONE |
+| bicycle rubber, chrome, paint, leather, dark | 5 | 7.6k | KEEP | – | – | No bicycle scan on Poly Haven. The procedural bike reads well. | KEEP |
+| lantern.iron + lantern.glass | 2 | 1.6k | SUBSTITUTE | `Lantern_01` (pinned) | 0.12×0.10×0.29 m | Hang the scanned lantern from the existing iron bracket arm (keep the arm). Scale ×1.3 to read as a wall lantern. | DONE (scanned lantern on the kept bracket arm, x1.3) |
+| balcony.stone | 1 | 36 | RETEXTURE | `old_sandstone_02` (pinned) | – | | DONE |
+| balcony.iron | 1 | 0.3k | RETEXTURE | `rusty_painted_metal` (pinned) | – | | DONE |
+| laundry rope | 1 | 0.3k | KEEP | – | – | | KEEP |
+| laundry cloth | 2 | 0.2k | RETEXTURE | aCG `Fabric004`, `Fabric026` and `Fabric045`, tinted per `CLOTH` | – | Woven texture instead of flat colour. | DONE (fabric albedo kept thin and translucent) |
+| line_bracket | 2 | 24 | KEEP | – | – | | KEEP |
+| web:tree_small_02 | 3 | 2.06M | KEEP | (already scanned) | 7.0 m | | KEEP |
 
 ## Big-surface textures (summary)
 
@@ -92,6 +92,14 @@ Rows below gather families with the same decision. The instance and triangle cou
 | Street | `cobblestone_pavement` + `concrete_pavement` | 2.5 / 1.8 m | env_kit wet roughness | snow material |
 
 ## Additions, so every audit pose looks real
+
+**Status: all DONE**, with these exceptions and changes:
+- `utility_box_01` sits at the street end of the passage (z 11.95), beside the arch-view camera. At the planned spot it filled the hero view's right side.
+- The north-door seating nook (`gallinera_table` and `painted_wooden_chair_01`) is beside the door under the east window. Under the balcony it would block the door.
+- `potted_plant_04` and `periwinkle_plant` stand beside the `planter_pot_clay` pots rather than in them. potted_plant_04 has its own pot.
+- Each corner has 2 `moss_01` patches, 8 in total. The asset converts to 204 triangles, not 246k.
+- The cloister lanterns hang on procedural chains.
+- The exclude boxes now cover every new prop.
 
 **Beyond the arch (street, z 13–28).** This is what the archway hero view and passage poses see.
 - `modular_urban_apartments_facade` at z≈24, as the street facade substitute above.

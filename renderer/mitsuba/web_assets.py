@@ -45,7 +45,7 @@ MANIFEST = HERE / "scenes" / "assets" / "web_manifest.json"
 CACHE = Path(os.environ.get("DOF_WEB_ASSETS", HERE / "web_assets"))
 API = "https://api.polyhaven.com"
 UA = {"User-Agent": "DoF-Graphics-dataset/0.1"}   # the API rejects Python's default agent
-CONVERTER_VERSION = 3                              # bump when conversion changes; old conversions are ignored
+CONVERTER_VERSION = 4                              # bump when conversion changes; old conversions are ignored
 FLIP_V = False                                     # Mitsuba bitmaps, like glTF, put v = 0 at the image top (measured)
 # Leaf-like parts get thin translucent shading; words that also name pots/vases ("plant", "flower") are left out.
 FOLIAGE_WORDS = ("leaf", "leaves", "fern", "foliage", "grass", "petal", "needle", "moss")
@@ -272,7 +272,7 @@ def _material(g, src: Path, out: Path, mi_idx, foliage_translucency: float):
         return src.parent / g["images"][g["textures"][tex_info["index"]]["source"]]["uri"]
 
     def gray(arr, tag) -> str:
-        path = tdir / f"{name}_{tag}.png"
+        path = tdir / f"{name}_{mi_idx}_{tag}.png"
         Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "L").save(path)
         return str(path.relative_to(out))
 
@@ -283,7 +283,7 @@ def _material(g, src: Path, out: Path, mi_idx, foliage_translucency: float):
         im = Image.open(base_img)
         if im.mode in ("RGBA", "LA") and mat.get("alphaMode") in ("MASK", "BLEND"):
             alpha = gray(np.asarray(im.getchannel("A")), "alpha")
-            rgb_path = tdir / f"{name}_base.png"
+            rgb_path = tdir / f"{name}_{mi_idx}_base.png"
             im.convert("RGB").save(rgb_path)
             base_rel = str(rgb_path.relative_to(out))
         else:
@@ -359,6 +359,8 @@ def _convert(gltf: Path, out: Path, foliage_translucency: float) -> dict:
     parts, lo, hi, total = [], np.full(3, np.inf), np.full(3, -np.inf), 0
     for mi_idx, prims in groups.items():
         name, bsdf, uvt = _material(g, gltf, out, mi_idx, foliage_translucency)
+        if any(p["name"] == name for p in parts):        # glTF allows duplicate material names
+            name = f"{name}_{mi_idx}"
         mesh = G.Mesh()
         for m, p, nrm, uv, f in prims:
             pw = p @ m[:3, :3].T + m[:3, 3]
