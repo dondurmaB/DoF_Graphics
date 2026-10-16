@@ -222,3 +222,58 @@ def escalator(rise: float = 4.8, angle_deg: float = 30.0, width: float = 1.1) ->
     plates = [box((width + 0.4, 0.04, 0.9), (0.0, 0.0, 0.45)).transformed(translate((0, 0.17, 0))),
               box((width + 0.4, 0.04, 0.9), (0.0, 0.0, 0.45)).transformed(translate((0, rise + 0.17, run - 0.45)))]
     return {"steps": steps, "metal": merge(skirts + rails + plates), "rubber": merge(rub)}
+
+
+# ----------------------------------------------------------------------------
+# Skyline towers
+# ----------------------------------------------------------------------------
+
+def facade_box(size, centre=(0.0, 0.0, 0.0)) -> Mesh:
+    """Box whose four sides have uv = (horizontal meters along the face, -height in meters), so a facade
+    texture stands upright at real scale on every side; top and bottom get (x, z) meters."""
+    sx, sy, sz = np.asarray(size, float) / 2
+    cx, cy, cz = centre
+    out = []
+    sides = [((1, 0, 0), (0, 0, -1), sz, sx), ((-1, 0, 0), (0, 0, 1), sz, sx), ((0, 0, 1), (1, 0, 0), sx, sz), ((0, 0, -1), (-1, 0, 0), sx, sz)]
+    for n, t, half_w, off in sides:
+        n, t = np.array(n, float), np.array(t, float)
+        c = np.array([cx, cy, cz]) + n * off
+        pts = [c - t * half_w - [0, sy, 0], c + t * half_w - [0, sy, 0], c + t * half_w + [0, sy, 0], c - t * half_w + [0, sy, 0]]
+        y0 = cy - sy
+        uv = [[0, -(0.0 + y0)], [2 * half_w, -y0], [2 * half_w, -(y0 + 2 * sy)], [0, -(y0 + 2 * sy)]]
+        out.append(Mesh(np.array(pts), np.tile(n, (4, 1)), np.array(uv, float), np.array([[0, 1, 2], [0, 2, 3]])))
+    for sgn in (1, -1):
+        y = cy + sgn * sy
+        pts = [(cx - sx, y, cz - sz), (cx + sx, y, cz - sz), (cx + sx, y, cz + sz), (cx - sx, y, cz + sz)]
+        uv = [(p[0], p[2]) for p in pts]
+        out.append(Mesh(np.array(pts, float), np.tile([0, sgn, 0], (4, 1)), np.array(uv, float), np.array([[0, 1, 2], [0, 2, 3]])))
+    return merge(out).oriented()
+
+
+def tower(seed: int, w: float, d: float, h: float, fins: bool) -> dict[str, Mesh]:
+    """An office tower centred on the origin, base at y = 0: a glazed podium, a shaft with 0-2 setbacks, a crown
+    (plant room and parapet) and, if `fins`, vertical mullion fins and spandrel ledges as real geometry."""
+    rng = np.random.default_rng(seed)
+    pod_h = 3.6 * int(rng.integers(2, 4))
+    parts = {"podium": [facade_box((w + 4, pod_h, d + 4), (0, pod_h / 2, 0))], "body": [], "crown": [], "fins": []}
+    y, cw, cd = pod_h, w, d
+    steps = int(rng.integers(0, 3))
+    seg = (h - pod_h) / (steps + 1)
+    for k in range(steps + 1):
+        parts["body"].append(facade_box((cw, seg, cd), (0, y + seg / 2, 0)))
+        if fins:
+            for face, length, other in ((0, cw, cd), (2, cd, cw)):
+                for xx in np.arange(-length / 2 + 1.5, length / 2 - 0.5, 3.0):
+                    for sgn in (-1, 1):
+                        c = [xx, y + seg / 2, sgn * (other / 2 + 0.2)] if face == 0 else [sgn * (other / 2 + 0.2), y + seg / 2, xx]
+                        sz = (0.18, seg, 0.4) if face == 0 else (0.4, seg, 0.18)
+                        parts["fins"].append(box(sz, c))
+            for yy in np.arange(y + 3.6, y + seg, 3.6):
+                parts["fins"].append(box((cw + 0.5, 0.25, cd + 0.5), (0, yy, 0)))
+        y += seg
+        cw, cd = cw * rng.uniform(0.7, 0.88), cd * rng.uniform(0.7, 0.88)
+    ph = rng.uniform(4.0, 7.0)
+    parts["crown"].append(box((cw * 0.55, ph, cd * 0.55), (0, y + ph / 2, 0)))
+    parts["crown"].append(box((cw / 0.8 + 0.3, 1.1, 0.3), (0, y + 0.55, cd / 0.8 / 2)))
+    parts["crown"].append(box((cw / 0.8 + 0.3, 1.1, 0.3), (0, y + 0.55, -cd / 0.8 / 2)))
+    return {k: merge(v) for k, v in parts.items() if v}

@@ -16260,6 +16260,79 @@
     "polycount": null
    }
   },
+  "wooden_barrels_01": {
+   "1k": {
+    "authors": [
+     "James Ray Cock"
+    ],
+    "dimensions_m": [
+     4.44,
+     3.345,
+     0.957
+    ],
+    "files": {
+     "textures/wooden_barrels_01_barrel01_arm_1k.jpg": {
+      "md5": "19e643936381b9ff0b5d3a17f41f590f",
+      "size": 852652,
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_barrels_01/wooden_barrels_01_barrel01_arm_1k.jpg"
+     },
+     "textures/wooden_barrels_01_barrel01_diff_1k.jpg": {
+      "md5": "8387b4843c9331f8dd7935a5034d3d38",
+      "size": 605063,
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_barrels_01/wooden_barrels_01_barrel01_diff_1k.jpg"
+     },
+     "textures/wooden_barrels_01_barrel01_nor_gl_1k.jpg": {
+      "md5": "21c030448f574a298f22a7edd2b5e176",
+      "size": 538634,
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_barrels_01/wooden_barrels_01_barrel01_nor_gl_1k.jpg"
+     },
+     "textures/wooden_barrels_01_barrel02_arm_1k.jpg": {
+      "md5": "20a7bccad7bf899a8a4b18c73cd74dc9",
+      "size": 848051,
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_barrels_01/wooden_barrels_01_barrel02_arm_1k.jpg"
+     },
+     "textures/wooden_barrels_01_barrel02_diff_1k.jpg": {
+      "md5": "5b3f9026ba99f55e3f9397e2e8818945",
+      "size": 618495,
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_barrels_01/wooden_barrels_01_barrel02_diff_1k.jpg"
+     },
+     "textures/wooden_barrels_01_barrel02_nor_gl_1k.jpg": {
+      "md5": "21e88f8d945b0a3b6861debe9db58a9f",
+      "size": 555954,
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_barrels_01/wooden_barrels_01_barrel02_nor_gl_1k.jpg"
+     },
+     "textures/wooden_barrels_01_pieces_arm_1k.jpg": {
+      "md5": "4dc69d91b60da91029acf8e0706e4b33",
+      "size": 904545,
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_barrels_01/wooden_barrels_01_pieces_arm_1k.jpg"
+     },
+     "textures/wooden_barrels_01_pieces_diff_1k.jpg": {
+      "md5": "9469a5822acae4616d98ca5fc2af97d2",
+      "size": 672604,
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_barrels_01/wooden_barrels_01_pieces_diff_1k.jpg"
+     },
+     "textures/wooden_barrels_01_pieces_nor_gl_1k.jpg": {
+      "md5": "1f580f7f8ce6fa21694c6048bad318c4",
+      "size": 620276,
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/wooden_barrels_01/wooden_barrels_01_pieces_nor_gl_1k.jpg"
+     },
+     "wooden_barrels_01.bin": {
+      "md5": "6c1dbd45bc5f0b1e726a7343fae0fbdb",
+      "size": 1243556,
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/wooden_barrels_01/wooden_barrels_01.bin"
+     },
+     "wooden_barrels_01_1k.gltf": {
+      "md5": "1228b95423a5430d74d238284fad724e",
+      "size": 31017,
+      "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/wooden_barrels_01/wooden_barrels_01_1k.gltf"
+     }
+    },
+    "kind": "model",
+    "name": "Wooden Barrels 01",
+    "page": "https://polyhaven.com/a/wooden_barrels_01",
+    "polycount": 33142
+   }
+  },
   "wooden_bowl_01": {
    "1k": {
     "authors": [
