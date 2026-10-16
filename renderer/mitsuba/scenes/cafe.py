@@ -520,6 +520,7 @@ SCENE = SceneDef(
     # targets sit at table-to-eye level, so random poses frame the room rather than beams or blank wall.
     camera_box=((-3.2, 0.6, -5.3), (3.2, 2.2, 2.95)),
     target_box=((-3.8, 0.4, -7.0), (3.8, 2.0, 3.5)),
+    lens_mm=(24.0, 85.0),   # longer lenses in a 7.6 m room mostly frame a patch of blank wall
     tags=("indoor", "day", "artificial_light", "clutter", "glass", "metal", "bokeh"),
     default_seed=7,
     asset_version=2,
