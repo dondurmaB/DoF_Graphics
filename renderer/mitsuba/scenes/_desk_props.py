@@ -344,3 +344,89 @@ def shelf_row(rng, x0: float, x1: float, y: float, z_front: float, max_h: float,
         b = book(rng.uniform(0.02, 0.04), rng.uniform(0.7, 1.0) * max_h, 0.2, (int(rng.integers(0, ATLAS_COLS)), int(rng.integers(0, ATLAS_ROWS - 1))))
         out += b.transformed(compose(translate((x + 0.06, y, z_front)), rotate((0, 0, 1), lean)))
     return out
+
+
+# ----------------------------------------------------------------------------
+# Room joinery and the street outside
+# ----------------------------------------------------------------------------
+
+def curtain(width: float, height: float, fold: float = 0.11, depth: float = 0.035, seed: int = 0) -> Mesh:
+    """A gathered curtain hanging in the zy plane (width along z, from y = 0 up to `height`), folds along x.
+    uv is in meters, so real-scale fabric textures tile correctly."""
+    rng = np.random.default_rng(seed)
+    cols, rows = max(24, int(width / fold * 10)), 40
+    z = np.linspace(0, width, cols)[None, :]
+    y = np.linspace(0, height, rows)[:, None]
+    ph = rng.uniform(0, 6.28)
+    amp = depth * (0.75 + 0.25 * np.sin(z / width * 3.1 + ph))
+    x = amp * np.sin(2 * np.pi * z / fold + ph) * (0.7 + 0.3 * (y / height))
+    p = np.stack(np.broadcast_arrays(x, y, z), -1).reshape(-1, 3)
+    f = G._grid_faces(rows, cols)
+    uv = np.stack(np.broadcast_arrays(z, y), -1).reshape(-1, 2)
+    return Mesh(p, G.vertex_normals(p, f), uv, f)
+
+
+def panel_door(width: float = 0.86, height: float = 2.04, thick: float = 0.04) -> dict[str, Mesh]:
+    """Four-panel door in the xy plane (face toward +z), bottom centre at the origin; uv in meters."""
+    slab = box((width, height, thick), (0, height / 2, 0))
+    mould = Mesh()
+    for (cx, cy, w, h) in ((-0.2, 1.5, 0.3, 0.75), (0.2, 1.5, 0.3, 0.75), (-0.2, 0.55, 0.3, 0.8), (0.2, 0.55, 0.3, 0.8)):
+        for (dx, dy, ww, hh) in ((0, h / 2, w + 0.03, 0.03), (0, -h / 2, w + 0.03, 0.03), (w / 2, 0, 0.03, h), (-w / 2, 0, 0.03, h)):
+            mould += box((ww, hh, 0.012), (cx + dx, cy + dy, thick / 2 + 0.006))
+    handle = lathe([(0.0, 0.0), (0.028, 0.0), (0.028, 0.006), (0.009, 0.012), (0.009, 0.05), (0.022, 0.06), (0.024, 0.075), (0.0, 0.078)], 24)
+    handle = handle.transformed(compose(translate((width / 2 - 0.08, 1.0, thick / 2)), rotate((1, 0, 0), 90)))
+    return {"slab": slab, "mould": mould, "handle": handle}
+
+
+def facade(width: float, height: float, storeys: int, bays: int, seed: int) -> dict[str, Mesh]:
+    """Terraced house front, face toward +x at x = 0, spanning z in [0, width] and y in [0, height].
+    'wall' (uv in meters) is the masonry with real window openings cut through it; 'glass' the dark panes set
+    0.12 m back; 'frame' sills, lintels and window frames; 'roof' a pitched roof; 'door' the front door."""
+    rng = np.random.default_rng(seed)
+    wall, glass, frame, roof, door = Mesh(), Mesh(), Mesh(), Mesh(), Mesh()
+    sh = (height - 0.5) / storeys
+    ww, wh = 1.0, 1.45
+    door_bay = int(rng.integers(0, bays))
+    holes = []
+    for s in range(storeys):
+        for k in range(bays):
+            zc = width * (k + 0.5) / bays
+            if s == 0 and k == door_bay:
+                holes.append((zc - 0.5, zc + 0.5, 0.0, 2.2, True))
+            else:
+                y0 = 0.9 + s * sh
+                holes.append((zc - ww / 2, zc + ww / 2, y0, y0 + wh, False))
+    # Masonry: vertical strips between holes, then pieces above/below each hole, all 0.3 m thick.
+    edges = sorted({0.0, width} | {h[0] for h in holes} | {h[1] for h in holes})
+    for z0, z1 in zip(edges[:-1], edges[1:]):
+        col = [h for h in holes if h[0] <= z0 + 1e-6 and h[1] >= z1 - 1e-6]
+        ys = [0.0]
+        for h in sorted(col, key=lambda h: h[2]):
+            ys += [h[2], h[3]]
+        ys.append(height)
+        for y0, y1 in zip(ys[0::2], ys[1::2]):
+            if y1 - y0 > 1e-6:
+                wall += box((0.3, y1 - y0, z1 - z0), (-0.15, (y0 + y1) / 2, (z0 + z1) / 2))
+    for z0, z1, y0, y1, is_door in holes:
+        zc, yc = (z0 + z1) / 2, (y0 + y1) / 2
+        if is_door:
+            door += box((0.05, y1 - y0, z1 - z0), (-0.2, yc, zc))
+            frame += box((0.06, 0.1, z1 - z0 + 0.2), (-0.02, y1 + 0.05, zc))
+            continue
+        glass += box((0.02, y1 - y0, z1 - z0), (-0.14, yc, zc))
+        frame += box((0.06, 0.06, z1 - z0 + 0.12), (0.01, y0 - 0.03, zc))                      # sill
+        frame += box((0.04, 0.12, z1 - z0 + 0.1), (0.0, y1 + 0.06, zc))                       # lintel
+        for z in (z0 + 0.025, z1 - 0.025, zc):
+            frame += box((0.05, y1 - y0, 0.05), (-0.12, yc, z))
+        frame += box((0.05, 0.05, z1 - z0), (-0.12, y0 + (y1 - y0) * 0.62, zc))
+    frame += box((0.12, 0.18, width), (0.03, height - 0.09, width / 2))                          # cornice
+    rp = height + 2.2
+    for sgn in (1,):
+        pts = np.array([[0.25, height, 0], [-3.5, rp, 0], [-3.5, rp, width], [0.25, height, width]])
+        n = np.cross(pts[1] - pts[0], pts[3] - pts[0]); n = n / np.linalg.norm(n)
+        if n[1] < 0:
+            n = -n
+        uv = np.array([[0, 0], [4.2, 0], [4.2, width], [0, width]])
+        roof += Mesh(pts, np.tile(n, (4, 1)), uv, np.array([[0, 1, 2], [0, 2, 3]])).oriented()
+    roof += box((0.3, 2.2, 0.3), (-1.5, height + 1.5, width * 0.3))                             # chimney stack
+    return {"wall": wall, "glass": glass, "frame": frame, "roof": roof, "door": door}
