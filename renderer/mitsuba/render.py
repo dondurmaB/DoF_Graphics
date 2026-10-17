@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import subprocess
 import sys
 import time
@@ -82,6 +83,12 @@ def pick_variant(requested: str) -> str:
     for variant, backend in backends:
         jb = getattr(dr.JitBackend, backend, None)
         if variant in mi.variants() and jb is not None and dr.has_backend(jb):
+            # On a GPU node a CUDA init failure (e.g. memory held by other processes) must not silently
+            # become a ~100x slower CPU render.
+            if backend != "CUDA" and (os.environ.get("CUDA_VISIBLE_DEVICES") or os.environ.get("SLURM_JOB_GPUS")):
+                raise RuntimeError(f"GPU allocated but CUDA is unavailable; refusing to fall back to {variant}. "
+                                   "Check nvidia-smi for memory held by other processes, or pass --variant.")
+            print(f"variant: {variant}", file=sys.stderr)
             mi.set_variant(variant)
             return variant
     mi.set_variant("scalar_rgb")

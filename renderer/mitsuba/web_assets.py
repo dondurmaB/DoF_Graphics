@@ -505,6 +505,7 @@ def model(aid: str, res: str = "1k", foliage_translucency: float = 0.35) -> Mode
             else:
                 _convert(root / next(k for k in entry["files"] if k.endswith(".gltf")), out, foliage_translucency)
     meta = json.loads((out / "model.json").read_text())
+    _check_size(aid, res, meta["bounds"])
     parts = [Part(p["name"], str(out / p["ply"]), _absolute(p["bsdf"], out), p["triangles"]) for p in meta["parts"]]
     return Model(aid, res, parts, tuple(map(tuple, meta["bounds"])), meta["triangles"])
 
@@ -558,6 +559,19 @@ def _tinted(path: Path, tint, out: Path) -> Path:
         a = np.asarray(Image.open(path).convert("RGB"), float) * np.asarray(tint, float)
         Image.fromarray(np.clip(a, 0, 255).astype(np.uint8)).save(dst)
     return dst
+
+
+def _check_size(aid: str, res: str, bounds) -> None:
+    """Warn when a model's geometry disagrees with its catalog size: some published glTFs are
+    authored at the wrong unit scale (steel_frame_shelves_01 is 10x). The scene decides the fix."""
+    dims = _read_manifest()["assets"].get(aid, {}).get(res, {}).get("dimensions_m")
+    if not dims:
+        return
+    ext = sorted(hi - lo for lo, hi in zip(*bounds))
+    ratio = ext[-1] / max(max(dims), 1e-9)
+    if not 0.67 < ratio < 1.5:
+        print(f"web_assets: {aid} geometry is {ratio:.2g}x its catalog size ({ext[-1]:.2f} m vs {max(dims):.2f} m); "
+              f"check units and scale it in the scene", file=sys.stderr)
 
 
 def place(m: Model, at=(0.0, 0.0, 0.0), yaw: float = 0.0, height: float | None = None, scale: float = 1.0):
