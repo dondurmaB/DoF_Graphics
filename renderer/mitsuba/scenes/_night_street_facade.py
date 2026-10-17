@@ -252,7 +252,7 @@ def build_facade(spec: dict, rng: np.random.Generator):
         g["drain"].add(tube([(x, h, -1.0), (x, top, -1.0)], 0.02, 6))
         for y in np.linspace(h + 0.6, top - 0.1, 3):
             g["drain"].add(tube([(x - 0.35, y, -1.0), (x + 0.35, y, -1.0)], 0.008, 4))
-    return {k: v for k, v in g.meshes().items()}, emit, signs
+    return {k: v for k, v in g.meshes().items()}, emit, signs, lay.get("props", [])
 
 
 # ---------------------------------------------------------------------------
@@ -295,7 +295,8 @@ def window(g: Groups, emit: dict, wd: dict, lay: dict, rng, spec) -> None:
     if not lit:
         g["glass_dark"].add(oq((x0, y0, zf - 0.04), (x1, y0, zf - 0.04), (x1, y1, zf - 0.04), (x0, y1, zf - 0.04), (0, 0, 1)))
         if rng.random() < 0.12 and lay["style"] != "stone":
-            g["ac_unit"].add(box((0.78, 0.48, 0.34), (xc + rng.uniform(-0.2, 0.2), y0 - 0.42, 0.17)))
+            # scanned unit, placed by the scene: (model, x, bottom y, z of the wall face it backs onto)
+            lay.setdefault("props", []).append(["exterior_aircon_unit", float(xc + rng.uniform(-0.2, 0.2)), float(y0 - 0.66), 0.0])
         return
 
     # a lit room: interior box, ceiling lamp, furniture, and one of curtains / sheer / blinds / nothing
@@ -383,9 +384,7 @@ def curtain_wall(g: Groups, emit: dict, lay: dict, rng) -> None:
                         g["furn_dark"].add(box((0.48, 0.5, 0.48), (xm, base + 0.25, zz + 0.6)))
                     g["shop_wall_c"].add(box((rx1 - rx0, 1.3, 0.05), ((rx0 + rx1) / 2, base + 0.65, zz + 1.0)))  # partition
                 if rng.random() < 0.5:
-                    g["leaf_plant"].add(G.lathe([(0.0, 0.0), (0.22, 0.0), (0.3, 0.5), (0.0, 0.5)], 12).transformed(
-                        G.translate((rx0 + 0.4, base + 0.05, -1.0))))
-                    g["leaf_plant"].add(G.ellipsoid((0.4, 0.55, 0.4), 8, 12).transformed(G.translate((rx0 + 0.4, base + 1.0, -1.0))))
+                    lay.setdefault("props", []).append(["potted_plant_02", float(rx0 + 0.4), float(base + 0.05), -1.35])
                 emit["emit_office"] = tuple(OFFICE_L * c for c in (0.88, 0.94, 1.0))
             else:
                 g["glass_curtain"].add(oq((x0, y0, -0.02), (x1, y0, -0.02), (x1, y1, -0.02), (x0, y1, -0.02), (0, 0, 1)))
