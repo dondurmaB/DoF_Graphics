@@ -932,6 +932,7 @@ def _glyphs():
         "U": (1.05, [[(0.12, 1.5), (0.12, 0.5)] + _arc(0.52, 0.5, 0.4, 0.5, 180, 360, 10) + [(0.92, 1.5)]]),
         "V": (1.05, [[(0.05, 1.5), (0.52, 0.0), (0.98, 1.5)]]),
         "Q": (1.05, [_arc(0.52, 0.75, 0.45, 0.75, 0, 360, 20), [(0.6, 0.3), (0.98, -0.1)]]),
+        "X": (1.0, [[(0.08, 0.0), (0.92, 1.5)], [(0.08, 1.5), (0.92, 0.0)]]),
         "0": (0.85, [_arc(0.5, 0.75, 0.4, 0.75, 0, 360, 18)]),
         "1": (0.6, [[(0.25, 1.2), (0.55, 1.5), (0.55, 0.0)]]),
         "2": (0.85, [_arc(0.5, 1.1, 0.38, 0.4, 160, -30, 9) + [(0.1, 0.0), (0.9, 0.0)]]),
@@ -1083,3 +1084,31 @@ def manuscript_spread(h: int, w: int, seed: int) -> np.ndarray:
     img = img * (1 - gold) + np.array([0.85, 0.65, 0.25]) * gold
     img[iy:iy + s, ix:ix + 3] = img[iy:iy + s, ix + s - 3:ix + s] = [0.8, 0.6, 0.2]
     return np.clip(img, 0, 1)
+
+
+# ----------------------------------------------------------------------------
+# Meter-uv quads, wall services
+# ----------------------------------------------------------------------------
+
+def quad(w: float, h: float) -> Mesh:
+    """w x h rectangle centred at the origin facing +z, uv in meters (real-scale tiling textures)."""
+    p = np.array([[-w / 2, -h / 2, 0], [w / 2, -h / 2, 0], [w / 2, h / 2, 0], [-w / 2, h / 2, 0.0]])
+    return Mesh(p, np.tile([0, 0, 1.0], (4, 1)), np.array([[0, 0], [w, 0], [w, h], [0, h]]), np.array([[0, 1, 2], [0, 2, 3]]))
+
+
+def grille(w: float = 0.6, h: float = 0.3, n: int = 11) -> dict[str, Mesh]:
+    """Wall air grille facing +z: frame and angled slats, with a dark plenum behind."""
+    t = 0.022
+    frame = join(G.box((w, t, 0.03), (0, h / 2 - t / 2, 0.015)), G.box((w, t, 0.03), (0, -h / 2 + t / 2, 0.015)),
+                 G.box((t, h, 0.03), (w / 2 - t / 2, 0, 0.015)), G.box((t, h, 0.03), (-w / 2 + t / 2, 0, 0.015)))
+    for i in range(n):
+        y = -h / 2 + t + (i + 0.5) * (h - 2 * t) / n
+        frame += G.box((w - 2 * t, 0.003, 0.026)).transformed(compose(translate((0, y, 0.014)), rotate((1, 0, 0), 35)))
+    return {"frame": frame, "back": G.box((w - 2 * t, h - 2 * t, 0.002), (0, 0, 0.001))}
+
+
+def exit_sign_tex(h: int = 160, w: int = 400) -> np.ndarray:
+    ink = Ink(w, h)
+    print_word(ink, 0.17 * w, 0.78 * h, "EXIT", 0.36 * h, 0.09 * h, track=0.35)
+    cov = ink.coverage()[..., None]
+    return np.clip(np.array([0.04, 0.62, 0.3]) * (1 - cov) + np.array([0.95, 1.0, 0.95]) * cov, 0, 1)
