@@ -47,13 +47,11 @@ DOOR_X = (0.0, 3.0)
 DOOR_TOP, DOOR_SLATS_BOTTOM = 2.7, 1.75
 SUN_ELEVATION, SUN_AZIMUTH = 28.0, -80.0
 SKY_SCALE = 7.0
-TUBE = (55.0, 57.0, 62.0)          # cool-white fluorescent radiance
+PANEL = (15.0, 15.5, 17.0)          # cool-white radiance of each 4-tube panel's diffuse emitter
 LAMP = (40.0, 26.0, 12.0)           # warm bulbs in the hanging lamps; big and dim, not small and hot (fireflies)
-WORKLIGHT = (170.0, 120.0, 62.0)
-CAR_AT = (1.0, -2.55)
-SHELF_X = ROOM_X1 - 0.23
-SHELF_Z = [-5.45, -4.45, -3.45, -2.45]
-SHELF_LEVELS = (0.18, 0.62, 1.06, 1.5, 1.94)
+WORKLIGHT = (40.0, 28.0, 14.5)           # big and dim (r 0.045), not small and hot: fireflies
+DOOR_BULB = (22.0, 15.0, 7.4)
+CAR_AT = (1.4, -2.55)
 FLAT = G.rotate((1, 0, 0), -90)    # lays an upright Poly Haven tool (thin along z) flat on its back
 
 
@@ -84,8 +82,13 @@ def wplace(m, at, yaw=0.0, pre=None, scale=1.0) -> np.ndarray:
     return G.compose(G.translate(at), G.rotate((0, 1, 0), yaw), G.translate(-anchor), R)
 
 
+# steel_frame_shelves_01's own glTF stores positions at 10x its catalog size (21.4 m tall vs 2.14 m); scale it back.
+ASSET_SCALE = {"steel_frame_shelves_01": 0.1}
+
+
 def put(b: SceneBuilder, aid: str, at, yaw=0.0, pre=None, scale=1.0, height=None, prefix=None, overrides=None):
     m = WA.model(aid)
+    scale *= ASSET_SCALE.get(aid, 1.0)
     if height is not None:
         scale = height / footprint(m, pre)[1]
     M = wplace(m, at, yaw, pre, scale)
@@ -121,7 +124,7 @@ def add_materials(b: SceneBuilder, local: Assets, ctx: BuildContext) -> None:
     b.material("shelf_plate", WA.surface("rusty_painted_metal", res="2k"))
     b.material("door_slats", {"type": "twosided", "bsdf": WA.surface("painted_metal_shutter", res="2k", uv_scale=(2.94 / 2.0, 0.95 / 2.0))})
     b.material("brick_far", WA.surface("brick_wall_02", res="2k", uv_scale=(24.0 / 2.0, 8.0 / 2.0)))
-    b.material("yard", WA.surface("asphalt_floor", res="2k", uv_scale=(24.0 / 2.35, 11.0 / 2.35)))
+    b.material("yard", WA.surface("asphalt_floor", res="2k", uv_scale=(24.0 / 2.35, 11.0 / 2.35), tint=(0.6, 0.6, 0.6)))
     b.material("ground", env_kit.ground("clear"))
     b.material("emitter_backing", {"type": "diffuse", "reflectance": rgb(0.0, 0.0, 0.0)})
     # Near-black and diffuse on purpose: a glossy or bright housing a few millimetres from a tube is lit mostly by that
@@ -134,6 +137,10 @@ def add_materials(b: SceneBuilder, local: Assets, ctx: BuildContext) -> None:
     b.material("steel_plain", principled((0.62, 0.62, 0.64), 0.4, metallic=1.0))
     b.material("chrome", {"type": "roughconductor", "material": "Cr", "alpha": 0.12})
     b.material("paint_grey", principled((0.30, 0.31, 0.33), 0.5, metallic=0.3))
+    b.material("rust_paint", WA.surface("rusty_painted_metal", res="2k"))
+    b.material("rust_frame", WA.surface("rusty_metal_02", res="2k"))
+    b.material("purlin", WA.surface("rusty_painted_metal", res="2k", tint=(0.55, 0.6, 0.65)))
+    b.material("cabinet_frame", WA.surface("blue_metal_plate", res="2k"))
     b.material("paint_black", principled((0.04, 0.04, 0.045), 0.5))
     b.material("paint_yellow", principled((0.75, 0.55, 0.05), 0.45))
     b.material("black_matt", principled((0.02, 0.02, 0.02), 0.7))
@@ -145,9 +152,9 @@ def add_materials(b: SceneBuilder, local: Assets, ctx: BuildContext) -> None:
         b.material(nm, principled(c, 0.55, specular=0.4))
     b.material("bin_yellow", principled((0.8, 0.62, 0.05), 0.4, specular=0.5))
     b.material("can_tin", principled((0.60, 0.60, 0.62), 0.3, metallic=0.9))
-    b.material("rag_red", {"type": "diffuse", "reflectance": rgb(0.55, 0.12, 0.08)})
-    b.material("rag_grey", {"type": "diffuse", "reflectance": rgb(0.45, 0.43, 0.40)})
-    b.material("mat_rubber", principled((0.025, 0.025, 0.027), 0.8))
+    b.material("rag_red", {"type": "twosided", "bsdf": WA.surface("acg:Fabric030", uv_scale=0.3, tint=(1.3, 0.45, 0.35))})
+    b.material("rag_grey", {"type": "twosided", "bsdf": WA.surface("acg:Fabric030", uv_scale=0.3)})
+    b.material("mat_rubber", WA.surface("acg:Rubber004", uv_scale=(2.2 / 0.75, 0.8 / 0.75)))
     for nm, c in (("bin_red", (0.55, 0.05, 0.04)), ("bin_blue", (0.05, 0.12, 0.5)), ("bin_grey", (0.35, 0.36, 0.38))):
         b.material(nm, principled(c, 0.4, specular=0.5))
     b.material("label", {"type": "diffuse", "reflectance": rgb(0.84, 0.82, 0.76)})
@@ -206,26 +213,33 @@ def add_room(b: SceneBuilder) -> None:
             b.box_mesh("rev_v", (ROOM_X0 - t / 2, 0.5 * sum(WIN_Y), z), (t, WIN_Y[1] - WIN_Y[0], 0.04), "plaster")
         f = 0.035
         for z in (z0 + f / 2, z1 - f / 2, zc):
-            b.cube((ROOM_X0 - 0.06, 0.5 * sum(WIN_Y), z), (0.05, WIN_Y[1] - WIN_Y[0], f), "paint_black")
+            b.box_mesh("win_mullion", (ROOM_X0 - 0.06, 0.5 * sum(WIN_Y), z), (0.05, WIN_Y[1] - WIN_Y[0], f), "rust_frame")
         for y in (WIN_Y[0] + f / 2, WIN_Y[1] - f / 2, 0.5 * sum(WIN_Y)):
-            b.cube((ROOM_X0 - 0.06, y, zc), (0.05, f, z1 - z0), "paint_black")
+            b.box_mesh(f"win_transom_{z1 - z0:.2f}".replace(".", "p"), (ROOM_X0 - 0.06, y, zc), (0.05, f, z1 - z0), "rust_frame")
     # Door jambs and the roller door: corrugated slats raised to DOOR_SLATS_BOTTOM, a roll housing above.
     d0, d1 = DOOR_X
     b.box_mesh("jamb", (d0 - 0.02, 0.5 * DOOR_TOP, ROOM_Z1 - 0.1), (0.14, DOOR_TOP, 0.2), "plaster")
     b.box_mesh("jamb", (d1 + 0.02, 0.5 * DOOR_TOP, ROOM_Z1 - 0.1), (0.14, DOOR_TOP, 0.2), "plaster")
     b.box_mesh("lintel", (0.5 * (d0 + d1), DOOR_TOP + 0.01, ROOM_Z1 - 0.1), (d1 - d0 + 0.2, 0.04, 0.2), "plaster")
     for x in (d0 + 0.02, d1 - 0.02):
-        b.cube((x, 0.5 * (DOOR_SLATS_BOTTOM + DOOR_TOP), ROOM_Z1 - 0.14), (0.05, DOOR_TOP - DOOR_SLATS_BOTTOM, 0.08), "paint_grey")
+        b.box_mesh("door_guide", (x, 0.5 * (DOOR_SLATS_BOTTOM + DOOR_TOP), ROOM_Z1 - 0.14), (0.05, DOOR_TOP - DOOR_SLATS_BOTTOM, 0.08), "rust_frame")
     slats = A.mesh("door_slats", lambda: corrugated(d1 - d0 - 0.06, DOOR_TOP - DOOR_SLATS_BOTTOM))
     b.ply(slats, G.translate((0.5 * (d0 + d1), DOOR_SLATS_BOTTOM, ROOM_Z1 - 0.15)), "door_slats", prefix="slats")
-    b.cube((0.5 * (d0 + d1), DOOR_TOP - 0.12, ROOM_Z1 - 0.2), (d1 - d0 - 0.06, 0.2, 0.2), "paint_grey")
-    b.cube((0.5 * (d0 + d1), DOOR_SLATS_BOTTOM - 0.015, ROOM_Z1 - 0.15), (d1 - d0 - 0.06, 0.03, 0.06), "paint_grey")
+    b.box_mesh("door_hood", (0.5 * (d0 + d1), DOOR_TOP - 0.12, ROOM_Z1 - 0.2), (d1 - d0 - 0.06, 0.2, 0.2), "rust_frame")
+    b.box_mesh("door_bottom", (0.5 * (d0 + d1), DOOR_SLATS_BOTTOM - 0.015, ROOM_Z1 - 0.15), (d1 - d0 - 0.06, 0.03, 0.06), "rust_frame")
     # Outside: yard, the facing building with an aircon unit, and ground to the horizon (sunsky needs it).
     b.rect(G.compose(G.translate((0, -0.02, 0)), G.rotate((1, 0, 0), -90), G.scale((400.0, 400.0, 1))), "ground")
     b.rect(G.compose(G.translate((0, 0.005, 0.5 * (ROOM_Z1 + 14.0))), G.rotate((1, 0, 0), -90), G.scale((12.0, 0.5 * (14.0 - ROOM_Z1), 1))), "yard")
     b.rect(G.compose(G.translate((0, 4.0, 14.0)), G.rotate((0, 1, 0), 180), G.scale((12.0, 4.0, 1))), "brick_far")
-    put(b, "exterior_aircon_unit", (2.2, 0.0, 13.6), yaw=180.0)
+    put(b, "exterior_aircon_unit", (2.2, 0.0, 13.6), yaw=180.0)        # outside on the facing building only
     put(b, "Barrel_02", (-0.6, 0.0, 12.8))
+    # Yard dressing, so the view out of the door is not a flat bright field.
+    put(b, "modular_chainlink_fence", (0.5, 0.0, 10.5))
+    put(b, "utility_box_02", (-2.6, 0.0, 9.2), yaw=180.0)
+    put(b, "street_lamp_02", (4.2, 0.0, 8.0), yaw=-90.0)
+    put(b, "rusted_wheel_rim_02", (0.9, 0.0, 6.2), pre=G.rotate((1, 0, 0), 90), yaw=40.0)
+    put(b, "wooden_barrels_01", (-4.5, 0.0, 12.0), yaw=10.0)
+    put(b, "metal_trash_can", (-1.9, 0.0, 4.0))
 
 
 # ----------------------------------------------------------------------------
@@ -233,7 +247,8 @@ def add_room(b: SceneBuilder) -> None:
 # ----------------------------------------------------------------------------
 
 BENCH_TALL = ["Drill_01", "lubricant_spray", "spray_paint_bottles_02", "oil_tin", "cleaner_tin_01", "can_rusted", "small_oil_can_01",
-              "brass_blowtorch", "metal_toolbox", "hand_plane_no4", "spray_paint_bottles", "measuring_tape_01"]
+              "brass_blowtorch", "metal_toolbox", "hand_plane_no4", "spray_paint_bottles", "measuring_tape_01",
+              "vintage_hand_drill", "propane_torch_02", "ammo_box", "retro_multimeter"]
 # (asset, pre-rotation) for tools lying on the bench; Poly Haven models them upright (thin along z) or already flat.
 BENCH_FLAT = [("adjustable_wrench", FLAT), ("cross_pein_hammer", FLAT), ("flathead_screwdriver", FLAT), ("pliers", FLAT),
               ("ratchet_wrench", FLAT), ("pipe_wrench", FLAT), ("combination_wrench", None), ("tongue_groove_pliers", None),
@@ -260,21 +275,19 @@ def add_bench(b: SceneBuilder, local: Assets, ctx: BuildContext) -> None:
     m, M = put(b, "drill_press_01", (BENCH_X1 - 0.28, BENCH_Y, bz0 + 0.33), yaw=-20.0)
     b.focus_points["bench_drill"] = (top_of(m, M) - np.array([0, 0.3, 0])).tolist()
     pc = A.meshes("parts_cabinet", W.parts_cabinet)
-    b.part_set(pc, G.translate((BENCH_X0 + 0.75, BENCH_Y, bz0 + 0.12)), {"frame": "paint_grey", "fronts": "bin_yellow", "pulls": "steel_plain"})
+    b.part_set(pc, G.translate((BENCH_X0 + 0.75, BENCH_Y, bz0 + 0.12)), {"frame": "cabinet_frame", "fronts": "bin_yellow", "pulls": "steel_plain"})
     b.focus_points["parts_cabinet"] = [BENCH_X0 + 0.75, BENCH_Y + 0.18, bz0 + 0.2]
-    can = A.meshes("coffee_can", lambda: W.paint_can(0.055, 0.15))
+    # A reused cleaner tin full of scanned screwdrivers, standing at random tilts.
     cx, cz = BENCH_X0 + 1.55, bz0 + 0.3
-    b.part_set(can, G.translate((cx, BENCH_Y, cz)), {"can": "can_tin", "handle": "steel_plain"})
+    m, M = put(b, "cleaner_tin_01", (cx, BENCH_Y, cz))
+    tin_top = top_of(m, M)[1]
     r3 = rng_for(ctx, 12)
-    handles = ["grip_red", "grip_blue", "grip_yellow", "grip_green", "grip_orange", "grip_black"]
-    for k in range(6):
-        sd = A.meshes("sd_100", lambda: W.screwdriver(0.1, True))
-        a = float(r3.uniform(0, 360))
-        tilt = float(r3.uniform(4, 22))
-        off = float(r3.uniform(0.0, 0.025))
-        m_ = G.compose(G.translate((cx + off * np.cos(np.radians(a)), BENCH_Y + 0.025, cz + off * np.sin(np.radians(a)))), G.rotate((0, 1, 0), a),
-                       G.rotate((0, 0, 1), -tilt), G.rotate((0, 0, 1), 90))
-        b.part_set(sd, m_, {"steel": "tool_steel", "handle": handles[int(r3.integers(0, 6))]})
+    for k in range(5):
+        aid = ("screwdriver", "flathead_screwdriver")[k % 2]
+        a, tilt = float(r3.uniform(0, 360)), float(r3.uniform(4, 16))
+        off = float(r3.uniform(0.0, 0.018))
+        put(b, aid, (cx + off * np.cos(np.radians(a)), tin_top - 0.1, cz + off * np.sin(np.radians(a))),
+            pre=G.compose(G.rotate((0, 1, 0), a), G.rotate((0, 0, 1), tilt)), scale=float(r3.uniform(0.85, 1.1)))
 
     # Seed-chosen clutter: tall things along the back, tools lying in two rows at the front.
     r = rng_for(ctx, 13)
@@ -325,17 +338,17 @@ def add_bench(b: SceneBuilder, local: Assets, ctx: BuildContext) -> None:
 def add_car(b: SceneBuilder, ctx: BuildContext) -> None:
     A = b.assets
     cx, cz = CAR_AT
-    m, M = put(b, "covered_car", (cx, 0.0, cz), yaw=180.0)
+    # Converter v4 splits the car into two parts; the 4k-triangle one renders as a flat orange slab over the body, and
+    # before v4 it was silently overwritten by the cover, which is the look that was approved. Keep only the cover.
+    m, M = put(b, "covered_car", (cx, 0.0, cz), yaw=180.0, overrides={"covered_car": {"type": "null"}})
     t = top_of(m, M)
     b.focus_points["car"] = [cx, t[1] - 0.1, cz + 0.4]
     b.focus_points["car_rear"] = [cx, 0.8, cz - 2.1]
     put(b, "tire_pump", (cx - 1.25, 0.0, cz + 1.9), yaw=30.0)
-    lx, lz = 1.05, -2.35
-    b.ply(A.mesh("wl_cable", lambda: W.drooping_cable((0, 0, 0), (0.0, -0.75, 0.0), 0.0, 0.0045, 10)), G.translate((lx, 3.38, lz)), "black_matt", prefix="wl")
-    wl = A.meshes("work_light", W.caged_work_light)
-    b.part_set(wl, G.translate((lx, 2.55, lz)), {"cage": "steel_plain", "body": "paint_yellow"})
-    b.sphere((lx, 2.46, lz), 0.026, "emitter_backing", emission=WORKLIGHT, prefix="wl_bulb")
-    b.focus_points["work_light"] = [lx, 2.5, lz]
+    lx, lz = cx + 0.05, cz + 1.3
+    b.focus_points["work_light"] = hanging_bulb(b, lx, lz, 2.5, WORKLIGHT)
+    m, M = put(b, "ceiling_fan", (cx, ROOM_H - 0.53, cz - 0.6))
+    b.focus_points["ceiling_fan"] = top_of(m, M).tolist()
 
 
 # ----------------------------------------------------------------------------
@@ -369,6 +382,18 @@ def add_left_side(b: SceneBuilder, ctx: BuildContext) -> None:
     b.focus_points["storage_cart"] = [ROOM_X0 + 0.6, 1.0, 0.95]
     put(b, "portable_welding_cart", (ROOM_X0 + 0.5, 0.0, 2.4), yaw=90.0 + float(r.uniform(-10, 10)))
     put(b, "propane_tank", (ROOM_X0 + 1.15, 0.0, 2.55))
+    put(b, "small_lpg_tank", (ROOM_X0 + 1.4, 0.0, 1.95), yaw=float(r.uniform(0, 360)))
+    put(b, "rubber_boots", (ROOM_X0 + 2.0, 0.0, 1.7), yaw=float(r.uniform(-40, 40)))
+    put(b, "old_gas_mask", (ROOM_X0 + 0.08, 1.45, 0.45), yaw=90.0)
+    put(b, "utility_box_01", (ROOM_X0 + 0.22, 0.0, -0.15), yaw=90.0)
+    put(b, "wooden_ladder_02", (ROOM_X0 + 0.45, 0.0, -1.25), yaw=90.0)
+    put(b, "plastic_broom", (ROOM_X0 + 0.12, 0.0, ROOM_Z1 - 0.1), pre=G.rotate((0, 0, 1), 9.0), yaw=45.0)
+    put(b, "dustpan", (ROOM_X0 + 1.1, 0.0, ROOM_Z1 - 0.2), yaw=float(r.uniform(0, 360)))
+    m, M = put(b, "worn_metal_rack", (-2.2, 0.0, ROOM_Z1 - 0.32), yaw=180.0)
+    for top, gap in shelf_levels(m, M):
+        fill_line(b, rng_for(ctx, 41), "kit" if top > 1.0 else "crates", top, -2.62, -1.78, ROOM_Z1 - 0.32, axis="x",
+                  max_h=min(gap - 0.04, 0.4), max_d=0.55)
+    b.focus_points["front_rack"] = [-2.2, 1.0, ROOM_Z1 - 0.32]
 
 
 # ----------------------------------------------------------------------------
@@ -383,38 +408,105 @@ SHELF_STOCK = {
 }
 
 
-def fill_shelf(b: SceneBuilder, r, kind: str, top: float, z0: float, z1: float) -> None:
-    """Pack scanned stock along one shelf from z0 to z1; the shelf is 0.43 m deep along x."""
-    z = z0 + 0.03
+def fill_line(b: SceneBuilder, r, kind: str, top: float, a0: float, a1: float, fixed: float, axis: str = "z",
+              max_h: float = 0.4, max_d: float = 0.44) -> None:
+    """Pack scanned stock along one shelf from a0 to a1 (along z, or x for a rack on the front wall); `fixed` is
+    the shelf's centre on the other horizontal axis, `max_d` its usable depth."""
+    a = a0 + 0.03
     pool = SHELF_STOCK[kind]
     tries = 0
-    while z < z1 and tries < 12:
+    while a < a1 and tries < 12:
         tries += 1
         aid = pool[int(r.integers(0, len(pool)))]
         m = WA.model(aid)
         fp = footprint(m)
-        yaw = 90.0 if fp[0] > fp[2] else 0.0
-        dx, dz = (fp[2], fp[0]) if yaw else (fp[0], fp[2])
-        if dx > 0.44 or fp[1] > 0.4 or z + dz > z1:
+        if axis == "z":
+            yaw = 90.0 if fp[0] > fp[2] else 0.0
+            depth, run = (fp[2], fp[0]) if yaw else (fp[0], fp[2])
+        else:
+            yaw = 90.0 if fp[2] > fp[0] else 0.0
+            depth, run = (fp[0], fp[2]) if yaw else (fp[2], fp[0])
+        if depth > max_d or fp[1] > max_h or a + run > a1:
             continue
-        put(b, aid, (SHELF_X + float(r.uniform(-0.03, 0.03)), top, z + dz / 2), yaw=yaw + float(r.choice([0.0, 180.0])) + float(r.uniform(-8, 8)))
-        z += dz + 0.03
+        jitter = float(r.uniform(-0.03, 0.03))
+        at = (fixed + jitter, top, a + run / 2) if axis == "z" else (a + run / 2, top, fixed + jitter)
+        put(b, aid, at, yaw=yaw + float(r.choice([0.0, 180.0])) + float(r.uniform(-8, 8)))
+        a += run + 0.03
+
+
+def read_ply_xyz(path: str) -> np.ndarray:
+    raw = open(path, "rb").read()
+    head, _, body = raw.partition(b"end_header\n")
+    n = int(head.split(b"element vertex ")[1].split()[0])
+    return np.frombuffer(body, dtype="<f4", count=n * 8).reshape(n, 8)[:, :3].astype(float)
+
+
+def shelf_levels(m, M) -> list[tuple[float, float]]:
+    """(world height of each shelf's top surface, clear height above it) for a scanned shelf unit placed by M.
+
+    A shelf is a 1 cm band of vertices spanning most of the unit's width and depth."""
+    p = np.concatenate([read_ply_xyz(part.ply) for part in m.parts])
+    lo, hi = p.min(0), p.max(0)
+    span = hi - lo
+    ys = np.round((p[:, 1] - lo[1]) / 0.01).astype(int)
+    tops = []
+    for k in np.unique(ys):
+        q = p[ys == k]
+        if (np.ptp(q[:, 0]) > 0.7 * span[0]) and (np.ptp(q[:, 2]) > 0.7 * span[2]) and len(q) > 8:
+            tops.append(float(q[:, 1].max()))
+    levels = []
+    for y in sorted(tops):
+        if levels and y - levels[-1] < 0.12:
+            levels[-1] = y
+        else:
+            levels.append(y)
+    world = [float((M @ np.array([0.0, y, 0.0, 1.0]))[1] - (M @ np.array([0.0, lo[1], 0.0, 1.0]))[1]) for y in levels]
+    world = [w for w in world if w > 0.05]
+    gaps = [b_ - a for a, b_ in zip(world, world[1:])] + [0.45]
+    return [(w + 0.004, g) for w, g in zip(world, gaps) if g > 0.15]
+
+
+def hanging_bulb(b: SceneBuilder, x: float, z: float, y: float, radiance) -> list:
+    """A scanned pull-chain socket on a cable from the roof, a scanned bulb under it, and a sphere emitter at the bulb.
+
+    The bulb's glass parts are made `null`: glass blocks next-event estimation, and the emitter sphere is the filament."""
+    s = WA.model("pull_chain_light_socket")
+    WA.add(b, s, wplace(s, (x, y, z)))
+    b.ply(b.assets.mesh(f"bulb_cable_{ROOM_H - y:.2f}".replace(".", "p"), lambda: W.drooping_cable((0, 0, 0), (0.0, -(ROOM_H - 0.08 - y - footprint(s)[1]), 0.0), 0.0, 0.004, 6)),
+          G.translate((x, ROOM_H - 0.08, z)), "black_matt", prefix="bulb_cable")
+    bulb = WA.model("lightbulb_01")
+    glass = {p.name: {"type": "null"} for p in bulb.parts
+             if "glass" in p.name.lower() or p.bsdf.get("type", "") in ("dielectric", "thindielectric", "roughdielectric")}
+    h = footprint(bulb)[1]
+    WA.add(b, bulb, wplace(bulb, (x, y - h + 0.01, z), pre=G.rotate((1, 0, 0), 180.0)), prefix="web_bulb", overrides=glass)
+    c = (x, y - h * 0.62, z)
+    b.sphere(c, 0.045, "emitter_backing", emission=radiance, prefix="bulb_glow")
+    return list(c)
 
 
 def add_right_side(b: SceneBuilder, ctx: BuildContext) -> None:
     A = b.assets
     r = rng_for(ctx, 5)
-    bay = A.meshes("shelving_bay", W.shelving_bay)
-    face = G.rotate((0, 1, 0), -90.0)
-    for z in SHELF_Z:
-        b.part_set(bay, G.compose(G.translate((SHELF_X, 0.0, z)), face), {"post": "shelf_post", "shelf": "shelf_plate"})
     r2 = rng_for(ctx, 51)
     kinds = ["crates", "boxes", "cans", "kit"]
-    for z in SHELF_Z:
-        for li, y in enumerate(SHELF_LEVELS):
-            kind = "boxes" if li == len(SHELF_LEVELS) - 1 else kinds[int(r2.integers(0, len(kinds)))]
-            fill_shelf(b, r2, kind, y + 0.008, z - 0.47, z + 0.47)
-    b.focus_points["shelving"] = [SHELF_X - 0.2, 1.06, SHELF_Z[1]]
+    units = [("steel_frame_shelves_01", -5.35), ("steel_frame_shelves_01", -4.2), ("worn_metal_rack", -3.1)]
+    for aid, z in units:
+        m = WA.model(aid)
+        s = ASSET_SCALE.get(aid, 1.0)
+        dx = footprint(m)[2] * s                  # depth after the quarter turn
+        x = ROOM_X1 - 0.03 - dx / 2
+        M = wplace(m, (x, 0.0, z), yaw=90.0, scale=s)
+        WA.add(b, m, M)
+        length = footprint(m)[0] * s
+        levels = shelf_levels(m, M)
+        for li, (top, gap) in enumerate(levels):
+            kind = "boxes" if li == len(levels) - 1 else kinds[int(r2.integers(0, len(kinds)))]
+            fill_line(b, r2, kind, top, z - length / 2 + 0.04, z + length / 2 - 0.04, x, axis="z", max_h=min(gap - 0.04, 0.4), max_d=dx - 0.04)
+    b.focus_points["shelving"] = [ROOM_X1 - 0.45, 1.06, -4.2]
+    put(b, "wooden_crate_02", (ROOM_X1 - 1.0, 0.0, -2.0), yaw=90.0)
+    m = WA.model("wooden_military_crate")
+    m2 = WA.model("wooden_crate_02")
+    WA.add(b, m, wplace(m, (ROOM_X1 - 1.0, footprint(m2)[1], -2.0), yaw=95.0))
     barrels = ["Barrel_01", "Barrel_02", "barrel_03"]
     for k, (x, z) in enumerate(((3.45, -1.05), (3.45, -0.4), (2.85, -0.75))):
         put(b, barrels[(ctx.seed + k) % 3], (x + float(r.uniform(-0.03, 0.03)), 0.0, z), yaw=float(r.uniform(0, 360)))
@@ -425,7 +517,15 @@ def add_right_side(b: SceneBuilder, ctx: BuildContext) -> None:
     put(b, "wooden_broom", (ROOM_X1 - 0.12, 0.0, -1.75), pre=G.rotate((0, 0, 1), 8.0), yaw=90.0)
     m, M = put(b, "tool_cart", (ROOM_X1 - 0.43, 0.0, 0.75), yaw=90.0)
     b.focus_points["tool_cart"] = top_of(m, M).tolist()
-    put(b, "metal_tool_chest", (ROOM_X1 - 0.4, 0.0, 1.95), yaw=-90.0)
+    put(b, "small_oil_can_01", (ROOM_X1 - 0.45, top_of(m, M)[1], 0.45), yaw=float(r.uniform(0, 360)))
+    put(b, "retro_multimeter", (ROOM_X1 - 0.45, top_of(m, M)[1], 1.0), yaw=-90.0)
+    m, M = put(b, "metal_tool_chest", (ROOM_X1 - 0.4, 0.0, 1.95), yaw=-90.0)
+    put(b, "boombox", (ROOM_X1 - 0.4, top_of(m, M)[1], 1.95), yaw=-90.0)
+    put(b, "dartboard", (ROOM_X1 - 0.03, 1.55, 0.75), yaw=-90.0)
+    put(b, "modular_electric_cables", (ROOM_X1 - 0.12, ROOM_H - 0.85, 0.9), yaw=-90.0)
+    lean_out = G.rotate((1, 0, 0), 10.0)
+    put(b, "rusted_spade_01", (3.15, 0.0, ROOM_Z1 - 0.12), pre=lean_out)
+    put(b, "picke_dirty_01", (3.45, 0.0, ROOM_Z1 - 0.12), pre=lean_out)
     b.focus_points["tool_chest"] = [ROOM_X1 - 0.5, 0.5, 1.95]
     put(b, "korean_fire_extinguisher_01", (ROOM_X1 - 0.22, 0.0, 2.72), yaw=-90.0)
 
@@ -446,8 +546,10 @@ def add_floor_props(b: SceneBuilder, ctx: BuildContext) -> None:
     for k in range(3):
         m, M = put(b, "cement_bag", (1.45 + float(r.uniform(-0.04, 0.04)), y, ROOM_Z0 + 0.45), yaw=90.0 + float(r.uniform(-12, 12)))
         y = top_of(m, M)[1] - 0.01
-    put(b, "compost_bag_02", (2.2, 0.0, ROOM_Z0 + 0.4), yaw=float(r.uniform(-20, 20)))
-    m, M = put(b, "portable_generator", (2.55, 0.0, -4.7), yaw=80.0)
+    put(b, "compost_bag_02", (2.1, 0.0, -5.0), yaw=float(r.uniform(-20, 20)))
+    m, M = put(b, "old_military_compressor", (2.6, 0.0, ROOM_Z0 + 0.42), yaw=90.0)
+    b.focus_points["compressor"] = top_of(m, M).tolist()
+    m, M = put(b, "portable_generator", (2.95, 0.0, -4.7), yaw=80.0)
     b.focus_points["generator"] = top_of(m, M).tolist()
     put(b, "metal_stool_02", (-2.0 + float(r.uniform(-0.25, 0.25)), 0.0, -4.7), yaw=float(r.uniform(0, 360)))
     put(b, "hand_truck", (-0.55, 0.0, ROOM_Z1 - 0.35), pre=G.rotate((1, 0, 0), 8.0), yaw=180.0)
@@ -457,7 +559,10 @@ def add_floor_props(b: SceneBuilder, ctx: BuildContext) -> None:
     m, M = put(b, "old_tyre", (-0.75, 0.0, -1.35), pre=lie, yaw=float(r.uniform(0, 360)))
     put(b, "rusted_wheel_rim_01", (-0.75, top_of(m, M)[1] - 0.12, -1.35), pre=lie)
     b.focus_points["spare_wheel"] = [-0.75, 0.2, -1.35]
-    b.box_mesh("drip_tray", (CAR_AT[0] - 0.2, 0.012, CAR_AT[1] + 1.6), (0.8, 0.024, 0.5), "paint_grey")
+    b.box_mesh("drip_tray", (CAR_AT[0] - 0.2, 0.012, CAR_AT[1] + 1.6), (0.8, 0.024, 0.5), "rust_paint")
+    put(b, "wall_clock", (1.5, 2.95, ROOM_Z1 - 0.03), yaw=180.0)
+    put(b, "fire_alarm", (3.35, 1.45, ROOM_Z1 - 0.02), yaw=180.0)
+    hanging_bulb(b, 1.5, ROOM_Z1 - 1.0, 2.75, DOOR_BULB)
     put(b, "plastic_crate_03", (-0.55, 0.0, -0.45), yaw=float(r.uniform(-30, 30)))
     put(b, "plastic_jerrycan", (BENCH_X1 + 0.25, 0.0, BENCH_Z1 - 0.2), yaw=float(r.uniform(0, 360)))
 
@@ -480,40 +585,56 @@ def corrugated(width: float, height: float, pitch: float = 0.075, amp: float = 0
 
 
 def add_beams_and_lights(b: SceneBuilder, ctx: BuildContext) -> None:
+    """Roof structure: rusty I-beams across, steel purlins along, under the corrugated sheets; ducts, pipes and cables;
+    scanned 4-tube fluorescent panels bolted to the beams, each with one rectangular emitter just under it."""
     A = b.assets
     beam = A.mesh("ibeam8", lambda: W.i_beam(8.0))
-    fix = A.meshes("batten", W.tube_light)
-    rng = rng_for(ctx, 6)
     for z in (-5.0, -3.0, -1.0, 1.0, 2.7):
-        b.ply(beam, G.translate((0.0, ROOM_H, z)), "paint_grey", prefix="beam")
+        b.ply(beam, G.translate((0.0, ROOM_H, z)), "rust_paint", prefix="beam")
+    for x in np.arange(-3.5, 3.51, 1.0):
+        b.box_mesh("purlin_9m", (float(x), ROOM_H - 0.05, 0.5 * (ROOM_Z0 + ROOM_Z1)), (0.05, 0.1, 9.0), "purlin")
+    panel = WA.model("mounted_fluorescent_lights")
+    th = footprint(panel)[1]
+    w_, d_ = footprint(panel)[0], footprint(panel)[2]
     for z in (-5.0, -3.0, -1.0, 1.0, 2.7):
         for x in (-2.1, 2.1):
-            y = ROOM_H - 0.3
-            b.part_set(fix, G.translate((x, y, z)), {"housing": "fixture"})
-            # One emitter per fixture standing in for its two tubes: 20 emitters instead of 40, so next-event estimation
-            # finds the right one twice as often, which matters most for glossy metal that mirrors a light.
-            b.rect(G.compose(G.translate((x, y - 0.003, z)), G.rotate((1, 0, 0), 90), G.scale((0.72, 0.045, 1))),
-                   "emitter_backing", emission=TUBE, prefix="tube", power=1.44 * 0.09 * luminance(TUBE))
-            for dx in (-0.6, 0.6):                                            # hanging chains to the beam
-                b.ply(A.mesh("chain_short", lambda: W.chain(0.28, 0.03, 0.016, 0.0028)), G.translate((x + dx, ROOM_H - 0.2, z)), "black_matt", prefix="chain")
+            y = ROOM_H - 0.22 - th
+            WA.add(b, panel, wplace(panel, (x, y, z)))
+            # Emitter 2 mm under the panel, standing in for its tubes behind a diffuser; same power as the old battens.
+            b.rect(G.compose(G.translate((x, y - 0.002, z)), G.rotate((1, 0, 0), 90), G.scale((0.46 * w_, 0.44 * d_, 1))),
+                   "emitter_backing", emission=PANEL, prefix="tube", power=0.92 * w_ * 0.88 * d_ * luminance(PANEL))
+            # Real fittings spill some light up through their vents; without it the roof reads black from below.
+            b.rect(G.compose(G.translate((x, y + th + 0.003, z)), G.rotate((1, 0, 0), -90), G.scale((0.46 * w_, 0.44 * d_, 1))),
+                   "emitter_backing", emission=tuple(0.1 * c for c in PANEL), prefix="uplight",
+                   power=0.1 * 0.92 * w_ * 0.88 * d_ * luminance(PANEL))
     # Drooping cables tied along the beams, with a yellow extension lead.
     cab = A.mesh("cable_a", lambda: W.drooping_cable((0, 0, 0), (3.2, 0.0, 0.0), 0.35, 0.006))
     b.ply(cab, G.translate((-3.9, 3.38, -3.9)), "black_matt", prefix="cable")
     cab2 = A.mesh("cable_b", lambda: W.drooping_cable((0, 0, 0), (2.6, 0.0, 0.0), 0.28, 0.007))
     b.ply(cab2, G.translate((1.3, 3.38, -1.5)), "cable_yellow", prefix="cable")
     b.ply(A.mesh("cable_c", lambda: W.drooping_cable((0, 0, 0), (0.0, -0.55, 1.6), 0.15, 0.005)), G.translate((-3.0, 3.38, -0.2)), "black_matt", prefix="cable")
+    # Round duct along the left side under the roof, pipe run high on the back wall, a caged pendant over the left bay.
+    duct = WA.model("modular_airduct_circular_01")
+    WA.add(b, duct, wplace(duct, (ROOM_X0 + 0.95, ROOM_H - 0.12 - footprint(duct)[1], -2.6), yaw=90.0))
+    pipes = WA.model("modular_industrial_pipes_01")
+    WA.add(b, pipes, wplace(pipes, (2.0, ROOM_H - 0.1 - footprint(pipes)[1], ROOM_Z0 + 0.03 + footprint(pipes)[2] / 2)))
+    cage = WA.model("caged_hanging_light")
+    WA.add(b, cage, wplace(cage, (-2.4, ROOM_H - footprint(cage)[1], 0.7)))
 
 
-def ply_extent(paths: list[str]) -> tuple[float, float, float, float]:
-    """(xmin, xmax, ymin, ymax) of binary little-endian PLYs written by procedural.Mesh.write_ply (8 float32 per vertex)."""
-    lo, hi = np.array([np.inf, np.inf]), np.array([-np.inf, -np.inf])
-    for path in paths:
-        raw = open(path, "rb").read()
-        head, _, body = raw.partition(b"end_header\n")
-        n = int(head.split(b"element vertex ")[1].split()[0])
-        xy = np.frombuffer(body, dtype="<f4", count=n * 8).reshape(n, 8)[:, :2]
-        lo, hi = np.minimum(lo, xy.min(0)), np.maximum(hi, xy.max(0))
-    return float(lo[0]), float(hi[0]), float(lo[1]), float(hi[1])
+# (asset, pre-rotation, scales): every pegboard tool is scanned; pre turns it to hang long axis up, thin axis off the wall.
+PEG_TOOLS = [
+    ("combination_wrench", G.rotate((1, 0, 0), -90), (0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0)),
+    ("adjustable_wrench", None, (0.6, 0.8, 1.0)),
+    ("pliers", None, (0.9, 1.0)),
+    ("tongue_groove_pliers", G.rotate((1, 0, 0), -90), (0.85, 1.0)),
+    ("cross_pein_hammer", None, (0.9, 1.0)),
+    ("wooden_hammer_01", None, (1.0,)),
+    ("handsaw_wood", G.compose(G.rotate((0, 1, 0), 90), G.rotate((1, 0, 0), -90)), (0.75, 0.9)),
+    ("rusted_hacksaw", G.rotate((0, 0, 1), 90), (1.0,)),
+    ("screwdriver", None, (0.6, 0.75, 0.9, 1.05, 1.2, 1.3)),
+    ("flathead_screwdriver", None, (0.6, 0.75, 0.9, 1.05)),
+]
 
 
 def add_pegboard(b: SceneBuilder, ctx: BuildContext) -> None:
@@ -523,49 +644,32 @@ def add_pegboard(b: SceneBuilder, ctx: BuildContext) -> None:
     h = PEG_Y1 - PEG_Y0
     b.box_mesh("pegboard_31x130", (0.5 * (BENCH_X0 + BENCH_X1), 0.5 * (PEG_Y0 + PEG_Y1), ROOM_Z0 + 0.006), (w, h, 0.012), "peg")
     r = rng_for(ctx, 2)
-    handles = ["grip_red", "grip_blue", "grip_yellow", "grip_green", "grip_orange", "grip_black"]
-    pool = []
-    for sz, ln in ((0.008, 0.12), (0.009, 0.125), (0.010, 0.14), (0.011, 0.15), (0.012, 0.16), (0.013, 0.17), (0.014, 0.185), (0.015, 0.19),
-                   (0.016, 0.2), (0.017, 0.21), (0.019, 0.23), (0.021, 0.25)):
-        pool.append((f"pc_{int(sz * 1000)}", lambda sz=sz, ln=ln: W.combination_wrench(sz, ln), -90.0))
-    for sz, ln in ((0.009, 0.12), (0.012, 0.15), (0.014, 0.17), (0.016, 0.19)):
-        pool.append((f"po_{int(sz * 1000)}", lambda sz=sz, ln=ln: W.open_end_wrench(sz, ln), -90.0))
-    pool += [("adj_15", lambda: W.adjustable_spanner(0.15), -90.0), ("adj_25", lambda: W.adjustable_spanner(0.25), -90.0),
-             ("pl_16", lambda: W.pliers(0.16), 90.0), ("pl_20", lambda: W.pliers(0.2), 90.0), ("pl_18", lambda: W.pliers(0.18), 90.0),
-             ("ham_30", lambda: W.hammer(0.3), 90.0), ("ham_36", lambda: W.hammer(0.36), 90.0), ("ham_26", lambda: W.hammer(0.26), 90.0),
-             ("saw_45", lambda: W.handsaw(0.45), -90.0), ("saw_55", lambda: W.handsaw(0.55), -90.0), ("hack", W.hacksaw, -90.0)]
-    for i, sh in enumerate((0.08, 0.09, 0.1, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.19, 0.21)):
-        pool.append((f"sd_{int(sh * 1000)}", lambda sh=sh: W.screwdriver(sh, i % 3 != 0, 0.0095 + 0.0002 * i), 90.0))
+    pool = [(aid, pre, s) for aid, pre, scales in PEG_TOOLS for s in scales]
     order = [pool[int(i)] for i in r.permutation(len(pool))]
     slots = 28                                  # 0.1 m wide; tools wider than WIDE take two neighbouring slots
     WIDE = 0.075
     x_slot = lambda k: BENCH_X0 + 0.1 + k * 0.1
     cursor = [PEG_Y1 - 0.06] * slots
-    mats = {"steel": "tool_steel", "wood": "wood_handle"}
     placed = 0
-    for name, build, rotz in order * 6:
-        parts = A.meshes(f"pegtool_{name}", build)
-        xmin, xmax, ymin, ymax = ply_extent(list(parts.values()))
-        ext, wide = xmax - xmin, (ymax - ymin) > WIDE
-        free = lambda s: min(cursor[s], cursor[s + 1]) if wide else cursor[s]
-        cand = [s for s in range(slots - (1 if wide else 0)) if free(s) - ext > PEG_Y0 + 0.05]
+    for aid, pre, s in order * 4:
+        m = WA.model(aid)
+        fp = footprint(m, pre) * s
+        ext, wide = fp[1], fp[0] > WIDE
+        free = lambda k: min(cursor[k], cursor[k + 1]) if wide else cursor[k]
+        cand = [k for k in range(slots - (1 if wide else 0)) if free(k) - ext > PEG_Y0 + 0.05]
         if not cand:
             continue
         k = max(cand, key=free)
         top = free(k)
-        top_local = -xmin if rotz < 0 else xmax
-        oy = top - top_local
         cx = x_slot(k) + (0.05 if wide else 0.0) + float(r.uniform(-0.008, 0.008))
-        m = G.compose(G.translate((cx, oy, zs + 0.016)), G.rotate((0, 0, 1), rotz + float(r.uniform(-2.5, 2.5))))
-        grip = handles[int(r.integers(0, 6))]
-        b.part_set(parts, m, {**mats, "grip": grip, "handle": grip})
+        tilt = G.compose(G.rotate((0, 0, 1), float(r.uniform(-2.5, 2.5))), pre if pre is not None else np.eye(4))
+        WA.add(b, m, wplace(m, (cx, top - ext, zs + fp[2] / 2 + 0.004), pre=tilt, scale=s))
         b.ply(A.mesh("hook_pin", W.hook_pin), G.translate((cx, top - 0.012, zs)), "steel_plain", prefix="hook")
-        for s in ((k, k + 1) if wide else (k,)):
-            cursor[s] = top - ext - 0.03
+        for q in ((k, k + 1) if wide else (k,)):
+            cursor[q] = top - ext - 0.03
         placed += 1
         if placed == 12:
-            b.focus_points["pegboard_tools"] = [cx, top - 0.1, zs + 0.02]
-    # Shadow-board style outlines would be next; a shelf under the pegboard holds nothing here.
+            b.focus_points["pegboard_tools"] = [cx, top - ext / 2, zs + 0.02]
 
 
 def build(ctx: BuildContext) -> SceneBundle:
@@ -594,7 +698,7 @@ SCENE = SceneDef(
         # Close on the bench and the lower half of the pegboard.
         "bench": View((-2.85, 1.42, -3.2), (-2.85, 1.3, -5.9), focus="vise"),
         # Along the shop floor past the covered car, shelving on the right, the bench far behind.
-        "along": View((-1.7, 1.5, 2.4), (-0.4, 0.9, -3.6), focus="car"),
+        "along": View((-1.5, 1.5, 2.4), (-0.4, 0.9, -3.6), focus="car"),
         # Back toward the roller door from beside the car.
         "door": View((-1.9, 1.6, -4.3), (1.2, 1.15, 3.0), focus="work_light"),
         # Across to the stocked shelving and barrels on the right wall.
@@ -606,7 +710,8 @@ SCENE = SceneDef(
     camera_box=((-3.0, 0.9, -4.9), (3.0, 2.1, 2.7)),
     target_box=((-3.8, 0.0, -5.9), (3.9, 2.4, 3.0)),
     exclude_boxes=(
-        ((-0.05, 0.0, -4.95), (2.05, 1.7, -0.15)),   # covered car
+        ((0.35, 0.0, -4.95), (2.45, 1.7, -0.15)),    # covered car
+        ((-2.75, 0.0, 2.2), (-1.65, 2.0, 3.0)),       # rack on the front wall
         ((-3.0, 0.0, 0.1), (-2.6, 1.6, 2.7)),        # storage and welding carts
         ((-0.95, 0.0, 2.2), (-0.1, 1.6, 2.7)),       # hand truck
     ),
@@ -614,6 +719,6 @@ SCENE = SceneDef(
     lens_mm=(24.0, 90.0),
     tags=("indoor", "artificial_light", "clutter", "metal", "specular"),
     default_seed=5,
-    asset_version=3,
+    asset_version=4,
     spp_hint=2048,
 )
