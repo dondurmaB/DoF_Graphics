@@ -94,3 +94,11 @@ Mitsuba cafe verified locally (`metal_ad_rgb`, M4 Max):
 - macOS OpenGL support is deprecated by Apple, though it remains suitable for this educational/research demo.
 - Runtime behavior depends on the current machine's OpenGL context and windowing environment; the current native smoke test passed on this machine, but future machines should rerun `--verify`.
 - Glass caustics in the Mitsuba scene converge slowly under unidirectional path tracing; DoF-pass references need 2048+ spp.
+
+## 2026-10-17 — Mitsuba DoF dataset scenes (renderer/mitsuba)
+
+- Work done: all ten artificial training scenes now use pinned CC0 web assets per `renderer/mitsuba/scenes/substitutions/<scene>.md` (statuses DONE/REVERTED per row). Committed today: workshop, museum, desk, pool, night_street (terminal, cafe, courtyard, greenhouse, rooftop earlier). `remote_run.sh` now detaches cluster steps so VPN drops do not kill renders; `pick_variant` refuses a silent LLVM fallback on GPU nodes; `web_assets` warns on mis-scaled assets.
+- Verification: per scene on the cluster — `check_scene.py` (0 failures on all five), `audit_poses.py` contact sheets for sampler seeds 0 and 1, `sampler.py --dry-run` (0 failed samples); local `tests/test_scene_api.py` passes.
+- State: pushed to `origin/ray-work`; viewers run as srun steps on the `dof-render` allocation (GPU memory fits ~8 viewers).
+- Risks: per-`mi.render` tracing overhead is ~10 s on workshop (0.5–1 s elsewhere); `dr.freeze` cuts it to 0.04 s in isolation but failed to record through `render_beauty` (memcpy_async / uncaptured variable) and was reverted. Open GPU viewers can starve render jobs of memory.
+- Next: fix frozen rendering before A100 bulk generation; val/test/test_ood scenes from the other author; haze, coc_valid, sharding.
