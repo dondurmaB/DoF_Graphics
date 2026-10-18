@@ -32,6 +32,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import render as R  # noqa: E402
+import lens_trace as LT  # noqa: E402
 import scene_api as S  # noqa: E402
 
 RESOLUTIONS = {"640x360": (640, 360), "960x540": (960, 540), "1280x720": (1280, 720)}
@@ -140,9 +141,14 @@ class Renderer(threading.Thread):
         w, h = RESOLUTIONS[self.state.res]
         sc = self.state.scene
         self.scene_dict["integrator"] = {"type": "path", "max_depth": min(sc.max_depth, 10), "rr_depth": min(sc.rr_depth, 5)}
+        # Two cameras: the thin lens for DoF mode, a pinhole for everything else. The pinhole render goes through
+        # dr.freeze (see _render); thin-lens renders fail to record, so DoF mode pays the per-call tracing cost.
         self.scene_dict["sensor"] = self.state.lens().sensor(w, h, 1, thin_lens=True)
+        self.scene_dict["sensor_pin"] = self.state.lens().sensor(w, h, 1, thin_lens=False)
         self.scene = mi.load_dict(self.scene_dict)
         self.params = mi.traverse(self.scene)
+        cams = {s.id(): s for s in self.scene.sensors()}
+        self.thin, self.pin = cams["sensor"], cams["sensor_pin"]
         self.aov = mi.load_dict({"type": "aov", "aovs": "t:depth,pos:position"})
 
     def run(self) -> None:
@@ -162,6 +168,9 @@ class Renderer(threading.Thread):
             if res != res_applied:
                 w, h = RESOLUTIONS[res]
                 self.params["sensor.film.size"] = mi.ScalarVector2u(w, h)
+                pin = mi.traverse(self.pin)  # the scene's parameters expose only the first sensor's film
+                pin["film.size"] = mi.ScalarVector2u(w, h)
+                pin.update()
                 self.params.update()
                 res_applied, applied_key = res, None
             if key != applied_key:
@@ -191,8 +200,10 @@ class Renderer(threading.Thread):
                 self.stats["status"] = "converged"
                 time.sleep(0.03)
                 continue
-            chunk = 1 if spp < 4 else (4 if spp < 64 else 16)
-            img = np.asarray(mi.render(self.scene, spp=chunk, seed=seed), dtype=np.float64)[..., :3]
+            # One chunk size, so lens_trace records a single frozen kernel (two ~10 s warm-up calls on a heavy
+            # scene, then ~5 ms per call).
+            chunk = 4
+            img = LT.trace(self.scene, lens, w, h, chunk, seed, aperture=(mode == "dof")).astype(np.float64)
             seed += 1
             accum = img * chunk if accum is None else accum + img * chunk
             spp += chunk
@@ -202,6 +213,28 @@ class Renderer(threading.Thread):
                 last_push, shown = now, view
 
     # --- helpers (render thread only) -----------------------------------
+    def _render(self, chunk: int, seed: int, integrator=None):
+        """Pinhole mi.render through dr.freeze. Retracing the path tracer costs ~10 s per call on scenes with a
+        few hundred materials (workshop), which held the viewer to 0.1 spp/s; a frozen call replays the recorded
+        kernel (0.04 s, identical pixels). Camera changes are opaque sensor parameters, so they reach the replay.
+        Falls back to plain mi.render if recording fails."""
+        mi, dr = self.mi, self.dr
+        frozen = self.__dict__.setdefault("_frozen", {})
+        key = (chunk, integrator is None, str(self.params["sensor.film.size"]))
+        if frozen.get(key) is False:
+            return mi.render(self.scene, sensor=self.pin, integrator=integrator, spp=chunk, seed=seed)
+        fn = frozen.get(key)
+        if fn is None:
+            fn = frozen[key] = dr.freeze(lambda scene, sensor, seed, integrator, n=chunk: mi.render(
+                scene, sensor=sensor, integrator=integrator, spp=n, seed=seed))
+        try:
+            return fn(self.scene, self.pin, mi.UInt32(seed % 2 ** 32), integrator or self.scene.integrator())
+        except RuntimeError as exc:
+            print(f"viewer: frozen render failed ({str(exc).splitlines()[0][:160]}); using plain mi.render",
+                  flush=True)
+            frozen[key] = False
+            return mi.render(self.scene, sensor=self.pin, integrator=integrator, spp=chunk, seed=seed)
+
     def _show(self, rgb, mode, depth, optics: R.Lens, exposure, spp, rate) -> None:
         rgb = rgb.astype(np.float32)
         if mode == "trad":
@@ -216,24 +249,19 @@ class Renderer(threading.Thread):
         fov_x = math.degrees(2 * math.atan(math.tan(math.radians(lens.fov_y) / 2) * w / h))
         to_world = mi.ScalarTransform4f().look_at(origin=lens.origin.tolist(), target=lens.target.tolist(),
                                                   up=[0, 1, 0])
-        p["sensor.to_world"] = mi.Transform4f(to_world.matrix)
-        p["sensor.x_fov"] = mi.Float(fov_x)
+        for cam in ("sensor", "sensor_pin"):
+            p[f"{cam}.to_world"] = mi.Transform4f(to_world.matrix)
+            p[f"{cam}.x_fov"] = mi.Float(fov_x)
         p["sensor.focus_distance"] = mi.Float(lens.focus_m)
         p["sensor.aperture_radius"] = mi.Float(max(lens.aperture_radius, 1e-7))
-        for k in ("sensor.x_fov", "sensor.focus_distance", "sensor.aperture_radius", "sensor.to_world"):
+        for k in ("sensor.x_fov", "sensor.focus_distance", "sensor.aperture_radius", "sensor.to_world",
+                  "sensor_pin.x_fov", "sensor_pin.to_world"):
             dr.make_opaque(p[k])
         p.update()
 
     def _render_depth(self, lens: R.Lens, seed: int) -> np.ndarray:
-        """Planar depth from a pinhole pass (aperture shrunk just for this call)."""
-        mi, dr, p = self.mi, self.dr, self.params
-        p["sensor.aperture_radius"] = mi.Float(1e-7)
-        dr.make_opaque(p["sensor.aperture_radius"])
-        p.update()
-        img = np.asarray(mi.render(self.scene, integrator=self.aov, spp=1, seed=seed), dtype=np.float32)
-        p["sensor.aperture_radius"] = mi.Float(max(lens.aperture_radius, 1e-7))
-        dr.make_opaque(p["sensor.aperture_radius"])
-        p.update()
+        """Planar depth from a pinhole pass."""
+        img = np.asarray(self._render(1, seed, self.aov), dtype=np.float32)
         hit = img[..., 0] > 0
         d = np.einsum("hwc,c->hw", img[..., 1:4] - lens.origin.astype(np.float32), lens.forward.astype(np.float32))
         return np.where(hit, d, np.inf)
