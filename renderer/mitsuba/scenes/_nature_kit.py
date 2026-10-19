@@ -149,19 +149,46 @@ class Library:
             self.sheets[aid] = sheet
         return self.sheets[aid]
 
-    def plant(self, aid, k, at, yaw=0.0, height=None, scale=1.0, tilt=(0.0, 0.0), overrides=None):
+    def plant(self, aid, k, at, yaw=0.0, height=None, scale=1.0, tilt=(0.0, 0.0), overrides=None, tag=""):
         """Variant k of a sheet, base at `at`, scaled to `height` (or by `scale`), leaned by tilt (x, z) degrees."""
         self.variants(aid, overrides)
         k, m, placed = self.matrix(aid, k, at, yaw, height, scale, tilt)
+        self.instance(aid, k, m, tag)
+        return placed
+
+    def instance(self, aid, k, m, tag="") -> None:
+        """Instance variant k of a sheet at matrix m (from `matrix`), with the tagged material set if given."""
+        k %= len(self.variants(aid))
         parts = self.sheets[aid][k][0]
-        group = f"sg_var_{aid}_{k}"
+        group = f"sg_var_{aid}{tag}_{k}"
         if group not in self.b.d:
             self.b.d[group] = {"type": "shapegroup", **{f"part_{i}": {"type": "ply", "filename": path,
-                                                                      "bsdf": {"type": "ref", "id": f"web_{aid}__{name}"}}
+                                                                      "bsdf": {"type": "ref", "id": f"web_{aid}{tag}__{name}"}}
                                                        for i, (name, path) in enumerate(parts.items())}}
         self.b.d[self.b._key(f"inst_var_{aid}")] = {"type": "instance", "shapegroup": {"type": "ref", "id": group},
                                                     "to_world": xf(m)}
-        return placed
+
+    def material_set(self, aid, tag, transform) -> None:
+        """Register a second set of materials for a scanned model, ids web_<aid><tag>__<part>, each the scan's
+        BSDF passed through `transform` (for example a clear coat for wet stones). Plants placed with the same
+        tag use them; untagged placements keep the scan's own materials."""
+        import copy
+        m = W.model(aid)
+        for p in m.parts:
+            mid = f"web_{aid}{tag}__{p.name}"
+            if mid not in self.b.d:
+                self.b.material(mid, transform(copy.deepcopy(p.bsdf)))
+
+    def top_point(self, aid, k, m) -> list[float]:
+        """World position of the highest vertex of variant k placed by matrix m: a point on the real surface,
+        so a focus point there passes the sampler's visibility test (a surface pixel within 0.15 m)."""
+        key = (aid, k % len(self.variants(aid)))
+        if not hasattr(self, "_tops"):
+            self._tops = {}
+        if key not in self._tops:
+            ps = np.concatenate([H.read_ply(q).p for q in self.variants(aid)[key[1]][0].values()])
+            self._tops[key] = ps[np.argmax(ps[:, 1])]
+        return (np.asarray(m) @ np.append(self._tops[key], 1.0))[:3].tolist()
 
     def matrix(self, aid, k, at, yaw=0.0, height=None, scale=1.0, tilt=(0.0, 0.0)):
         """(variant index, placement matrix, placed height) for variant k of a sheet, as `plant` places it."""
@@ -196,9 +223,10 @@ class Batch:
     def __init__(self, lib: Library):
         self.lib, self.items = lib, []
 
-    def plant(self, aid, k, at, yaw=0.0, height=None, scale=1.0, tilt=(0.0, 0.0)) -> float:
+    def plant(self, aid, k, at, yaw=0.0, height=None, scale=1.0, tilt=(0.0, 0.0), tag="") -> float:
         k, m, placed = self.lib.matrix(aid, k, at, yaw, height, scale, tilt)
-        self.items.append((aid, k, m))
+        self.items.append((aid, k, m, tag))
+        self.last = (aid, k, m)
         return placed
 
     def flush(self, assets: Assets, key: str) -> None:
@@ -206,14 +234,16 @@ class Batch:
 
         def build():
             cache, acc = {}, {}
-            for aid, k, m in items:
+            for aid, k, m, tag in items:
                 for name, path in self.lib.variants(aid)[k][0].items():
                     if path not in cache:
                         cache[path] = H.read_ply(path)
-                    acc.setdefault(f"web_{aid}__{name}", []).append(cache[path].transformed(m))
+                    acc.setdefault(f"web_{aid}{tag}__{name}", []).append(cache[path].transformed(m))
             return {mat: _concat(meshes) for mat, meshes in acc.items()}
 
-        for mat, path in assets.meshes(key, build).items():
+        # Sorted, so a cold build (meshes in creation order) and a warm one (cache files, which glob returns
+        # sorted) number the shapes alike and give the same fingerprint.
+        for mat, path in sorted(assets.meshes(key, build).items()):
             self.lib.b.ply(path, np.eye(4), mat, prefix="batch")
         self.items = []
 
