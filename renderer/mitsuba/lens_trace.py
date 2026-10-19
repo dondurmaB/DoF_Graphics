@@ -19,6 +19,30 @@ import math
 import numpy as np
 
 _FROZEN: dict = {}
+_WARMED: set = set()
+
+
+def _warm(scene) -> None:
+    """Sample every area emitter once outside the recording.
+
+    A bitmap-textured emitter (desk's monitor, museum's exit sign) builds its sampling distribution lazily on
+    first use; built inside a recording, that copy reads memory the recording does not know ("Tried to record
+    a memcpy_async operation, but the source pointer ... is unknown").
+    """
+    import drjit as dr
+    import mitsuba as mi
+
+    if id(scene) in _WARMED:
+        return
+    for shape in scene.shapes():
+        if shape.is_emitter():
+            em = shape.emitter()
+            ps, _ = em.sample_position(0.0, mi.Point2f(0.5, 0.5))
+            si = dr.zeros(mi.SurfaceInteraction3f)
+            si.p, si.n, si.uv = ps.p, ps.n, ps.uv
+            ds, weight = em.sample_direction(si, mi.Point2f(0.5, 0.5))
+            dr.eval(ps.p, ds.d, weight)
+    _WARMED.add(id(scene))
 
 
 def _kernel(scene, integrator, seed, cam, w: int, h: int, spp: int):
@@ -62,6 +86,7 @@ def trace(scene, lens, w: int, h: int, spp: int, seed: int, integrator=None, ape
     import mitsuba as mi
 
     integrator = integrator or scene.integrator()
+    _warm(scene)
     right = np.cross(lens.forward, lens.up)
     right /= np.linalg.norm(right)
     up = np.cross(right, lens.forward)
