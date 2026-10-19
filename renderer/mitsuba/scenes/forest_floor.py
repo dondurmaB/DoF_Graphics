@@ -11,7 +11,8 @@ Layout, meters, y up, the hero cameras look toward -z:
   foreground   a fern patch at (-1.4, 1.2) and a mossy boulder at (1.3, -1.0)
   midground    a stump at (-2.0, -6.0); ferns, shrubs and rocks scattered through the wood
   background   a fallen log from (-5.0, -12.0) to (3.5, -15.0), then scanned trees to ~55 m
-  backdrop     a sparser belt of trees to ~95 m, then a dark woodland band at 100 m
+  backdrop     a sparser belt of trees to ~95 m, then far woodland at 100 m: a dark band whose top follows a
+               lumpy skyline frayed by leaf clusters, all geometry so depth and image agree
 Light is only `env_kit`'s sun and sky; the sun is high (55 degrees) and to the right of and behind the
 hero cameras, so it never appears in their frames and comes through the crowns as flecks on the floor.
 
@@ -33,12 +34,11 @@ import numpy as np
 import env_kit
 import procedural as G
 from scene_api import BuildContext, SceneBundle, SceneDef, View
-from scene_kit import Assets, SceneBuilder, principled, rgb
+from scene_kit import Assets, SceneBuilder, bitmap, principled, rgb
 from scenes import _nature_kit as N
-from scenes import _pool_props as PP
 import web_assets as W
 
-ASSET_VERSION = 1
+ASSET_VERSION = 2                                       # 2: geometric skyline backdrop replaces the sawtooth band
 EYE = np.eye(4)
 SUN = env_kit.default_sun_direction(55.0, 70.0)
 SKY_SCALE = {"clear": 22.0, "overcast": 50.0, "wet": 70.0}
@@ -56,6 +56,9 @@ LOG = ((-5.0, -12.0), (3.5, -15.0), 0.33)                # start, end, radius
 NEAR_TREES = [(-4.8, 4.6), (5.1, 2.2), (-5.3, -3.4), (4.6, -5.6), (-1.0, -9.6)]
 LANDMARKS = [(-3.0, -24.0), (5.5, -36.0)]               # fixed mid and far trees, focus targets
 CLEARING = ((-6.5, -10.5), (6.5, 7.5))                  # random trees stay out of this
+# Far woodland at 100 m: an opaque band whose top follows a lumpy skyline, frayed by leaf clusters (no alpha).
+BACKDROP = {"centre": (0.0, -20.0), "radius": 100.0, "y0": -6.0, "y_tex": 22.0, "tile": 30.0}
+SKYLINE = N.Skyline(61, BACKDROP["radius"], base=13.0, spread=4.0)
 
 
 def rng_for(ctx: BuildContext, k: int) -> np.random.Generator:
@@ -74,14 +77,18 @@ def add_materials(b: SceneBuilder, ctx: BuildContext) -> None:
     # The scan's mean albedo (0.096) read as pale sand in full sun; 0.55 brings it to dark humus (~0.053).
     b.material("litter", surf("brown_mud_leaves_01", LITTER_DARKEN * (0.65 if wet else 1.0), wet))
     b.material("bark", surf("bark_brown_02", 0.65 if wet else 1.0, wet))
-    b.material("backdrop", {"type": "twosided", "bsdf": principled((0.035, 0.05, 0.03), 0.9)})
+    alb = b.assets.texture("backdrop_albedo_v2", lambda: N.backdrop_albedo(61, BACKDROP["tile"], BACKDROP["y0"], BACKDROP["y_tex"]))
+    b.material("backdrop", {"type": "twosided", "bsdf": principled(bitmap(alb), 0.9)})
+    b.material("backdrop_leaf", {"type": "twosided", "bsdf": principled((0.010, 0.018, 0.006), 0.85)})
 
 
 def add_ground(b: SceneBuilder) -> None:
     b.ply(b.assets.mesh(f"terrain_v{ASSET_VERSION}", TERRAIN.mesh), EYE, "litter", prefix="ground")
-    ring = G.compose(G.translate((0.0, -5.0, -20.0)))
-    b.ply(b.assets.mesh("backdrop_ring", lambda: PP.treeline(100.0, 61, base=19.0, var=4.0)), ring, "backdrop",
-          prefix="backdrop")
+    cx, cz = BACKDROP["centre"]
+    b.ply(b.assets.mesh("backdrop_band", lambda: N.backdrop_band(cx, cz, SKYLINE, BACKDROP["y0"], BACKDROP["y_tex"],
+                                                                  BACKDROP["tile"])), EYE, "backdrop", prefix="backdrop")
+    b.ply(b.assets.mesh("backdrop_fringe", lambda: N.backdrop_fringe(np.random.default_rng(62), cx, cz, SKYLINE)), EYE,
+          "backdrop_leaf", prefix="backdrop_leaf")
 
 
 def tree(L: N.Library, rng, x, z, kind=None) -> tuple[str, float]:

@@ -225,6 +225,111 @@ def _concat(meshes) -> G.Mesh:
 
 
 # --------------------------------------------------------------------------
+# Distant woodland backdrop
+# --------------------------------------------------------------------------
+# All geometry, no alpha: render.py's G-buffer takes the first surface a ray hits and ignores mask opacity,
+# so a masked canopy edge would label sky-hole pixels with the band's depth while the image shows sky.
+
+class Skyline:
+    """Height of the far canopy edge along a ring: a sum of sinusoids in arc length, 60 m down to 0.6 m
+    wavelengths, so the silhouette is lumpy at every scale instead of a few straight-edged teeth."""
+
+    def __init__(self, seed, radius, base=13.0, spread=4.0):
+        rng = np.random.default_rng(seed)
+        self.radius, self.base = radius, base
+        lam = np.array([60.0, 25.0, 9.0, 3.5, 1.4, 0.6])
+        amp = np.array([2.5, 1.6, 0.9, 0.45, 0.22, 0.1]) * spread / 4.0
+        circ = math.tau * radius
+        self.k = np.round(circ / lam) * math.tau / circ          # whole cycles around the ring, so it closes
+        self.amp, self.ph = amp, rng.uniform(0, math.tau, len(lam))
+
+    def top(self, theta):
+        s = np.asarray(theta)[..., None] * self.radius
+        return self.base + (self.amp * np.sin(self.k * s + self.ph)).sum(-1)
+
+
+def backdrop_band(cx, cz, sky: Skyline, y0, y_tex_top, tile_w, step=0.1) -> G.Mesh:
+    """Vertical band (normals inward) around (cx, cz) from y0 up to the skyline, one column every `step` m of
+    arc. u repeats every tile_w metres; v is 0 at y_tex_top and 1 at y0 (Mitsuba puts v = 0 at the image top)."""
+    n = int(math.tau * sky.radius / step)
+    th = np.linspace(0.0, math.tau, n + 1)
+    x, z, top = cx + sky.radius * np.cos(th), cz + sky.radius * np.sin(th), sky.top(th)
+    u = th * sky.radius / tile_w
+    u = u * (round(u[-1]) / u[-1])
+    p = np.concatenate([np.stack([x, np.full_like(x, y0), z], -1), np.stack([x, top, z], -1)])
+    nrm = np.concatenate([np.stack([-np.cos(th), 0 * th, -np.sin(th)], -1)] * 2)
+    v = lambda y: (y_tex_top - y) / (y_tex_top - y0)
+    uv = np.concatenate([np.stack([u, np.ones_like(u)], -1), np.stack([u, v(top)], -1)])
+    return G.Mesh(p, nrm, uv, G._grid_faces(2, n + 1)).oriented()
+
+
+def backdrop_fringe(rng, cx, cz, sky: Skyline, per_m=3.0, depth=(0.5, 4.0)) -> G.Mesh:
+    """Leaf clusters fraying the skyline: irregular 7-sided discs facing the ring centre, scattered from 2.5 m
+    below the edge to 1.5 m above it, thinner higher up, a few metres in front of the band. Sky shows through
+    the real gaps between them."""
+    n = int(math.tau * sky.radius * per_m)
+    th = rng.uniform(0, math.tau, n)
+    dy = rng.uniform(-2.5, 1.5, n)
+    keep = rng.random(n) < np.clip(1.0 - (dy + 2.5) / 4.0, 0.08, 1.0)
+    th, dy = th[keep], dy[keep]
+    r = sky.radius - rng.uniform(*depth, len(th))
+    centre = np.stack([cx + r * np.cos(th), sky.top(th) + dy, cz + r * np.sin(th)], -1)
+    inward = np.stack([-np.cos(th), 0 * th, -np.sin(th)], -1)
+    tangent = np.stack([-np.sin(th), 0 * th, np.cos(th)], -1)
+    size = rng.uniform(0.3, 1.2, len(th))
+    k = 7
+    ang = np.linspace(0, math.tau, k, endpoint=False)[None, :] + rng.uniform(0, math.tau, (len(th), 1))
+    rad = size[:, None] * rng.uniform(0.55, 1.0, (len(th), k))
+    ring = (centre[:, None, :] + rad[..., None] * (np.cos(ang)[..., None] * tangent[:, None, :]
+                                                   + np.sin(ang)[..., None] * np.array([0.0, 1.0, 0.0])))
+    p = np.concatenate([centre[:, None, :], ring], 1).reshape(-1, 3)
+    nrm = np.repeat(inward, k + 1, 0)
+    base = (np.arange(len(th)) * (k + 1))[:, None]
+    f = np.stack([np.zeros(k, int), np.arange(1, k + 1), np.roll(np.arange(1, k + 1), -1)], -1)[None] + base[..., None]
+    uv = np.zeros((len(p), 2))
+    return G.Mesh(p, nrm, uv, f.reshape(-1, 3)).oriented()
+
+
+def _periodic(a: np.ndarray, overlap: int) -> np.ndarray:
+    """Cross-fade the last `overlap` columns into the first ones and drop them, so the image tiles in u."""
+    w = a.shape[1] - overlap
+    ramp = np.linspace(0.0, 1.0, overlap)[None, :]
+    out = a[:, :w].copy()
+    out[:, :overlap] = a[:, w:] * (1 - ramp) + a[:, :overlap] * ramp
+    return out
+
+
+def _srgb(lin):
+    lin = np.clip(lin, 0.0, 1.0)
+    return np.where(lin <= 0.0031308, 12.92 * lin, 1.055 * lin ** (1 / 2.4) - 0.055)
+
+
+def backdrop_albedo(seed: int, tile_w: float, y0: float, y_top: float, ppm: int = 32) -> np.ndarray:
+    """sRGB albedo tile for `backdrop_band`: a dark self-shadowed canopy above 9 m, deep shade with lit trunks
+    below 5 m, blended between. Tiles seamlessly in u."""
+    W, H = int(tile_w * ppm), int((y_top - y0) * ppm)
+    O = W // 6
+    rng = np.random.default_rng(seed)
+    y = y_top - (np.arange(H)[:, None] + 0.5) / ppm
+    clumps = G.fbm(H, W + O, octaves=5, base=16, seed=seed + 2, aspect=(W + O) / H)
+    # Dark on purpose: a forest seen 100 m deep is mostly shade. A vertical band facing the sky catches far
+    # more light than a canopy interior, so its albedo sits well below the near foliage (measured: at 3x
+    # this it read as a pale grey wall between the trunks).
+    canopy = np.stack([0.005 + 0.009 * clumps, 0.009 + 0.014 * clumps, 0.003 + 0.004 * clumps], -1)
+    shade = np.array([0.004, 0.005, 0.003])
+    trunks = np.zeros((1, W + O))
+    for _ in range(int(tile_w / 1.6)):
+        c, w = rng.uniform(0, W + O), rng.uniform(0.25, 0.6) * ppm
+        trunks = np.maximum(trunks, np.clip(1.0 - np.abs(np.arange(W + O)[None, :] - c) / w, 0, 1) ** 0.5
+                            * rng.uniform(0.5, 1.0))
+    bark = np.array([0.010, 0.009, 0.007])                        # trunks only slightly lighter than shade
+    zone = np.clip((9.0 - y) / 4.0, 0.0, 1.0)[..., None]
+    lin = canopy * (1 - zone) + (shade + (bark - shade) * trunks[..., None]) * zone
+    out = _periodic(_srgb(lin).transpose(2, 0, 1).reshape(3 * H, W + O), O).reshape(3, H, W).transpose(1, 2, 0)
+    return out.astype(np.float32)
+
+
+# --------------------------------------------------------------------------
 # Procedural pieces
 # --------------------------------------------------------------------------
 def log_axis(rng, length, radius, rings=24):
