@@ -1,8 +1,9 @@
 """Loader for the DoF dataset, implementing ai/DATA_PROTOCOL.md.
 
-One example is `x` [4, H, W] (sharp RGB in model space + signed CoC / COC_NORM), `y` [3, H, W] (DoF RGB in
-model space), `mask` [1, H, W] (coc_valid) and `meta`. Model space is log(1 + radiance * auto_exposure_scale);
-`from_model` inverts it. The numpy core has no framework dependency; `DofDataset` wraps it for PyTorch.
+One example is `x` [10, H, W] (sharp RGB in model space, inverse depth, 6 camera settings as constant planes),
+`y` [3, H, W] (DoF RGB in model space), `settings` [6] and `meta`. Model space is
+log(1 + radiance * auto_exposure_scale); `from_model` inverts it. The numpy core has no framework dependency;
+`DofDataset` wraps it for PyTorch.
 
     from ai.data import find_samples, load_example
     samples = find_samples("dataset/mitsuba", split="train")
@@ -24,13 +25,12 @@ import numpy as np
 REPO = Path(__file__).resolve().parent.parent
 SPLITS = REPO / "renderer" / "mitsuba" / "scenes" / "splits.json"
 
-COC_NORM = 16.0            # px; channel 3 of x is CoC / COC_NORM
 CROP = 512
 HFLIP_PROB = 0.5
 ROT90_PROB = 0.1           # sideways pictures break gravity and sun cues (SCENE_CONTRACT.md section 7)
 VFLIP_PROB = 0.1
 MIN_DEPTH_M = 0.05
-COC_P95_FRAC = (0.0005, 0.04)   # the sampler's target range for p95 |CoC| / image height
+SETTINGS = ("log_focal_50mm", "log_fnumber_4", "log_aperture_10mm", "inv_focus_m", "sensor_24mm", "frame_1080px")
 
 
 @dataclass
@@ -96,10 +96,10 @@ def from_model(t: np.ndarray, exposure_scale: float = 1.0) -> np.ndarray:
     return (np.expm1(t) / exposure_scale).astype(np.float32)
 
 
-def check(sharp, dof, depth, coc, height: int) -> list[str]:
+def check(sharp, dof, depth) -> list[str]:
     """Data problems that make a sample unusable (DATA_PROTOCOL.md section 6); empty when fine."""
     problems = []
-    for name, a in (("sharp", sharp), ("dof", dof), ("coc", coc)):
+    for name, a in (("sharp", sharp), ("dof", dof)):
         if not np.all(np.isfinite(a)):
             problems.append(f"{name} has NaN or inf")
     if np.any(np.isnan(depth)):
@@ -107,36 +107,39 @@ def check(sharp, dof, depth, coc, height: int) -> list[str]:
     finite = depth[np.isfinite(depth)]
     if finite.size and finite.min() < MIN_DEPTH_M:
         problems.append(f"depth {finite.min():.3f} m < {MIN_DEPTH_M} m")
-    p95 = float(np.percentile(np.abs(coc), 95)) / height
-    lo, hi = COC_P95_FRAC
-    if not lo * 0.5 <= p95 <= hi * 2:
-        problems.append(f"CoC p95 {p95:.4f} of image height is far outside [{lo}, {hi}]")
     m_s, m_d = float(sharp.mean()), float(dof.mean())
     if abs(m_d - m_s) > 0.05 * max(m_s, 1e-6):
         problems.append(f"mean(dof) {m_d:.4g} differs from mean(sharp) {m_s:.4g} by more than 5%")
     return problems
 
 
+def settings_vector(meta: dict) -> np.ndarray:
+    """The 6 normalised camera settings of DATA_PROTOCOL.md section 1, in SETTINGS order."""
+    cam = meta["camera"]
+    f, n, s = cam["focal_length_mm"], cam["f_number"], cam["focus_distance_m"]
+    return np.array([np.log(f / 50.0), np.log(n / 4.0), np.log(f / n / 10.0), 1.0 / s,
+                     cam["sensor_height_mm"] / 24.0, meta["resolution"][1] / 1080.0], np.float32)
+
+
 def load_example(sample: Sample, crop: int | None = CROP, rng: np.random.Generator | None = None,
                  augment: bool = True, validate: bool = False) -> dict:
-    """x [4, H, W], y [3, H, W], mask [1, H, W] float32 and meta. crop=None keeps the full frame."""
+    """x [10, H, W], y [3, H, W], settings [6] float32 and meta. crop=None keeps the full frame."""
     rng = rng or np.random.default_rng()
     meta = json.loads((sample.lens_dir / "metadata.json").read_text())
     scale = float(sample.entry.get("auto_exposure_scale")
                   or json.loads((sample.pose_dir / "pose.json").read_text())["auto_exposure_scale"])
     sharp = read_exr(sample.pose_dir / "sharp.exr")
     dof = read_exr(sample.lens_dir / "dof.exr")
-    coc = np.load(sample.lens_dir / "coc.npy").astype(np.float32)
-    mask_path = sample.pose_dir / "coc_valid.npy"
-    mask = np.load(mask_path).astype(np.float32) if mask_path.exists() else np.ones(coc.shape, np.float32)
-    h, w = coc.shape
+    depth = np.load(sample.pose_dir / "depth.npy").astype(np.float32)
+    h, w = depth.shape
     if validate:
-        problems = check(sharp, dof, np.load(sample.pose_dir / "depth.npy"), coc, h)
+        problems = check(sharp, dof, depth)
         if problems:
             raise ValueError(f"{sample.lens_dir}: " + "; ".join(problems))
 
-    # Order fixed by the protocol: colour transform, crop, flips / rot90, CoC normalisation.
-    planes = np.concatenate([to_model(sharp, scale), coc[..., None], mask[..., None], to_model(dof, scale)], -1)
+    # Order fixed by the protocol: colour transform and inverse depth, crop, flips / rot90, settings planes.
+    inv_depth = np.where(np.isfinite(depth), 1.0 / np.maximum(depth, MIN_DEPTH_M), 0.0).astype(np.float32)
+    planes = np.concatenate([to_model(sharp, scale), inv_depth[..., None], to_model(dof, scale)], -1)
     if crop is not None:
         if h < crop or w < crop:
             raise ValueError(f"{sample.lens_dir}: {w}x{h} is smaller than the {crop} crop")
@@ -152,15 +155,15 @@ def load_example(sample: Sample, crop: int | None = CROP, rng: np.random.Generat
             k = int(rng.choice([1, 3]))
             planes, ops = np.rot90(planes, k), ops + [f"rot90x{k}"]
     planes = np.ascontiguousarray(planes.transpose(2, 0, 1))      # HWC -> CHW
-    x = planes[0:4].copy()
-    x[3] /= COC_NORM
+    settings = settings_vector(meta)
+    x = np.concatenate([planes[0:4], np.broadcast_to(settings[:, None, None], (6, *planes.shape[1:]))])
     cam = meta["camera"]
     info = {"sample_id": meta["sample_id"], "scene": sample.scene, "env": sample.env,
-            "focal_mm": cam["focal_length_mm"], "f_number": cam["f_number"], "focus_m": cam["focus_distance_m"],
-            "coc_p95_frac": sample.entry.get("coc_p95_frac"), "stratum": sample.entry.get("stratum"),
-            "auto_exposure_scale": scale, "has_coc_valid": mask_path.exists(), "augment": ops,
-            "lens_dir": str(sample.lens_dir)}
-    return {"x": x, "y": planes[5:8].copy(), "mask": planes[4:5].copy(), "meta": info}
+            "focal_mm": cam["focal_length_mm"], "f_number": cam["f_number"],
+            "aperture_mm": cam["focal_length_mm"] / cam["f_number"], "focus_m": cam["focus_distance_m"],
+            "sensor_mm": cam["sensor_height_mm"], "frame_px": meta["resolution"][1],
+            "auto_exposure_scale": scale, "augment": ops, "lens_dir": str(sample.lens_dir)}
+    return {"x": x.astype(np.float32), "y": planes[4:7].copy(), "settings": settings, "meta": info}
 
 
 def DofDataset(root, split="train", crop=CROP, augment=True, seed=0, scenes=None):
@@ -181,7 +184,7 @@ def DofDataset(root, split="train", crop=CROP, augment=True, seed=0, scenes=None
             rng = np.random.default_rng([self.seed, i, info.id if info else 0, torch.initial_seed() % 2 ** 32])
             ex = load_example(self.samples[i], crop, rng, augment)
             return {"x": torch.from_numpy(ex["x"]), "y": torch.from_numpy(ex["y"]),
-                    "mask": torch.from_numpy(ex["mask"]), "meta": ex["meta"]}
+                    "settings": torch.from_numpy(ex["settings"]), "meta": ex["meta"]}
 
     return _Dof()
 
@@ -197,7 +200,8 @@ def main(argv=None) -> int:
         print(f"no finished samples under {args.root} for split {args.split}")
         return 1
     rng = np.random.default_rng(0)
-    bad, per_scene, stats = 0, {}, {"x_rgb": [], "coc": [], "y": [], "mask": []}
+    bad, per_scene, stats = 0, {}, {"x_rgb": [], "inv_depth": [], "y": []}
+    settings = []
     for s in samples:
         try:
             ex = load_example(s, args.crop, rng, augment=True, validate=True)
@@ -205,17 +209,21 @@ def main(argv=None) -> int:
             bad += 1
             print("BAD", e)
             continue
-        assert ex["x"].shape == (4, args.crop, args.crop) and ex["y"].shape == (3, args.crop, args.crop)
-        assert ex["mask"].shape == (1, args.crop, args.crop)
+        assert ex["x"].shape == (10, args.crop, args.crop) and ex["y"].shape == (3, args.crop, args.crop)
+        assert np.allclose(ex["x"][4:].mean((1, 2)), ex["settings"])
         per_scene[s.scene] = per_scene.get(s.scene, 0) + 1
         stats["x_rgb"].append(ex["x"][:3].mean())
-        stats["coc"].append(np.percentile(np.abs(ex["x"][3]), 95))
+        stats["inv_depth"].append(ex["x"][3].max())
         stats["y"].append(ex["y"].mean())
-        stats["mask"].append(ex["mask"].mean())
+        settings.append(ex["settings"])
     print(f"{len(samples)} samples, {bad} bad | per scene {per_scene}")
     for k, v in stats.items():
         if v:
             print(f"  {k}: mean {np.mean(v):.3f}  min {np.min(v):.3f}  max {np.max(v):.3f}")
+    if settings:
+        a = np.stack(settings)
+        for i, name in enumerate(SETTINGS):
+            print(f"  {name}: min {a[:, i].min():.3f}  max {a[:, i].max():.3f}")
     return 1 if bad else 0
 
 
