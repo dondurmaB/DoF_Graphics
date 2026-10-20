@@ -38,17 +38,66 @@ class StreamTerrain(N.Terrain):
         s = t * t * (3 - 2 * t)
         floor = (WATER_Y - BED_DEPTH) * (1 - s) + (WATER_Y + 0.12) * s
         side = 0.06 * np.maximum(d - 2.0, 0.0) + 0.012 * np.maximum(d - 2.0, 0.0) ** 1.5   # valley walls
-        return np.where(d < BANK, floor, WATER_Y + 0.12 + side + (valley - self.base) * np.clip((d - BANK) / 3, 0, 1))
+        outside = WATER_Y + 0.12 + side + (valley - self.base) * np.clip((d - BANK) / 3, 0, 1)
+        # The valley's undulation must not dip the banks below the water outside the channel: those hollows
+        # would be dry ground below the waterline (mud-coloured, and with no water in them).
+        return np.where(d < BANK, floor, np.maximum(outside, WATER_Y + SHORE_TOP + 0.02))
 
 
-def split_by_height(mesh: G.Mesh, y_split: float) -> dict[str, G.Mesh]:
-    """{'bed': faces whose centroid is below y_split, 'bank': the rest} with unused vertices dropped."""
-    c = mesh.p[mesh.f].mean(1)[:, 1]
-    out = {}
-    for name, keep in (("bed", c < y_split), ("bank", c >= y_split)):
-        used, inv = np.unique(mesh.f[keep], return_inverse=True)
-        out[name] = G.Mesh(mesh.p[used], mesh.n[used], mesh.uv[used], inv.reshape(-1, 3))
-    return out
+BED_TOP = -0.08          # mud below this, relative to the water: always under water, even in a ripple trough
+SHORE_TOP = 0.04         # wet mud from BED_TOP up to this, relative to the water; litter or snow above
+
+
+def _drop_unused(p, n, uv, f) -> G.Mesh:
+    used, inv = np.unique(f, return_inverse=True)
+    return G.Mesh(p[used], n[used], uv[used], inv.reshape(-1, 3))
+
+
+def cut_at_height(mesh: G.Mesh, y: float) -> tuple[G.Mesh, G.Mesh]:
+    """(below, above): the mesh cut exactly along the contour at height y. Triangles that straddle it are split
+    where their edges cross y, so the boundary between the two parts is a smooth contour line, not the
+    staircase of whole grid triangles a per-face split gives (visible as saw teeth where snow meets mud).
+    Crossings are computed once per edge, so the two parts share their boundary vertices."""
+    p, n, uv, f = mesh.p, mesh.n, mesh.uv, mesh.f
+    below = p[:, 1] < y
+    nb = below[f].sum(1)
+    cut = (nb == 1) | (nb == 2)
+    fc = f[cut]
+    # rotate each cut face so its lone vertex (alone on its side of y) comes first; winding is kept
+    lone_is_below = nb[cut] == 1
+    lone = np.where(lone_is_below[:, None], below[fc], ~below[fc]).argmax(1)
+    idx = (lone[:, None] + np.arange(3)[None, :]) % 3
+    a, b_, c = (np.take_along_axis(fc, idx, 1)[:, k] for k in range(3))
+    # one new vertex per crossed edge
+    edges = np.concatenate([np.stack([a, b_], 1), np.stack([a, c], 1)])
+    key = np.sort(edges, 1)
+    uniq, inv = np.unique(key, axis=0, return_inverse=True)
+    inv = inv.reshape(-1)
+    e0, e1 = uniq[:, 0], uniq[:, 1]
+    t = ((y - p[e0, 1]) / (p[e1, 1] - p[e0, 1]))[:, None]
+    newp = p[e0] + t * (p[e1] - p[e0])
+    newn = n[e0] + t * (n[e1] - n[e0])
+    newn /= np.maximum(np.linalg.norm(newn, axis=1, keepdims=True), 1e-12)
+    newuv = uv[e0] + t * (uv[e1] - uv[e0])
+    base = len(p)
+    ab, ac = base + inv[:len(a)], base + inv[len(a):]
+    P, Nn, UV = np.concatenate([p, newp]), np.concatenate([n, newn]), np.concatenate([uv, newuv])
+    tri = np.stack([a, ab, ac], 1)                                   # the lone vertex's side
+    quad = np.concatenate([np.stack([ab, b_, c], 1), np.stack([ab, c, ac], 1)])
+    lb2 = np.concatenate([lone_is_below, lone_is_below])
+    lo = np.concatenate([f[nb == 3], tri[lone_is_below], quad[~lb2]])
+    hi = np.concatenate([f[nb == 0], tri[~lone_is_below], quad[lb2]])
+    return _drop_unused(P, Nn, UV, lo), _drop_unused(P, Nn, UV, hi)
+
+
+def terrain_parts(terrain) -> dict[str, G.Mesh]:
+    """{'bed', 'shore', 'bank'}: the terrain cut along two contours, BED_TOP and SHORE_TOP relative to the water.
+    The only edge the camera sees at the water is where the water surface meets the shore (smooth); the mud of
+    the bed starts under water."""
+    m = terrain.mesh()
+    bed, rest = cut_at_height(m, WATER_Y + BED_TOP)
+    shore, bank = cut_at_height(rest, WATER_Y + SHORE_TOP)
+    return {"bed": bed, "shore": shore, "bank": bank}
 
 
 def water(z0, z1, seed, spacing=0.04, slope_rms=0.12) -> G.Mesh:

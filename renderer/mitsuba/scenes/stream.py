@@ -8,7 +8,10 @@ over the water, backlit leaves on both banks.
 Layout, meters, y up, the stream runs along z and the hero cameras look upstream toward -z:
   water        a flat surface at y = -0.15 (`_stream_props.WATER_Y`) over a bed 0.45 m deeper, meandering
                about x = 0 (two bends, so it turns out of sight upstream); rippled like riffles (rms slope 0.12)
-  banks        rise over 0.7 m from the water's edge, then valley sides climb gently to ~9 m at x = +-60
+  banks        rise over 0.7 m from the water's edge, then valley sides climb gently to ~9 m at x = +-60;
+               the terrain is cut along two contours (`_stream_props.terrain_parts`): mud bed from 8 cm under
+               the water, a wet-mud shore up to 4 cm above it, litter or snow above. Cutting exactly along
+               contours keeps the material edges smooth (a per-face split left saw teeth where snow met mud).
   foreground   a wet boulder in the stream at z = 1.5, a fern bank on the left bank at z = 3
   midground    a fallen log across the stream at z ~ -8, a riffle of stones at z ~ -15
   background   trees on both banks to ~55 m, a sparser belt beyond, then far woodland at 100 m (the same
@@ -37,10 +40,12 @@ from scene_kit import Assets, SceneBuilder, bitmap, principled
 from scenes import _nature_kit as N
 from scenes import _stream_props as P
 
-ASSET_VERSION = 2                     # 2: stones get an opaque principled BSDF instead of the scan's leaf BSDF
+ASSET_VERSION = 3                     # 2: opaque stones; 3: terrain cut along contours (smooth shoreline)
 EYE = np.eye(4)
 SUN = {"clear": env_kit.default_sun_direction(36.0, 160.0), "snow": env_kit.default_sun_direction(24.0, 165.0)}
-SKY_SCALE = {"clear": 14.0, "overcast": 40.0, "snow": 12.0}      # first guesses; calibrated on the preview
+# Calibrated on check_scene previews (6cc21fc): clear 14 gave medians 0.021-0.033, just over the 0.02 floor;
+# snow 12 gave the bank view 0.886, over the 0.5 ceiling. Overcast 40 gave 0.047-0.066.
+SKY_SCALE = {"clear": 26.0, "overcast": 40.0, "snow": 5.5}
 LITTER_DARKEN = 0.55
 
 TERRAIN = P.StreamTerrain(-60.0, 60.0, -90.0, 40.0, spacing=0.25,
@@ -97,6 +102,9 @@ def add_materials(b: SceneBuilder, L: N.Library, ctx: BuildContext) -> None:
     darken = lambda aid, f: W.surface(aid, tint=(f,) * 3)
     b.material("bank", env_kit.ground("snow") if snow else darken("brown_mud_leaves_01", LITTER_DARKEN))
     b.material("bed", darken("brown_mud_02", 0.7))
+    shore = darken("brown_mud_02", 0.5)                                    # wet mud at the water's edge, every env
+    (shore["bsdf"] if shore["type"] == "normalmap" else shore).update(clearcoat=0.6, clearcoat_gloss=0.9)
+    b.material("shore", shore)
     b.material("bark", W.surface("bark_brown_02"))
     # Rough, not smooth: a smooth dielectric reflects the sun as caustics a path tracer finds only by chance;
     # alpha 0.06 keeps the glints small and bright while next-event estimation can still reach them.
@@ -111,9 +119,9 @@ def add_materials(b: SceneBuilder, L: N.Library, ctx: BuildContext) -> None:
 
 
 def add_ground(b: SceneBuilder) -> None:
-    parts = b.assets.meshes(f"stream_terrain_v{ASSET_VERSION}",
-                            lambda: P.split_by_height(TERRAIN.mesh(), P.WATER_Y + 0.02))
+    parts = b.assets.meshes(f"stream_terrain_v{ASSET_VERSION}", lambda: P.terrain_parts(TERRAIN))
     b.ply(parts["bank"], EYE, "bank", prefix="ground")
+    b.ply(parts["shore"], EYE, "shore", prefix="shore")
     b.ply(parts["bed"], EYE, "bed", prefix="bed")
     b.ply(b.assets.mesh(f"stream_water_v{ASSET_VERSION}", lambda: P.water(*WATER_Z, seed=29)), EYE, "water", prefix="water")
     c0, c1 = BACKDROP["centre"]
