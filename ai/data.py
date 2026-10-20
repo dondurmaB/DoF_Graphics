@@ -46,14 +46,15 @@ class Sample:
 
 
 def find_samples(root, split: str | None = "train", scenes=None) -> list[Sample]:
-    """Samples under root/<scene>/s<seed>/<env>/ listed in manifest.jsonl whose pose finished (.done)."""
+    """Samples under root/<scene>/s<seed>/<env>/ listed in manifest*.jsonl whose pose finished (.done)."""
     root = Path(root)
     allowed = set(scenes) if scenes else None
     if split is not None:
         in_split = set(json.loads(SPLITS.read_text())[split])
         allowed = in_split if allowed is None else allowed & in_split
     out = []
-    for manifest in sorted(root.glob("*/s*/*/manifest.jsonl")):
+    seen = set()
+    for manifest in sorted(root.glob("*/s*/*/manifest*.jsonl")):
         env_dir = manifest.parent
         scene, env = env_dir.parent.parent.name, env_dir.name
         if allowed is not None and scene not in allowed:
@@ -63,6 +64,9 @@ def find_samples(root, split: str | None = "train", scenes=None) -> list[Sample]
                 continue
             entry = json.loads(line)
             lens_dir = env_dir / entry["path"]
+            if lens_dir in seen:          # a chunk rerun after a crash can list a sample twice
+                continue
+            seen.add(lens_dir)
             if (lens_dir.parent / ".done").exists() and (lens_dir / "dof.exr").exists():
                 out.append(Sample(lens_dir, scene, env, entry))
     return out

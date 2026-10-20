@@ -275,7 +275,8 @@ Crops are free and preserve everything (the CoC does not depend on the crop).
   `mean(dof) = mean(sharp)` within 1%. There is no denoising unless we decide on
   one later.
 - **Balance [done in `sampler.py` v0].** The target p95 blur (as a fraction of image
-  height, 0.05% to 4%, which is 0.5 to 43 px at 1080p) is drawn log-uniformly from what
+  height, 0.5% to 4%, which is 5.4 to 43 px at 1080p; the floor was 0.05% until a third of the pilot
+  showed no visible blur) is drawn log-uniformly from what
   the pose's focal length and the focus can reach with the allowed f-numbers, then the
   f-number is solved for it. Asking a wide lens for a huge blur is physically
   unreachable, so the achieved distribution is skewed toward mid and large blur

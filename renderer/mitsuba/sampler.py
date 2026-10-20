@@ -15,7 +15,8 @@ Layout (SCENE_CONTRACT.md section 6):
 
   <out>/<scene>/s<seed>/<env>/p<index>_<hash>/{pose.json, depth.npy, gbuffer.exr, sharp.exr,
                                               lens_<hash>/{dof.exr, coc.npy, metadata.json}, .done}
-  <out>/<scene>/s<seed>/<env>/manifest.jsonl
+  <out>/<scene>/s<seed>/<env>/manifest.jsonl     (or --manifest-name: one file per parallel worker,
+                                               so workers never append to the same file over NFS)
 """
 
 from __future__ import annotations
@@ -53,7 +54,8 @@ ROLL_TILT_P, ROLL_TILT_MAX_DEG = 0.3, 45.0
 ROLL_PORTRAIT_JITTER_DEG = 5.0                      # remaining 10%: +-90 degrees, either way
 LENS_MM_GLOBAL = (24.0, 135.0)
 F_NUMBER_GLOBAL = (1.2, 16.0)
-COC_FRAC_RANGE = (0.0005, 0.04)  # target p95 |CoC| as a fraction of image height (0.5 to 43 px at 1080p)
+COC_FRAC_RANGE = (0.005, 0.04)   # target p95 |CoC| as a fraction of image height (5.4 to 43 px at 1080p); the floor
+                                 # was 0.0005 until 2026-10-20, when a third of the pilot had no visible blur (p95 < 3 px)
 COC_BINS = 8
 FOCUS_NAMED_PROB = 0.5
 FOCUS_VISIBLE_TOL_M = 0.15     # a named point counts as visible if a surface pixel lies this close
@@ -201,9 +203,17 @@ def run_sample(index, scene_def, bundle, scene, ctx, args, base: Path, fp: str, 
         origin, target, roll, focal = drawn
         pose_lens = R.Lens(origin, target, focal, S.SENSOR_HEIGHT_MM, 1e5, 1.0, roll, scene_def.far_clip)
         depth, layers, g_sec = R.render_gbuffer(scene, pose_lens, w, h, int(rng.integers(0, 2 ** 31 - 1)))
-        if check_depth(depth, reasons, layers["nn"]) and bright_enough(scene, pose_lens, w, h, rng, reasons):
-            pose = dict(origin=origin, target=target, roll=roll, focal=focal, attempt=k)
-            break
+        if not (check_depth(depth, reasons, layers["nn"]) and bright_enough(scene, pose_lens, w, h, rng, reasons)):
+            continue
+        # A pose whose depth range cannot give a blur inside COC_FRAC_RANGE at any allowed f-number (a wide lens
+        # facing only distant surfaces) would yield a sample below the floor: draw another pose instead.
+        lenses = [draw_lens(scene_def, rng_for(scene_def, args, index, 2 + j), pose_lens, depth, layers["pos"],
+                            bundle.focus_points, h) for j in range(args.lenses_per_pose)]
+        if any(ls["coc_out_of_range"] for ls in lenses):
+            reasons["blur_unreachable"] += 1
+            continue
+        pose = dict(origin=origin, target=target, roll=roll, focal=focal, attempt=k)
+        break
     if pose is None:
         return {"index": index, "failed": True, "reasons": dict(reasons)}
 
@@ -211,9 +221,6 @@ def run_sample(index, scene_def, bundle, scene, ctx, args, base: Path, fp: str, 
                 "origin": np.round(origin, 4).tolist(), "target": np.round(target, 4).tolist(),
                 "roll": round(roll, 3), "focal": round(focal, 3), "res": [w, h]}
     pose_id = f"p{index:06d}_{short_hash(pose_key)[:8]}"
-    lens_rng = rng_for(scene_def, args, index, 1)
-    lenses = [draw_lens(scene_def, rng_for(scene_def, args, index, 2 + j), pose_lens, depth, layers["pos"],
-                        bundle.focus_points, h) for j in range(args.lenses_per_pose)]
     out = {"index": index, "pose_id": pose_id, "reasons": dict(reasons), "lenses": lenses, "pose": pose_key}
     if args.dry_run:
         return out
@@ -273,7 +280,7 @@ def run_sample(index, scene_def, bundle, scene, ctx, args, base: Path, fp: str, 
                          "exposure_gate_ok": pose_meta["exposure_gate_ok"],
                          "auto_exposure_scale": round(pose_meta["auto_exposure_scale"], 5)})
     (pdir / ".done").write_text("")
-    with open(base / "manifest.jsonl", "a") as f:
+    with open(base / args.manifest_name, "a") as f:
         f.write("".join(json.dumps(m) + "\n" for m in manifest))
     return out
 
@@ -295,6 +302,8 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default=str(R.REPO / "dataset" / "mitsuba"))
     ap.add_argument("--assets", default=str(HERE / "generated"))
     ap.add_argument("--dry-run", action="store_true", help="draw and check poses and lenses, render no beauty passes")
+    ap.add_argument("--manifest-name", default="manifest.jsonl",
+                    help="manifest file in the env directory; give each parallel worker its own (manifest.<chunk>.jsonl)")
     args = ap.parse_args(argv)
     args.width, args.height = (int(v) for v in args.res.lower().split("x"))
 
