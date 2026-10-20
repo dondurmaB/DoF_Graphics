@@ -227,6 +227,7 @@ def run_sample(index, scene_def, bundle, scene, ctx, args, base: Path, fp: str, 
     sharp, sharp_sec = R.render_beauty(scene, pose_lens, w, h, False, args.spp, args.spp_per_pass, sharp_seed,
                                        "sharp")
     np.save(pdir / "depth.npy", depth)
+    np.save(pdir / "coc_valid.npy", layers["coc_valid"][..., 0].astype(np.uint8))
     R.write_gbuffer(pdir / "gbuffer.exr", layers)
     write_exr(pdir / "sharp.exr", sharp)
     lum = luminance(sharp)
@@ -235,6 +236,7 @@ def run_sample(index, scene_def, bundle, scene, ctx, args, base: Path, fp: str, 
                  "sharp_median_luminance": float(np.median(lum)),
                  "exposure_gate_ok": bool(0.02 <= np.median(lum) <= 0.5),
                  "auto_exposure_scale": auto_exposure(lum),
+                 "coc_valid_fraction": float(layers["coc_valid"].mean()),
                  "camera": pose_lens.metadata(w, h)}
     (pdir / "pose.json").write_text(json.dumps(pose_meta, indent=2))
 

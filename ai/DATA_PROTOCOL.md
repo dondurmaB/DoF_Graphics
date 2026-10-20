@@ -107,7 +107,7 @@ quantised like a JPEG while the target stays HDR.
 | G-buffer | OpenEXR, float32, 10 named channels | many channels with names in one file |
 | depth | `.npy` float32, meters, `inf` for sky | exact, fast to load |
 | CoC | `.npy` float32, signed pixels | same |
-| `coc_valid` | `.npy` uint8 (todo) | |
+| `coc_valid` | `.npy` uint8, 1 = trust the CoC | per pose |
 | metadata | JSON | |
 | previews | PNG 8-bit sRGB, tone-mapped | looking only, never training |
 
@@ -151,7 +151,7 @@ extrinsics (in `metadata.json`) for camera space, and rotate them with any flip 
 p<index>_<hash>/sharp.exr                  -> x[0:3]
 p<index>_<hash>/lens_<hash>/coc.npy        -> x[3]   (float32 [1080, 1920], signed px)
 p<index>_<hash>/lens_<hash>/dof.exr        -> y
-p<index>_<hash>/lens_<hash>/coc_valid.npy  -> mask   (todo in the renderer; all ones until then)
+p<index>_<hash>/coc_valid.npy              -> mask   (uint8 [1080, 1920]; per pose, shared by its lenses)
 p<index>_<hash>/lens_<hash>/metadata.json  -> auto_exposure_scale, meta
 ```
 
@@ -200,7 +200,10 @@ The val and test scenes never enter this loop, so the selection cannot leak into
       with Mitsuba's own ImageBlock. Checked against `mi.render` on the Cornell box, desk and
       workshop (2026-10-20): difference between methods equals the noise between two renders of
       one method (ratio 0.98 to 1.04, edges too), same per-pixel noise, means within 0.1%.
-- [ ] `coc_valid` mask in the renderer (contract section 7).
+- [x] `coc_valid` mask in the renderer (contract section 7), from the first-hit BSDF flags: 0 where the
+      surface has a specular or glossy lobe and no diffuse one (the rule 9 BSDFs) or is a `null`
+      surface. Measured: pool views 23-50% masked (water), museum case views about 50% (display
+      glass), desk under 5% (monitor stand, keyboard plate).
 - [ ] Measure radiance maxima per scene (decides half vs float32 EXR).
 - [ ] A loader (`ai/data.py`) that implements this file, with a test that loads one sample
       per scene and checks shapes, ranges and `mean(y) ~ mean(x[0:3])`.

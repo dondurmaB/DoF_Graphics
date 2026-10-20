@@ -208,7 +208,7 @@ For each sample (scene, scene seed, env, camera pose and roll, lens, render seed
 dataset/mitsuba/<scene_id>/s<seed>/<env>/
   manifest.jsonl                                          # one line per (pose, lens) sample
   p<index>_<hash>/                                        # a pose: position, target, roll, focal length
-    pose.json, depth.npy, gbuffer.exr, sharp.exr, .done
+    pose.json, depth.npy, coc_valid.npy, gbuffer.exr, sharp.exr, .done
     lens_<hash>/dof.exr, coc.npy, metadata.json           # a lens variant: focus distance, f-number
 ```
 
@@ -232,12 +232,15 @@ formula; timings. `sample_id` hashes only the rounded sampler inputs, not the
 git commit, and each sample's random stream is derived from its ids with
 `SeedSequence`, never drawn from one shared stream. A changed `fingerprint`
 marks old samples stale. **[done in `render.py` and `sampler.py`: metadata, `--roll`, poses, the manifest,
-resume; shared, todo: sharding into archives, `coc_valid`]**
+resume, `coc_valid`; shared, todo: sharding into archives]**
 
 **`coc_valid`.** Depth is the first surface, but behind a mirror, window or glass
 the eye focuses on the virtual image, so analytic CoC is wrong there. The mask
 marks pixels whose first hit has a specular or transmissive BSDF (rule 9), and the
-loss can ignore or down-weight them.
+loss can ignore or down-weight them. **[done]** `coc_valid.npy` (uint8, 1 = trust the CoC) is
+written per pose from the first-hit BSDF flags in the G-buffer kernel (`lens_trace._aov_kernel`):
+0 where the surface has a delta or glossy lobe and no diffuse one, or is a `null` surface
+(invisible, yet depth records it). Rough metal is masked too, which is conservative.
 
 **Augmentation after rendering.** Only horizontal flip and 90-degree rotations
 are applied to finished passes, because they are exact for beauty, depth, CoC and

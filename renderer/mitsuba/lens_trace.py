@@ -14,7 +14,7 @@ Pixel filter: "gaussian" (the default, what the dataset uses) splats every sampl
 with Mitsuba's own ImageBlock and gaussian filter, exactly as mi.render does with the sensor's default film,
 so the images match it in blur and in how noise spreads between neighbours. "box" puts each sample only in
 the pixel it was drawn in: about half a pixel sharper (see ai/DATA_PROTOCOL.md) and slightly faster.
-`trace_aovs` gives one jittered sample per pixel of an AOV integrator, for the G-buffer.
+`trace_aovs` gives one jittered sample per pixel of an AOV integrator, for the G-buffer, plus `coc_valid`.
 """
 
 from __future__ import annotations
@@ -97,7 +97,13 @@ def _kernel(scene, integrator, seed, cam, w: int, h: int, spp: int, rfilter: str
 
 
 def _aov_kernel(scene, integrator, seed, cam, w: int, h: int, channels: int):
-    """Returns (h, w, channels): the AOVs of one jittered sample per pixel."""
+    """Returns (h, w, channels + 1): the AOVs of one jittered sample per pixel, then `coc_valid`.
+
+    `coc_valid` is 0 where the first hit is a mirror, glass or water surface (a specular or glossy lobe and
+    no diffuse one: conductor, roughconductor, dielectric, thindielectric, roughdielectric, the BSDFs of
+    SCENE_CONTRACT.md rule 9) or an invisible `null` surface, so the eye sees something other than the
+    surface whose depth is recorded and the analytic CoC is wrong. Sky and every other surface give 1.
+    """
     import drjit as dr
     import mitsuba as mi
 
@@ -105,10 +111,18 @@ def _aov_kernel(scene, integrator, seed, cam, w: int, h: int, channels: int):
     sampler.seed(seed, w * h)
     pix, _, ray = _rays(sampler, cam, w, h, 1)
     _, _, aovs = integrator.sample(scene, sampler, ray)
-    out = dr.zeros(mi.Float, w * h * channels)
-    for ch in range(channels):
-        dr.scatter(out, aovs[ch], pix * channels + ch)
-    return mi.TensorXf(out, shape=(h, w, channels))
+    si = scene.ray_intersect(ray)
+    flags = dr.select(si.is_valid(), si.bsdf(ray).flags(), mi.UInt32(0))
+    F = mi.BSDFFlags
+    specular = mi.has_flag(flags, F.Delta) | mi.has_flag(flags, F.Glossy)
+    diffuse = mi.has_flag(flags, F.Diffuse)
+    invisible = mi.has_flag(flags, F.Null)
+    valid = dr.select((specular & ~diffuse) | invisible, mi.Float(0.0), mi.Float(1.0))
+    n = channels + 1
+    out = dr.zeros(mi.Float, w * h * n)
+    for ch, v in enumerate(list(aovs[:channels]) + [valid]):
+        dr.scatter(out, v, pix * n + ch)
+    return mi.TensorXf(out, shape=(h, w, n))
 
 
 def _camera(lens, w: int, h: int, aperture: bool):
@@ -156,7 +170,8 @@ def trace(scene, lens, w: int, h: int, spp: int, seed: int, integrator=None, ape
 
 
 def trace_aovs(scene, lens, w: int, h: int, seed: int, integrator) -> np.ndarray:
-    """(h, w, C) AOVs of an `aov` integrator, one jittered pinhole sample per pixel, in aov_names() order."""
+    """(h, w, C + 1): AOVs of an `aov` integrator, one jittered pinhole sample per pixel, in aov_names() order,
+    then the `coc_valid` mask (see _aov_kernel)."""
     import drjit as dr
     import mitsuba as mi
 

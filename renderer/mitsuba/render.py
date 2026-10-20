@@ -241,7 +241,7 @@ def render_gbuffer(scene, lens: Lens, width, height, seed):
             {"type": "aov", "aovs": "pos:position,nn:sh_normal,alb:albedo,idx:shape_index,t:depth"})
     t0 = time.time()
     img = LT.trace_aovs(scene, lens, width, height, seed, integrator)
-    names = [n.split(".")[0] for n in integrator.aov_names()]
+    names = [n.split(".")[0] for n in integrator.aov_names()] + ["coc_valid"]
     layers = {n: img[..., [i for i, m in enumerate(names) if m == n]] for n in dict.fromkeys(names)}
     pos, hit = layers["pos"], layers["t"][..., 0] > 0
     depth = np.einsum("hwc,c->hw", pos - lens.origin.astype(np.float32), lens.forward.astype(np.float32))
@@ -356,6 +356,8 @@ def main(argv=None) -> int:
         depth, layers, sec = render_gbuffer(scene, lens, args.width, args.height,
                                             (args.seed + 2) * 100003 + 50000)
         np.save(out / "depth.npy", depth)
+        np.save(out / "coc_valid.npy", layers["coc_valid"][..., 0].astype(np.uint8))
+        meta["coc_valid_fraction"] = float(layers["coc_valid"].mean())
         mi.Bitmap(np.where(np.isfinite(depth), depth, 0.0)[..., None]).write(str(out / "depth.exr"))
         finite = depth[np.isfinite(depth)]
         near, far = float(finite.min()), float(np.percentile(finite, 99.5))
