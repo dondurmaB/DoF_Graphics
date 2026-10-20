@@ -68,8 +68,7 @@ def main(argv=None) -> int:
                 continue
             origin, target, roll, focal = drawn
             lens = R.Lens(origin, target, focal, S.SENSOR_HEIGHT_MM, 1e5, 1.0, roll, scene_def.far_clip)
-            depth, layers, _ = R.render_gbuffer(scene, lens.sensor(w, h, 1, False, "box"), lens,
-                                                int(rng.integers(0, 2 ** 31 - 1)))
+            depth, layers, _ = R.render_gbuffer(scene, lens, w, h, int(rng.integers(0, 2 ** 31 - 1)))
             if SM.check_depth(depth, reasons, layers["nn"]) and SM.bright_enough(scene, lens, w, h, rng, reasons):
                 pose = (focal, roll, lens)
                 break
@@ -80,7 +79,7 @@ def main(argv=None) -> int:
             tiles.append(tile)
             continue
         focal, roll, lens = pose
-        rgb, _ = R.render_beauty(scene, lens.sensor(w, h, args.spp, False), args.spp, args.spp, i % 10000, "audit")
+        rgb, _ = R.render_beauty(scene, lens, w, h, False, args.spp, args.spp, i % 10000, "audit")
         med = float(np.median(rgb @ np.array([0.2126, 0.7152, 0.0722], np.float32)))
         ok = 0.02 <= med <= 0.5 or "night" in scene_def.tags
         dark += not ok

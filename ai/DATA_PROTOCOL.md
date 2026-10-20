@@ -196,8 +196,10 @@ The val and test scenes never enter this loop, so the selection cannot leak into
 
 ## 11. Before bulk generation
 
-- [ ] Dataset rendering on the fast frozen renderer (`lens_trace`) with the gaussian filter
-      reproduced by filter importance sampling; checked equal to `mi.render`.
+- [x] Dataset rendering on the fast frozen renderer (`lens_trace`), gaussian filter splatted
+      with Mitsuba's own ImageBlock. Checked against `mi.render` on the Cornell box, desk and
+      workshop (2026-10-20): difference between methods equals the noise between two renders of
+      one method (ratio 0.98 to 1.04, edges too), same per-pixel noise, means within 0.1%.
 - [ ] `coc_valid` mask in the renderer (contract section 7).
 - [ ] Measure radiance maxima per scene (decides half vs float32 EXR).
 - [ ] A loader (`ai/data.py`) that implements this file, with a test that loads one sample

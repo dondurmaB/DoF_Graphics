@@ -102,3 +102,11 @@ Mitsuba cafe verified locally (`metal_ad_rgb`, M4 Max):
 - State: pushed to `origin/ray-work`; viewers run as srun steps on the `dof-render` allocation (GPU memory fits ~8 viewers).
 - Risks: per-`mi.render` tracing overhead is ~10 s on workshop (0.5–1 s elsewhere); `dr.freeze` cuts it to 0.04 s in isolation but failed to record through `render_beauty` (memcpy_async / uncaptured variable) and was reverted. Open GPU viewers can starve render jobs of memory.
 - Next: fix frozen rendering before A100 bulk generation; val/test/test_ood scenes from the other author; haze, coc_valid, sharding.
+
+## 2026-10-20 — Fast dataset rendering, data protocol (renderer/mitsuba, ai/)
+
+- Work done: `lens_trace.py` now renders the dataset passes too. The gaussian pixel filter is splatted with Mitsuba's own ImageBlock inside a `dr.freeze` recording, and the G-buffer comes from a frozen AOV kernel. `render_beauty` / `render_gbuffer` take a `Lens` plus size, and `sampler.py`, `audit_poses.py` and `render.py` (so `check_scene.py`) use them. Bitmap-textured emitters are sampled once before recording (they broke recording on desk, museum, night_street, terminal and cafe). Viewer: trackpad pinch sets the focal length. `ai/DATA_PROTOCOL.md` v0: input `[B,4,512,512]` = sharp RGB + signed CoC, target DoF RGB, linear HDR colour (`log(1 + radiance * auto_exposure_scale)`), EXR/npy formats, G-buffer use, depth units, active learning.
+- Verification (cluster GPU): all 11 scenes record; fast vs `mi.render` on Cornell, desk and workshop: method difference equals noise (ratio 0.98–1.04, edges included), same noise, means within 0.1%; G-buffer depth median relative difference under 0.1%. `sampler.py` end to end on workshop (3 poses) and night_street (2 poses), 0 failures. Workshop DoF pass 3 s vs 92 s; a pose (sharp 128 + 2 DoF 256 spp at 960x540) about 2.3 s after a one-time ~30 s of recording per process.
+- State: committed and pushed to `origin/ray-work`. One viewer runs at a time (courtyard was last).
+- Risks: the first calls of each new (size, spp) record for 20–50 s on heavy scenes, so chunks should keep one size; the protocol's `coc_valid`, loader and sharding are still todo; held-out scenes not built.
+- Next: `coc_valid` mask, `ai/data.py` loader with its test, then a first generation run per scene on the cluster.

@@ -132,7 +132,7 @@ def check_depth(depth: np.ndarray, reasons: Counter, normals: np.ndarray | None 
 
 def bright_enough(scene, lens, w, h, rng, reasons: Counter) -> bool:
     """4-spp probe: rejects frames that are essentially black before the expensive passes."""
-    probe, _ = R.render_beauty(scene, lens.sensor(w, h, 4, False), 4, 4, int(rng.integers(0, 10000)), "probe")
+    probe, _ = R.render_beauty(scene, lens, w, h, False, 4, 4, int(rng.integers(0, 10000)), "probe")
     if np.median(luminance(probe)) < MIN_MEDIAN_LUMINANCE:
         reasons["black"] += 1
         return False
@@ -200,8 +200,7 @@ def run_sample(index, scene_def, bundle, scene, ctx, args, base: Path, fp: str, 
             continue
         origin, target, roll, focal = drawn
         pose_lens = R.Lens(origin, target, focal, S.SENSOR_HEIGHT_MM, 1e5, 1.0, roll, scene_def.far_clip)
-        depth, layers, g_sec = R.render_gbuffer(scene, pose_lens.sensor(w, h, 1, False, "box"), pose_lens,
-                                                int(rng.integers(0, 2 ** 31 - 1)))
+        depth, layers, g_sec = R.render_gbuffer(scene, pose_lens, w, h, int(rng.integers(0, 2 ** 31 - 1)))
         if check_depth(depth, reasons, layers["nn"]) and bright_enough(scene, pose_lens, w, h, rng, reasons):
             pose = dict(origin=origin, target=target, roll=roll, focal=focal, attempt=k)
             break
@@ -225,8 +224,8 @@ def run_sample(index, scene_def, bundle, scene, ctx, args, base: Path, fp: str, 
         return out
     pdir.mkdir(parents=True, exist_ok=True)
     sharp_seed = int(rng_for(scene_def, args, index, 100).integers(0, 10000))
-    sharp, sharp_sec = R.render_beauty(scene, pose_lens.sensor(w, h, args.spp, False), args.spp, args.spp_per_pass,
-                                       sharp_seed, "sharp")
+    sharp, sharp_sec = R.render_beauty(scene, pose_lens, w, h, False, args.spp, args.spp_per_pass, sharp_seed,
+                                       "sharp")
     np.save(pdir / "depth.npy", depth)
     R.write_gbuffer(pdir / "gbuffer.exr", layers)
     write_exr(pdir / "sharp.exr", sharp)
@@ -249,7 +248,7 @@ def run_sample(index, scene_def, bundle, scene, ctx, args, base: Path, fp: str, 
         ldir = pdir / lens_id
         ldir.mkdir(exist_ok=True)
         dof_seed = 10000 + int(rng_for(scene_def, args, index, 200 + j).integers(0, 10000))
-        dof, dof_sec = R.render_beauty(scene, lens.sensor(w, h, dof_spp, True), dof_spp, args.spp_per_pass, dof_seed, "dof")
+        dof, dof_sec = R.render_beauty(scene, lens, w, h, True, dof_spp, args.spp_per_pass, dof_seed, "dof")
         write_exr(ldir / "dof.exr", dof)
         np.save(ldir / "coc.npy", lens.coc_map(depth, h))
         sample_id = short_hash({**pose_key, "focus": round(lens_spec["focus"], 4),
