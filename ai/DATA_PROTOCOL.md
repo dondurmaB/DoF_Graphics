@@ -38,10 +38,13 @@ Evaluation uses the full frame.
 | 8 | sensor height | `h / 24 mm` | 1.0 for all data so far |
 | 9 | frame height | `H_px / 1080` | 1.0 for all data so far; the **full frame's** height, unchanged by crops |
 
-Channels 4 to 9 are constant over the image. They are the vector `settings` broadcast, so a model can
-take the settings either as planes concatenated with the image (the default for a CNN) or as a
-vector (FiLM, MLP). Channels 8 and 9 are constant today and still part of the input: the format must
-not change when a dataset at another resolution or sensor size is added.
+Channels 4 to 9 are constant over the image: each setting is one number, **broadcast** (copied to
+every pixel) and concatenated with the image channels. That is the contract's default conditioning:
+the first convolution sees the settings at every pixel, next to that pixel's depth. The same numbers
+also come as the vector `settings` [6], so a model may instead (or also) feed them through FiLM
+(a small MLP that scales and shifts the features at every level); that is a model choice and changes
+nothing in the data. Channels 8 and 9 are constant today and still part of the input: the format
+must not change when a dataset at another resolution or sensor size is added.
 
 ### Why exactly these settings
 

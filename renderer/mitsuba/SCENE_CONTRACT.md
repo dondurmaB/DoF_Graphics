@@ -202,6 +202,9 @@ an underwater reef). The five scenes are still to be chosen.
 
 ## 7. What the shared side produces
 
+What a model receives from these files (input channels, settings, colour transform) is fixed in
+`ai/DATA_PROTOCOL.md` and implemented by `ai/data.py`.
+
 For each sample (scene, scene seed, env, camera pose and roll, lens, render seed):
 
 ```
