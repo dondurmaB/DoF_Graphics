@@ -17,9 +17,14 @@ SERVER_NAME=dof-render
 repo_root() { cd "$(git rev-parse --show-toplevel)" && pwd; }
 
 sync_code() {
-  "${SSH[@]}" "mkdir -p $REMOTE/renderer/mitsuba $REMOTE/logs $REMOTE/output"
+  "${SSH[@]}" "mkdir -p $REMOTE/renderer/mitsuba $REMOTE/ai $REMOTE/logs $REMOTE/output"
   rsync -az --exclude __pycache__ --exclude generated -e "ssh -o BatchMode=yes" \
     renderer/mitsuba/ "$HOST:$REMOTE/renderer/mitsuba/"
+  rsync -az --exclude __pycache__ -e "ssh -o BatchMode=yes" ai/ "$HOST:$REMOTE/ai/"
+  # The copy there has no .git: record which commit it is, for metadata.json (render.git_state).
+  printf '{"commit": "%s", "dirty": %s}\n' "$(git rev-parse HEAD)" \
+    "$([ -n "$(git status --porcelain --untracked-files=no)" ] && echo true || echo false)" |
+    "${SSH[@]}" "cat >| $REMOTE/GIT_STATE.json"
 }
 
 # Prints "<jobid> <node>" of the allocation to run in, submitting one first if there is none.

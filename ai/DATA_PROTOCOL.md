@@ -205,8 +205,9 @@ The val and test scenes never enter this loop, so the selection cannot leak into
       surface. Measured: pool views 23-50% masked (water), museum case views about 50% (display
       glass), desk under 5% (monitor stand, keyboard plate).
 - [ ] Measure radiance maxima per scene (decides half vs float32 EXR).
-- [ ] A loader (`ai/data.py`) that implements this file, with a test that loads one sample
-      per scene and checks shapes, ranges and `mean(y) ~ mean(x[0:3])`.
+- [x] A loader (`ai/data.py`) that implements this file; `python ai/data.py <root> --split train`
+      checks every finished sample (shapes, NaN, depth, CoC range, `mean(dof) ~ mean(sharp)`).
+      First run on the pilot: 18 samples, 0 bad. About 70 MB per sample at 1080p.
 - [ ] Held-out scenes (3 val, 1 test, 1 test_ood) from the other author; their generation can
       start later because splits are by scene.
 - [ ] Sharding into archives (not needed for the first few thousand samples).

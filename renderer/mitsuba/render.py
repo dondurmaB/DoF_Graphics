@@ -286,7 +286,10 @@ def git_state() -> dict:
         run = lambda *c: subprocess.run(["git", *c], cwd=REPO, capture_output=True, text=True, check=True).stdout.strip()
         return {"commit": run("rev-parse", "HEAD"), "dirty": bool(run("status", "--porcelain", "--untracked-files=no"))}
     except Exception:
-        return {"commit": None, "dirty": None}
+        try:  # a synced copy without .git (the cluster): hpc/_remote_lib.sh sync_code writes this file
+            return json.loads((REPO / "GIT_STATE.json").read_text())
+        except Exception:
+            return {"commit": None, "dirty": None}
 
 
 def main(argv=None) -> int:
