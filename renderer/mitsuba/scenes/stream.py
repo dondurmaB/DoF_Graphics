@@ -37,7 +37,7 @@ from scene_kit import Assets, SceneBuilder, bitmap, principled
 from scenes import _nature_kit as N
 from scenes import _stream_props as P
 
-ASSET_VERSION = 1
+ASSET_VERSION = 2                     # 2: stones get an opaque principled BSDF instead of the scan's leaf BSDF
 EYE = np.eye(4)
 SUN = {"clear": env_kit.default_sun_direction(36.0, 160.0), "snow": env_kit.default_sun_direction(24.0, 165.0)}
 SKY_SCALE = {"clear": 14.0, "overcast": 40.0, "snow": 12.0}      # first guesses; calibrated on the preview
@@ -75,10 +75,18 @@ def in_water(x, z, margin=0.0) -> bool:
     return abs(x - cx(z)) < hw(z) + margin
 
 
-def wet(bsdf: dict) -> dict:
-    """The scan's stone BSDF with a glossy clear coat: wet rock in and at the edge of the stream."""
-    (bsdf["bsdf"] if bsdf["type"] == "normalmap" else bsdf).update(clearcoat=0.8, clearcoat_gloss=0.92)
-    return bsdf
+def stone(bsdf: dict, wet: bool = False) -> dict:
+    """The rock scan as an opaque stone. web_assets classes rock_moss_set_01 as foliage (its name contains
+    "moss", one of web_assets.FOLIAGE_WORDS) and converts it to a thin leaf BSDF (principledthin, 35% diffuse
+    transmission): light would pass through the stones, and principledthin has no clear coat for the wet look.
+    This keeps the scan's albedo, roughness and normal maps on an opaque principled BSDF; wet stones (in and at
+    the edge of the stream) add a glossy clear coat. Scene-local: web_assets itself is left alone."""
+    nm = bsdf if bsdf["type"] == "normalmap" else None
+    inner = nm["bsdf"] if nm else bsdf
+    new = {"type": "principled", "base_color": inner["base_color"], "roughness": inner["roughness"], "specular": 0.5}
+    if wet:
+        new.update(clearcoat=0.8, clearcoat_gloss=0.92)
+    return {"type": "normalmap", "normalmap": nm["normalmap"], "bsdf": new} if nm else new
 
 
 # --------------------------------------------------------------------------
@@ -98,7 +106,8 @@ def add_materials(b: SceneBuilder, L: N.Library, ctx: BuildContext) -> None:
     b.material("backdrop", {"type": "twosided", "bsdf": principled(bitmap(alb), 0.9)})
     leaf = (0.035, 0.035, 0.03) if snow else (0.010, 0.018, 0.006)       # bare winter twigs vs leaf clusters
     b.material("backdrop_leaf", {"type": "twosided", "bsdf": principled(leaf, 0.85)})
-    L.material_set("rock_moss_set_01", "_wet", wet)
+    L.material_set("rock_moss_set_01", "_wet", lambda bsdf: stone(bsdf, wet=True))
+    L.material_set("rock_moss_set_01", "_dry", lambda bsdf: stone(bsdf, wet=False))
 
 
 def add_ground(b: SceneBuilder) -> None:
@@ -218,7 +227,7 @@ def add_scatter(b: SceneBuilder, L: N.Library, ctx: BuildContext, trees: list, f
     for x, z in N.scatter(rng, ((-30.0, -70.0), (30.0, 30.0)), 50, 3.0, avoid=hero + trunks):
         if banks(x, z):
             batch.plant("rock_moss_set_01", int(rng.integers(6)), TERRAIN.at(x, z, -0.12), yaw=float(rng.uniform(0, 360)),
-                        height=rng.uniform(0.3, 0.8))
+                        height=rng.uniform(0.3, 0.8), tag="_dry")
     if not snow:
         near_bank = lambda x, z: not in_water(x, z, P.BANK * 0.4) and in_water(x, z, 4.0)
         for x, z in N.scatter(rng, ((-12.0, -70.0), (12.0, 30.0)), 260, 1.4, avoid=hero + trunks):   # ferns by the water
