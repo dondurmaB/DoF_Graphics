@@ -6,6 +6,11 @@
   python generate.py status --out DATASET
   python generate.py release --out DATASET                       # requeue chunks claimed by dead workers
   python generate.py sheet  --out DATASET --per-scene 8          # PNG per scene: sharp | DoF pairs to review
+  python generate.py ship   --out DATASET --to HOST:/path        # copy finished poses there, keep only markers
+
+With `work --ship-to HOST:/path` each worker ships after every chunk, so the render machine only holds the
+chunks in progress (the student-lab cluster renders, CIAI's /nfs-stor stores). A shipped pose keeps its empty
+directory and `.done` locally, so it is never rendered again; the copy at the destination is complete.
 
 The plan splits `--samples` evenly over the train scenes (scenes/splits.json) and, inside a scene, evenly over
 the environments it declares; a sample is one (pose, lens) pair, so poses = samples / lenses-per-pose. Each
@@ -92,6 +97,54 @@ def claim(q: Path, chunk_id: str) -> bool:
     return True
 
 
+def ship(out: Path, dest: str) -> int:
+    """Copy every finished, not yet shipped pose of a done chunk to `dest`, then empty it locally.
+
+    Order makes a partial transfer harmless: pose data first, then the `.done` markers, manifests and queue
+    records, so the destination never has a `.done` without its data; local files are removed only after both
+    copies succeeded. Exit code 24 (a file vanished because another worker pruned it) counts as success."""
+    import tempfile
+
+    out = Path(out)
+    q = queue_dir(out)
+    plan = {c["id"]: c for c in json.loads((q / "plan.json").read_text())["chunks"]}
+    poses, extra = [], []
+    for marker in sorted((q / "done").iterdir()):
+        c = plan.get(marker.name)
+        if c is None:
+            continue
+        for env_dir in out.glob(f"{c['scene']}/s*/{c['env']}"):
+            for i in range(c["start"], c["start"] + c["count"]):
+                poses += [p for p in env_dir.glob(f"p{i:06d}_*") if (p / ".done").exists() and (p / "sharp.exr").exists()]
+            extra += [m for m in env_dir.glob(f"manifest.{c['id']}.jsonl")]
+        extra += [marker] + [p for p in (q / "logs" / f"{c['id']}.log",) if p.exists()]
+    if not poses:
+        return 0
+    rel = lambda paths: "".join(str(p.relative_to(out)) + "\n" for p in paths)
+    with tempfile.TemporaryDirectory() as tmp:
+        data, marks = Path(tmp) / "data", Path(tmp) / "marks"
+        data.write_text(rel(poses))
+        marks.write_text(rel([p / ".done" for p in poses] + extra + [q / "plan.json"]))
+        ssh = "ssh -o BatchMode=yes -o ConnectTimeout=30"
+        for files, extra_args in ((data, ["-r", "--exclude", ".done"]), (marks, [])):
+            rc = subprocess.run(["rsync", "-a", "--partial", "-e", ssh, *extra_args, f"--files-from={files}",
+                                 f"{out}/", f"{dest.rstrip('/')}/"]).returncode
+            if rc not in (0, 24):
+                print(f"ship to {dest} failed (rsync {rc}); will retry after the next chunk", flush=True)
+                return 0
+    for p in poses:
+        for child in p.iterdir():
+            if child.name != ".done":
+                shutil.rmtree(child) if child.is_dir() else child.unlink()
+    print(f"shipped {len(poses)} poses to {dest}", flush=True)
+    return len(poses)
+
+
+def cmd_ship(args) -> int:
+    ship(args.out, args.to)
+    return 0
+
+
 def resumable(q: Path) -> set:
     """Claimed, unfinished chunks this worker should take over: its own from before a requeue (same SLURM job
     and GPU), and orphans whose owning job is no longer running (node failure, a job that ended). An orphan is
@@ -149,6 +202,8 @@ def cmd_work(args) -> int:
         print(f"[{time.strftime('%H:%M:%S')}] {c['id']}: {'done' if finished else 'FAILED'} rc {rc} "
               f"in {status['seconds']:.0f}s", flush=True)
         done_here += finished
+        if finished and args.ship_to:
+            ship(args.out, args.ship_to)
         if args.max_chunks and done_here >= args.max_chunks:
             break
     print(f"worker finished: {done_here} chunks", flush=True)
@@ -234,7 +289,7 @@ def cmd_sheet(args) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("plan", "work", "status", "release", "sheet"):
+    for name in ("plan", "work", "status", "release", "sheet", "ship"):
         p = sub.add_parser(name)
         p.add_argument("--out", type=Path, required=True, help="dataset root")
         if name == "plan":
@@ -249,13 +304,16 @@ def main(argv=None) -> int:
                            help="after --: extra sampler.py arguments, e.g. -- --res 960x540 --spp 256")
         if name == "work":
             p.add_argument("--max-chunks", type=int, default=0, help="stop after this many (0: until empty)")
+            p.add_argument("--ship-to", default=None, help="HOST:/path to copy each finished chunk to (see ship)")
+        if name == "ship":
+            p.add_argument("--to", required=True, help="HOST:/path, e.g. ciai-copy:/nfs-stor/rui.gao/dof_dataset/train10k")
         if name == "sheet":
             p.add_argument("--per-scene", type=int, default=8)
     args = ap.parse_args(argv)
     if args.cmd == "plan":
         args.sampler_args = [a for a in args.sampler_args if a != "--"]
     return {"plan": cmd_plan, "work": cmd_work, "status": cmd_status, "release": cmd_release,
-            "sheet": cmd_sheet}[args.cmd](args)
+            "sheet": cmd_sheet, "ship": cmd_ship}[args.cmd](args)
 
 
 if __name__ == "__main__":

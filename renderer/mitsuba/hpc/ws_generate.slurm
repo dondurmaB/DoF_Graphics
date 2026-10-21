@@ -1,7 +1,11 @@
 #!/bin/bash
 # Dataset generation on the student-lab RTX 5000 Ada cluster: one generate.py worker on one GPU.
 #
-#   sbatch renderer/mitsuba/hpc/ws_generate.slurm <dataset root>          (from ~/dof_dev on the login node)
+#   sbatch renderer/mitsuba/hpc/ws_generate.slurm <dataset root> [ship-to HOST:/path]   (from ~/dof_dev)
+#
+# With ship-to, each finished chunk is copied there and emptied locally (generate.py ship), so the home quota
+# only holds chunks in progress: renders go to CIAI's /nfs-stor through the ciai-copy ssh key. Do not put data on
+# this cluster's /l (Lustre rebuild, October 2026).
 #
 # The QoS allows 2 jobs per user and ws-ia jobs last at most 1 day, so a job requeues itself 10 minutes before
 # its limit (same job id, no new submission) and its worker resumes the chunk it held; finished poses are
@@ -20,6 +24,7 @@
 
 set -uo pipefail
 OUT=${1:?dataset root}
+SHIP=${2:-}
 source ~/anaconda3/etc/profile.d/conda.sh
 conda activate dof-graphics
 export OPTIX_CACHE_PATH=/tmp/optix_cache_$USER   # node-local
@@ -33,7 +38,7 @@ requeue() {
 }
 trap requeue USR1
 
-python -u renderer/mitsuba/generate.py work --out "$OUT" &
+python -u renderer/mitsuba/generate.py work --out "$OUT" ${SHIP:+--ship-to "$SHIP"} &
 worker=$!
 wait "$worker"   # returns early when USR1 arrives; the trap then requeues
 python renderer/mitsuba/generate.py status --out "$OUT"
