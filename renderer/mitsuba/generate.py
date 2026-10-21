@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -45,7 +46,10 @@ def make_plan(args) -> dict:
     poses_total = args.samples // args.lenses_per_pose
     chunks = []
     for i, scene in enumerate(scenes):
-        envs = list(S.load_scene(scene).envs) if args.envs == "all" else ["clear"]
+        declared = list(S.load_scene(scene).envs)
+        envs = declared if args.envs == "all" else [e for e in declared if e in args.envs.split(",")]
+        if not envs:
+            continue
         scene_poses = poses_total // len(scenes) + (i < poses_total % len(scenes))
         for j, env in enumerate(envs):
             n = scene_poses // len(envs) + (j < scene_poses % len(envs))
@@ -88,12 +92,46 @@ def claim(q: Path, chunk_id: str) -> bool:
     return True
 
 
+def resumable(q: Path) -> set:
+    """Claimed, unfinished chunks this worker should take over: its own from before a requeue (same SLURM job
+    and GPU), and orphans whose owning job is no longer running (node failure, a job that ended). An orphan is
+    adopted with an atomic mkdir, so two workers starting together never take the same one."""
+    job, gpu = os.environ.get("SLURM_JOB_ID"), os.environ.get("CUDA_VISIBLE_DEVICES")
+    try:
+        running = set(subprocess.run(["squeue", "-h", "-o", "%A"], capture_output=True, text=True,
+                                     check=True).stdout.split())
+    except (OSError, subprocess.CalledProcessError):
+        return set()            # no scheduler to ask: never guess that a claim is dead
+    take = set()
+    for p in (q / "claimed").iterdir():
+        if (q / "done" / p.name).exists():
+            continue
+        try:
+            owner = json.loads((p / "owner.json").read_text())
+        except (OSError, ValueError):
+            continue
+        if owner.get("job") == job and owner.get("gpu") == gpu:
+            take.add(p.name)
+        elif owner.get("job") and owner["job"] not in running:
+            try:
+                os.mkdir(p / f"adopted-from-{owner['job']}-{owner.get('gpu')}")
+            except FileExistsError:
+                continue
+            (p / "owner.json").write_text(json.dumps({**owner, "job": job, "gpu": gpu, "host": socket.gethostname(),
+                                                      "adopted_from": owner["job"]}))
+            take.add(p.name)
+    return take
+
+
 def cmd_work(args) -> int:
     q = queue_dir(args.out)
     plan = json.loads((q / "plan.json").read_text())
     done_here = 0
-    for c in plan["chunks"]:
-        if (q / "done" / c["id"]).exists() or not claim(q, c["id"]):
+    resume = resumable(q)
+    if resume:
+        print(f"resuming unfinished chunks (own before a requeue, or orphaned): {sorted(resume)}", flush=True)
+    for c in sorted(plan["chunks"], key=lambda c: c["id"] not in resume):
+        if (q / "done" / c["id"]).exists() or not (c["id"] in resume or claim(q, c["id"])):
             continue
         cmd = [sys.executable, "-u", str(HERE / "sampler.py"), "--scene", c["scene"], "--env", c["env"],
                "--start", str(c["start"]), "--count", str(c["count"]),
@@ -144,9 +182,7 @@ def cmd_release(args) -> int:
     n = 0
     for p in (q / "claimed").iterdir():
         if not (q / "done" / p.name).exists():
-            for f in p.iterdir():
-                f.unlink()
-            p.rmdir()
+            shutil.rmtree(p)
             (q / "failed" / p.name).unlink(missing_ok=True)
             n += 1
     print(f"released {n} chunks")
@@ -205,7 +241,8 @@ def main(argv=None) -> int:
             p.add_argument("--samples", type=int, required=True, help="(pose, lens) samples in total")
             p.add_argument("--lenses-per-pose", type=int, default=2)
             p.add_argument("--chunk", type=int, default=50, help="poses per chunk")
-            p.add_argument("--envs", choices=("all", "clear"), default="all")
+            p.add_argument("--envs", default="all", help="'all' (each scene's declared envs) or a comma list, "
+                           "e.g. clear,overcast: a scene gets those of them it declares")
             p.add_argument("--scenes", nargs="*", default=None, help="default: the train split")
             p.add_argument("--force", action="store_true")
             p.add_argument("sampler_args", nargs=argparse.REMAINDER,
