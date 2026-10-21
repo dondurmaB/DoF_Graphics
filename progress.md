@@ -110,3 +110,11 @@ Mitsuba cafe verified locally (`metal_ad_rgb`, M4 Max):
 - State: committed and pushed to `origin/ray-work`. One viewer runs at a time (courtyard was last).
 - Risks: the first calls of each new (size, spp) record for 20–50 s on heavy scenes, so chunks should keep one size; the protocol's `coc_valid`, loader and sharding are still todo; held-out scenes not built.
 - Next: `coc_valid` mask, `ai/data.py` loader with its test, then a first generation run per scene on the cluster.
+
+## 2026-10-21 — 10k training set generating (renderer/mitsuba, ai/)
+
+- Work done: data protocol v1 (`ai/DATA_PROTOCOL.md`): x = sharp HDR RGB + 1/z + 6 broadcast camera settings (f, N, A, 1/s, sensor h, frame H), y = DoF RGB, colour log(1 + L * exposure), no masks; `ai/data.py` implements it. `generate.py` (plan / work / status / release / sheet) with an NFS-safe chunk queue, per-worker manifests, self-requeueing jobs (`hpc/ws_generate.slurm`) and orphan adoption. Blur floor raised to 0.5% of image height (5.4 px p95 at 1080p); poses that cannot reach it are redrawn.
+- Verification: protocol check on 64 pilot samples (0 bad; blur computed from x matches coc.npy within 5e-6). Pilot: all 10 scenes, 80 poses, 0 failures, ~75 s/pose on an RTX 5000 Ada. CIAI A100 benchmark: ~11 min/pose on cafe (12x slower, no RT cores; GPU not shared), so rendering stays on the RTX cluster. Requeue tested on a 12-minute job.
+- State: 10k run (5,000 poses, clear + overcast) started 2026-10-21 10:04 into `~/dof_dev/dataset/train10k` on the student-lab cluster: job 241177 plus a worker step in the interactive job 240004; a local watcher submits a second job when 240004 ends. ETA about 2.2 days.
+- Risks: wet and snow presets look wrong (night_street wet renders daylight; courtyard snow/wet look like clear), so they are excluded until fixed. The 2-job QoS cap limits the run to 2 GPUs.
+- Next: check sheets from the first finished chunks; fix the wet and snow presets; held-out scenes from the other author.
