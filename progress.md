@@ -118,3 +118,11 @@ Mitsuba cafe verified locally (`metal_ad_rgb`, M4 Max):
 - State: 10k run (5,000 poses, clear + overcast) started 2026-10-21 10:04 into `~/dof_dev/dataset/train10k` on the student-lab cluster: job 241177 plus a worker step in the interactive job 240004; a local watcher submits a second job when 240004 ends. ETA about 2.2 days.
 - Risks: wet and snow presets look wrong (night_street wet renders daylight; courtyard snow/wet look like clear), so they are excluded until fixed. The 2-job QoS cap limits the run to 2 GPUs.
 - Next: check sheets from the first finished chunks; fix the wet and snow presets; held-out scenes from the other author.
+
+## 2026-10-22 — 10k run: renders shipped to CIAI /nfs-stor (renderer/mitsuba)
+
+- Work done: the student-lab home quota (hidden; hit at ~52 GB) stopped both workers on 2026-10-21 at 12:36 after 322 poses. The data was copied to CIAI `/nfs-stor` over a restricted ssh key (`ciai-copy` on the student-lab cluster) and `generate.py work --ship-to` now copies each finished chunk there and empties it locally, so home holds only chunks in progress. Generation was paused 21:00–10:45 while `/nfs-stor/rui.gao` was reorganized into `Researches/<project>/`; jobs were resubmitted with the new destination, and the CIAI paths in `ciai_generate.slurm` follow the new layout.
+- Verification: test write through the key to the new path; first automatic ship `shipped 38 poses`, CIAI then holds 360 finished poses (322 + 38, 49 GB) and the home staging dir 2.3 GB.
+- State: jobs 242566 / 242567 on ws-l1-002 / ws-l5-013 shipping to `ciai-copy:/nfs-stor/rui.gao/Researches/dof/dof_dataset/train10k`; 7 of 100 chunks done, ~4,640 poses left, ETA about 36 h (Friday night).
+- Risks: if shipping fails repeatedly, poses accumulate in home and the quota fills again. Do not use the student-lab `/l` (storage migration).
+- Next: check sheets from shipped chunks on CIAI; fix wet/snow presets; decide whether to drop gbuffer/coc to save space.

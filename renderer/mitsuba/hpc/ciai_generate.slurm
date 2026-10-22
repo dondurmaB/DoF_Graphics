@@ -6,18 +6,19 @@
 # Our account (cscc-users) may use the cscc-gpu-p partition (QoS cscc-gpu-qos: 14 nodes x 4 A100-40GB, jobs up
 # to 48 h; the `long` partition rejects it). Several of these jobs can share one queue; a job that ends (time
 # limit, preemption) leaves at most one claimed chunk per GPU behind (`generate.py release`).
-# Code, conda env and data live on /nfs-stor: /home on this cluster is nearly full.
+# Code, conda env and data live in /nfs-stor/rui.gao/Researches/dof (/home on this cluster is nearly full); the env
+# keeps its old path /nfs-stor/rui.gao/envs/dof-graphics as a symlink because conda bakes its prefix in.
 #SBATCH --job-name=dof-gen
 #SBATCH --partition=cscc-gpu-p
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=160G
 #SBATCH --time=24:00:00
-#SBATCH --output=/nfs-stor/rui.gao/dof_dev/logs/dof-gen-%j.out
+#SBATCH --output=/nfs-stor/rui.gao/Researches/dof/dof_dev/logs/dof-gen-%j.out
 
 set -euo pipefail
 OUT=${1:?dataset root}
-CODE=${DOF_CODE:-/nfs-stor/rui.gao/dof_dev}
+CODE=${DOF_CODE:-/nfs-stor/rui.gao/Researches/dof/dof_dev}
 PY=${DOF_PY:-/nfs-stor/rui.gao/envs/dof-graphics/bin/python}
 export OPTIX_CACHE_PATH=/tmp/optix_cache_$USER   # node-local
 cd "$CODE"

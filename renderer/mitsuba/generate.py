@@ -306,7 +306,7 @@ def main(argv=None) -> int:
             p.add_argument("--max-chunks", type=int, default=0, help="stop after this many (0: until empty)")
             p.add_argument("--ship-to", default=None, help="HOST:/path to copy each finished chunk to (see ship)")
         if name == "ship":
-            p.add_argument("--to", required=True, help="HOST:/path, e.g. ciai-copy:/nfs-stor/rui.gao/dof_dataset/train10k")
+            p.add_argument("--to", required=True, help="HOST:/path, e.g. ciai-copy:/nfs-stor/rui.gao/Researches/dof/dof_dataset/train10k")
         if name == "sheet":
             p.add_argument("--per-scene", type=int, default=8)
     args = ap.parse_args(argv)
