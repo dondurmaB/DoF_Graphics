@@ -7,46 +7,46 @@ Poly Haven `dimensions` are read as [width, depth, height] in m (verified agains
 
 ## Object groups
 
-| object group | inst | tris | decision | asset id(s) | size check | notes |
-|---|---|---|---|---|---|---|
-| notebook.pages / .edges / .cover | 1 | 7.5k | KEEP | | | Procedural handwriting, diagram and coffee ring are the point of this scene |
-| sheet (report, table, red-pen) | 3 | 3.1k | KEEP | | | Procedural printed text |
-| cube:paper_plain (paper stack) | 3 | 36 | KEEP | | | Sits under the text sheets |
-| rectangle:sticky_0..3 | 5 | 10 | KEEP | | | Handwritten notes |
-| rectangle:pinboard | 1 | 2 | KEEP | | | Procedural pinned notes; optionally retexture the cork with ACG cork |
-| plant_floor (leaves, stems, pot, soil) | 1 | 11k | SUBSTITUTE | potted_plant_01 | 0.59x0.64x1.35 m; a floor plant is 1.0-1.4 m, so it fits as is | Scanned leaves with alpha and translucency |
-| plant_shelf (leaves, stems, pot, soil) | 2 | 13k | SUBSTITUTE | potted_plant_04 | 0.17x0.19x0.27 m; fits a 0.3 m shelf gap | Use 2 instances, yaw varied by seed |
-| plant_side (on side cabinet) | 1 | 9.4k | SUBSTITUTE | potted_plant_02 | 0.70x0.66x0.84 m; scale 0.75 to 0.63 m on a 0.8 m cabinet | |
-| plant_desk_1 | 1 | 7.4k | SUBSTITUTE | potted_plant_04 | 0.27 m; desk plant size | Different yaw and tint from the shelf ones |
-| office_chair (fabric, chrome, plastic) | 1 | 7.4k | SUBSTITUTE | gallinera_chair (alt: dining_chair_02) | 0.58x0.60x1.03 m; seat height matches a 0.75 m desk | No swivel office chair in PH; a wooden chair suits a home study |
-| lamp_arms / lamp_base / lamp_shade_out | 1 | 2.1k | SUBSTITUTE | desk_lamp_arm_01 | 0.62x0.41x0.88 m; a real architect lamp | Keep the procedural emitter (lamp_shade_in, sphere bulb) inside its shade |
-| lamp_shade_in [emitter], sphere bulb [emitter] | 2 | 0.4k | KEEP | | | Emitters; reposition into the scanned lamp's shade |
-| jar (glass, lid) on bookcase | 1 | 6k | SUBSTITUTE | brass_vase_03 or ceramic_vase_03 | 0.08x0.08x0.20 / 0.41 m; fits a shelf | No scanned glass jar exists |
-| cube:black (picture frames, 2 artworks) | 8 | 96 | SUBSTITUTE | hanging_picture_frame_01, hanging_picture_frame_02 | 0.59x0.84 and 0.75x0.50 m vs art_a 0.6x0.8 and art_b 0.75x0.56: near exact | Scanned frames with their own art. Drop rect art_a/art_b, or keep them as the inset |
-| rectangle:art_a / art_b | 2 | 4 | SUBSTITUTE | (with the frames above) | | |
-| books (about 300 spines on the bookcase) | 1 | 3.2k | KEEP + mix | book_encyclopedia_set_01, decorative_book_set_01 | 0.55 m and 2.51 m runs; place 1-2 runs on shelves | Procedural spines are convincing at shelf distance; scanned sets add variety and depth |
-| cube:book_0 / book_1 (desk book stack) | 3 | 36 | RETEXTURE | ACG Fabric0xx (book cloth), Leather0xx | | Boxes; real cloth or leather covers help close-ups |
-| mug.mug / mug.coffee | 1 | 2.9k | KEEP | | | No single mug in PH (only tea_set_01); the procedural mug reads fine |
-| headphones (cushion, plastic, metal) | 1 | 4.2k | KEEP | | | No headphones in PH |
-| pen_cup, ballpoint (6), pencil (4) | 11 | 3k | KEEP | | | No pens in PH; small and fine-edged, which is the point |
-| mouse, keyboard | 2 | 2k | KEEP | | | No match. The keyboard legends are procedural detail |
-| monitor (body, stand, logo) | 1 | 0.7k | KEEP | | | The code-editor screen is procedural text. classic_laptop exists, but the monitor is the subject |
-| cube:case_wood (bookcase carcass, cabinet dividers, jar lid) | 12 | 144 | RETEXTURE | PH oak_veneer or american_walnut_veneer | | The custom 3 m bookcase holds 300 books, so keep the geometry and use real wood |
-| cube:desk_dark (desk panels, pedestal, modesty panel, pinboard frame, side cabinet) | 8 | 96 | RETEXTURE | PH black_walnut_veneer_01 | | Flat dark colour now |
-| box_desk_top / cube:desk_wood (drawer fronts) | 4 | 48 | RETEXTURE | PH american_walnut_veneer (or european_walnut_veneer_04) | | Procedural wood_top now; PH veneer has a normal map |
-| box_mat (leather desk mat) | 1 | 12 | RETEXTURE | PH brown_leather (alt ACG Leather0xx) | | |
-| cube:brass (drawer pulls) | 3 | 36 | KEEP | | | Tiny; the roughconductor already reads as brass |
-| cube:white_paint (skirting, window frame, mullions, sill) | 11 | 132 | RETEXTURE | ACG PaintedWood0xx (white) | | Painted-wood grain and normal help in close views of the window |
-| cube:wall (left wall around window) | 4 | 48 | RETEXTURE | PH painted_plaster_wall (tint to match) | | |
-| rectangle:wall (right and front walls) | 2 | 4 | RETEXTURE | PH painted_plaster_wall / beige_wall_001 | | Real plaster unevenness instead of flat procedural |
-| rectangle:wall_back (dark wall behind bookcase) | 1 | 2 | RETEXTURE | PH painted_plaster_wall, tint dark green | | |
-| rectangle:ceiling | 1 | 2 | RETEXTURE | PH white_plaster_02 (alt white_plaster_rough_01) | | Upward views hit it |
-| rectangle:floor | 1 | 2 | RETEXTURE | PH herringbone_parquet (alt old_wood_floor) | | |
-| rectangle:rug | 1 | 2 | KEEP | (opt. ACG Carpet0xx normal) | | Procedural woven pattern; no scanned rugs |
-| rectangle:emitter_backing (4 ceiling panels, 1 shelf strip) | 5 | 10 | KEEP | | | Emitters. Add visible fixtures (below) |
-| plant soils | 5 | 0.3k | (with plants) | | | |
-| rectangle:ground (outside) | 1 | 2 | REPLACE | see outside | | |
-| cube:hedge (outside) | 1 | 12 | SUBSTITUTE | shrub_02 x 2-3 | 5.3x2.1x2.1 m each | A real hedge line at 6-8 m |
+| object group | inst | tris | decision | asset id(s) | size check | notes | status |
+|---|---|---|---|---|---|---|---|
+| notebook.pages / .edges / .cover | 1 | 7.5k | KEEP | | | Procedural handwriting, diagram and coffee ring are the point of this scene | kept |
+| sheet (report, table, red-pen) | 3 | 3.1k | KEEP | | | Procedural printed text | kept |
+| cube:paper_plain (paper stack) | 3 | 36 | KEEP | | | Sits under the text sheets | kept |
+| rectangle:sticky_0..3 | 5 | 10 | KEEP | | | Handwritten notes | kept |
+| rectangle:pinboard | 1 | 2 | KEEP | | | Procedural pinned notes; optionally retexture the cork with ACG cork | kept (procedural pinned notes) |
+| plant_floor (leaves, stems, pot, soil) | 1 | 11k | SUBSTITUTE | potted_plant_01 | 0.59x0.64x1.35 m; a floor plant is 1.0-1.4 m, so it fits as is | Scanned leaves with alpha and translucency | DONE |
+| plant_shelf (leaves, stems, pot, soil) | 2 | 13k | SUBSTITUTE | potted_plant_04 | 0.17x0.19x0.27 m; fits a 0.3 m shelf gap | Use 2 instances, yaw varied by seed | DONE |
+| plant_side (on side cabinet) | 1 | 9.4k | SUBSTITUTE | potted_plant_02 | 0.70x0.66x0.84 m; scale 0.75 to 0.63 m on a 0.8 m cabinet | | DONE |
+| plant_desk_1 | 1 | 7.4k | SUBSTITUTE | potted_plant_04 | 0.27 m; desk plant size | Different yaw and tint from the shelf ones | DONE |
+| office_chair (fabric, chrome, plastic) | 1 | 7.4k | SUBSTITUTE | gallinera_chair (alt: dining_chair_02) | 0.58x0.60x1.03 m; seat height matches a 0.75 m desk | No swivel office chair in PH; a wooden chair suits a home study | DONE |
+| lamp_arms / lamp_base / lamp_shade_out | 1 | 2.1k | SUBSTITUTE | desk_lamp_arm_01 | 0.62x0.41x0.88 m; a real architect lamp | Keep the procedural emitter (lamp_shade_in, sphere bulb) inside its shade | DONE |
+| lamp_shade_in [emitter], sphere bulb [emitter] | 2 | 0.4k | KEEP | | | Emitters; reposition into the scanned lamp's shade | DONE: emitter moved into desk_lamp_arm_01's light part |
+| jar (glass, lid) on bookcase | 1 | 6k | SUBSTITUTE | brass_vase_03 or ceramic_vase_03 | 0.08x0.08x0.20 / 0.41 m; fits a shelf | No scanned glass jar exists | DONE: brass_vase_03 on the shelf |
+| cube:black (picture frames, 2 artworks) | 8 | 96 | SUBSTITUTE | hanging_picture_frame_01, hanging_picture_frame_02 | 0.59x0.84 and 0.75x0.50 m vs art_a 0.6x0.8 and art_b 0.75x0.56: near exact | Scanned frames with their own art. Drop rect art_a/art_b, or keep them as the inset | DONE |
+| rectangle:art_a / art_b | 2 | 4 | SUBSTITUTE | (with the frames above) | | | DONE |
+| books (about 300 spines on the bookcase) | 1 | 3.2k | KEEP + mix | book_encyclopedia_set_01, decorative_book_set_01 | 0.55 m and 2.51 m runs; place 1-2 runs on shelves | Procedural spines are convincing at shelf distance; scanned sets add variety and depth | DONE: procedural spines kept, book_encyclopedia_set_01 mixed in |
+| cube:book_0 / book_1 (desk book stack) | 3 | 36 | RETEXTURE | ACG Fabric0xx (book cloth), Leather0xx | | Boxes; real cloth or leather covers help close-ups | DONE: ACG Leather026 / Fabric030 covers |
+| mug.mug / mug.coffee | 1 | 2.9k | KEEP | | | No single mug in PH (only tea_set_01); the procedural mug reads fine | kept |
+| headphones (cushion, plastic, metal) | 1 | 4.2k | KEEP | | | No headphones in PH | kept |
+| pen_cup, ballpoint (6), pencil (4) | 11 | 3k | KEEP | | | No pens in PH; small and fine-edged, which is the point | kept |
+| mouse, keyboard | 2 | 2k | KEEP | | | No match. The keyboard legends are procedural detail | kept |
+| monitor (body, stand, logo) | 1 | 0.7k | KEEP | | | The code-editor screen is procedural text. classic_laptop exists, but the monitor is the subject | kept |
+| cube:case_wood (bookcase carcass, cabinet dividers, jar lid) | 12 | 144 | RETEXTURE | PH oak_veneer or american_walnut_veneer | | The custom 3 m bookcase holds 300 books, so keep the geometry and use real wood | DONE |
+| cube:desk_dark (desk panels, pedestal, modesty panel, pinboard frame, side cabinet) | 8 | 96 | RETEXTURE | PH black_walnut_veneer_01 | | Flat dark colour now | DONE |
+| box_desk_top / cube:desk_wood (drawer fronts) | 4 | 48 | RETEXTURE | PH american_walnut_veneer (or european_walnut_veneer_04) | | Procedural wood_top now; PH veneer has a normal map | DONE |
+| box_mat (leather desk mat) | 1 | 12 | RETEXTURE | PH brown_leather (alt ACG Leather0xx) | | | DONE |
+| cube:brass (drawer pulls) | 3 | 36 | KEEP | | | Tiny; the roughconductor already reads as brass | kept |
+| cube:white_paint (skirting, window frame, mullions, sill) | 11 | 132 | RETEXTURE | ACG PaintedWood0xx (white) | | Painted-wood grain and normal help in close views of the window | DONE |
+| cube:wall (left wall around window) | 4 | 48 | RETEXTURE | PH painted_plaster_wall (tint to match) | | | DONE |
+| rectangle:wall (right and front walls) | 2 | 4 | RETEXTURE | PH painted_plaster_wall / beige_wall_001 | | Real plaster unevenness instead of flat procedural | DONE |
+| rectangle:wall_back (dark wall behind bookcase) | 1 | 2 | RETEXTURE | PH painted_plaster_wall, tint dark green | | | DONE |
+| rectangle:ceiling | 1 | 2 | RETEXTURE | PH white_plaster_02 (alt white_plaster_rough_01) | | Upward views hit it | DONE |
+| rectangle:floor | 1 | 2 | RETEXTURE | PH herringbone_parquet (alt old_wood_floor) | | | DONE |
+| rectangle:rug | 1 | 2 | KEEP | (opt. ACG Carpet0xx normal) | | Procedural woven pattern; no scanned rugs | kept (procedural weave) |
+| rectangle:emitter_backing (4 ceiling panels, 1 shelf strip) | 5 | 10 | KEEP | | | Emitters. Add visible fixtures (below) | kept |
+| plant soils | 5 | 0.3k | (with plants) | | | | kept |
+| rectangle:ground (outside) | 1 | 2 | REPLACE | see outside | | | DONE: leafy_grass garden, brick_pavement, asphalt_02 road |
+| cube:hedge (outside) | 1 | 12 | SUBSTITUTE | shrub_02 x 2-3 | 5.3x2.1x2.1 m each | A real hedge line at 6-8 m | DONE: shrub_02 hedge line |
 
 ## Big-surface textures
 
@@ -67,6 +67,8 @@ Poly Haven `dimensions` are read as [width, depth, height] in m (verified agains
 | outside: facades across the road | brick_wall_006, white_stucco, plastered_stone_wall (one per building) | PH | on procedural facade boxes with recessed windows |
 
 ## Additions
+
+Status: all DONE (room 1-12, outside 1-5), as built in desk.py; the door and curtains are procedural.
 
 **Room** (visible from random poses: corners, ceiling, the other walls)
 1. ArmChair_01 or mid_century_lounge_chair in the empty corner, with throw_pillows_01 and side_table_01 (0.55 m).

@@ -10,12 +10,13 @@
 # What it does:
 #   1. rsyncs renderer/mitsuba to ~/dof_dev on the cluster (your git clone there is left alone; no --delete)
 #   2. picks the allocation to run in: your `interactive` job, else a `dof-render` one (see _remote_lib.sh)
-#   3. runs the command as an `srun --overlap` step inside it, one GPU job at a time (flock), prints the log tail
+#   3. runs the command as a detached `srun --overlap` step inside it (survives VPN drops), one GPU job at a
+#      time (flock); waits for it and prints the log tail
 #   4. copies the --out / --keep directory back (PNG and JSON; EXR=1 adds .exr/.npy)
 # Output paths must be relative to the repo root. Env: HPC_HOST, HPC_DEV_DIR, LOG_LINES (default 40), EXR=1.
 
 set -euo pipefail
-[ $# -ge 2 ] || { sed -n 2,16p "$0"; exit 2; }
+[ $# -ge 2 ] || { sed -n 2,17p "$0"; exit 2; }
 . "$(dirname "$0")/_remote_lib.sh"
 LABEL=$1; shift
 cd "$(repo_root)"
@@ -42,16 +43,26 @@ echo "node \$(hostname -s), GPU: \$(nvidia-smi --query-gpu=name --format=csv,noh
 exec flock /tmp/dof_gpu.lock python -u $CMD
 EOF
 
-echo "running $LABEL on $NODE (allocation $JOB) ..."
-tmp=$(mktemp); status=0
-"${SSH[@]}" "srun --jobid=$JOB --overlap --ntasks=1 --cpus-per-task=${CPUS:-4} -J $LABEL bash $REMOTE/logs/$LABEL.sh" >"$tmp" 2>&1 || status=$?
-grep -v '^  \[' "$tmp" | tail -"${LOG_LINES:-40}" || true
-rm -f "$tmp"
+# The step is detached on the login node and writes its log and exit code to the NFS home, so a VPN drop
+# only interrupts the polling below, never the render. Rerunning a label while it is still running is refused.
+LOG=$REMOTE/logs/$LABEL.log; EXITF=$REMOTE/logs/$LABEL.exit
+"${SSH[@]}" "squeue -u $USER_NAME -s -h -o '%j' | grep -qx '$LABEL'" && { echo "$LABEL is already running" >&2; exit 1; }
+"${SSH[@]}" "rm -f $LOG $EXITF; setsid nohup bash -c 'srun --jobid=$JOB --overlap --ntasks=1 --cpus-per-task=${CPUS:-4} -J $LABEL bash $REMOTE/logs/$LABEL.sh >$LOG 2>&1; echo \$? >$EXITF' </dev/null >/dev/null 2>&1 &"
+echo "running $LABEL on $NODE (allocation $JOB); log at $LOG ..."
+status=
+until [ -n "$status" ]; do
+  sleep 15
+  status=$("${SSH[@]}" "cat $EXITF 2>/dev/null" 2>/dev/null) || status=   # ssh down: keep waiting
+done
+until "${SSH[@]}" "cat $LOG" 2>/dev/null | grep -v '^  \[' | tail -"${LOG_LINES:-40}"; do sleep 15; done
 
 if [ -n "$OUT" ]; then
   mkdir -p "$OUT"
   filter=(--exclude '*.exr' --exclude '*.npy'); [ "${EXR:-0}" = 1 ] && filter=()
-  rsync -az ${filter[@]+"${filter[@]}"} -e "ssh -o BatchMode=yes" "$HOST:$REMOTE/$OUT/" "$OUT/" || true
+  for _ in $(seq 40); do   # retries ride out a VPN drop (10 min)
+    rsync -az ${filter[@]+"${filter[@]}"} -e "ssh -o BatchMode=yes" "$HOST:$REMOTE/$OUT/" "$OUT/" && break
+    sleep 15
+  done
   echo "results in $OUT (exit $status)"
 fi
 exit $status

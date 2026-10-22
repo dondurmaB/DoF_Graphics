@@ -46,6 +46,15 @@ from scene_api import BuildContext, SceneBundle, SceneDef, View
 from scene_kit import Assets, SceneBuilder, luminance, principled, rgb, xf
 from scenes import _pool_props as P
 from scenes import _pool_tex as T
+import web_assets as W
+
+
+def web(b: SceneBuilder, aid: str, at, yaw: float = 0.0, scale: float = 1.0, height=None, prefix=None):
+    """Place a pinned CC0 scan (Poly Haven); glass parts convert opaque, so they are hidden."""
+    m = W.model(aid)
+    hide = {p.name: {"type": "null"} for p in m.parts if p.name.endswith("_glass")}
+    W.add(b, m, W.place(m, at=at, yaw=yaw, scale=scale, height=height), prefix=prefix, overrides=hide or None)
+    return m
 
 # ---- layout --------------------------------------------------------------------------------------------------
 X_L, X_R, Z_N, Z_F, CEIL = -9.5, 13.0, 6.0, -30.0, 8.0
@@ -75,7 +84,7 @@ UPLIGHT_L = 40.0                                    # an up-facing disc on top: 
 UPLIGHT_SAMPLE_SHARE = 0.2
 PENDANT_RGB = (1.0, 0.93, 0.82)
 SCORE_LEVEL = 2.5
-ASSET_VERSION = 4
+ASSET_VERSION = 5
 
 FLOAT_COLS = [(0.62, 0.03, 0.03), (0.02, 0.10, 0.48), (0.85, 0.62, 0.03), (0.03, 0.42, 0.12), (0.86, 0.86, 0.84),
               (0.95, 0.35, 0.03)]
@@ -159,22 +168,14 @@ def add_materials(b: SceneBuilder, As: Assets, Ad: Assets, ctx: BuildContext) ->
     pr = png(As, "mosaic_pool_r", lambda: T.mosaic(11, T.POOL_PALETTE, T.POOL_WEIGHTS)[1], gray=True)
     la = png(As, "mosaic_lane", lambda: T.mosaic(12, T.LANE_PALETTE, [0.5, 0.3, 0.2])[0])
     lr = png(As, "mosaic_lane_r", lambda: T.mosaic(12, T.LANE_PALETTE, [0.5, 0.3, 0.2])[1], gray=True)
-    wa = png(As, "mosaic_white", lambda: T.mosaic(13, T.WHITE_PALETTE, [0.5, 0.3, 0.2], tile_m=0.125, ppm=768)[0])
-    wr = png(As, "mosaic_white_r", lambda: T.mosaic(13, T.WHITE_PALETTE, [0.5, 0.3, 0.2], tile_m=0.125, ppm=768)[1], gray=True)
     b.material("water", {"type": "dielectric", "int_ior": 1.333, "ext_ior": 1.000277,
                          "specular_transmittance": rgb(0.88, 0.96, 0.97)})
     b.material("pool_tile", principled(tex(pa), tex(pr, raw=True), specular=0.5))
     b.material("lane_tile", principled(tex(la), tex(lr, raw=True), specular=0.5))
-    b.material("white_tile", principled(tex(wa), tex(wr, raw=True), specular=0.5))
-    W, D = STAND_X0 - X_L, Z_N - Z_F
-    rect_pool = (-PX - X_L, PX - X_L, PZ1 - Z_F, PZ0 - Z_F)
-    da = Ad.root / "textures" / "deck.png"
-    dr = Ad.root / "textures" / "deck_r.png"
-    if Ad.rebuild or not (da.exists() and dr.exists()):
-        alb, rough = T.deck(ctx.seed * 7 + 1, W, D, pool_rect=rect_pool)
-        T.save_png8(da, alb)
-        T.save_png8(dr, np.repeat(rough[..., None], 3, -1))
-    b.material("deck", principled(tex(str(da)), tex(str(dr), raw=True), specular=0.5))
+    b.material("white_tile", W.surface("square_tiled_wall"))
+    deck_w, deck_d = STAND_X0 - X_L, Z_N - Z_F
+    # Scanned anti-slip tile; the deck mesh's uv spans the whole floor, so scale to its size in tiles.
+    b.material("deck", W.surface("anti_skid_tiles", uv_scale=(deck_w / 1.8, deck_d / 1.8)))
     b.material("coping", principled((0.86, 0.87, 0.86), 0.16, specular=0.5))
     b.material("coping_edge", principled((0.03, 0.07, 0.24), 0.2, specular=0.5))
     b.material("steel", {"type": "roughconductor", "material": "Cr", "alpha": 0.10})
@@ -182,15 +183,11 @@ def add_materials(b: SceneBuilder, As: Assets, Ad: Assets, ctx: BuildContext) ->
     b.material("block_mat", principled((0.04, 0.04, 0.045), 0.85))
     b.material("white_paint", principled((0.86, 0.86, 0.84), 0.35, specular=0.5))
     b.material("chair_seat", principled((0.66, 0.06, 0.05), 0.45, specular=0.5))
-    wp = png(As, "teak", lambda: G.straight_wood(512, 512, seed=21, base=(0.62, 0.42, 0.24), dark=(0.42, 0.26, 0.13))[0])
-    b.material("bench_wood", principled(tex(wp, scale=(1.0, 4.0)), 0.45))
-    gp = png(As, "glulam", lambda: G.straight_wood(512, 512, seed=22, base=(0.78, 0.60, 0.40), dark=(0.62, 0.45, 0.28))[0])
-    b.material("glulam", principled(tex(gp, scale=(0.25, 1.0)), 0.55))
-    cp = png(As, "concrete", lambda: G.plaster(1024, 1024, (0.60, 0.59, 0.57), seed=23, strength=0.12))
-    b.material("concrete", principled(tex(cp, scale=(1 / 3.0, 1 / 3.0)), 0.85))
-    pp = png(As, "plaster", lambda: G.plaster(1024, 1024, (0.84, 0.82, 0.77), seed=24))
-    b.material("plaster", principled(tex(pp, scale=(1 / 4.0, 1 / 4.0)), 0.8))
-    b.material("ceiling", {"type": "diffuse", "reflectance": rgb(0.80, 0.80, 0.78)})
+    b.material("bench_wood", W.surface("brown_planks_04"))
+    b.material("glulam", W.surface("beam_wall_01"))
+    b.material("concrete", W.surface("brushed_concrete"))
+    b.material("plaster", W.surface("beige_wall_001", tint=(1.12, 1.12, 1.1)))
+    b.material("ceiling", W.surface("roof_planks"))
     b.material("alu", principled((0.13, 0.14, 0.15), 0.4, metallic=0.6))
     b.material("duct", {"type": "roughconductor", "material": "Al", "alpha": 0.28})
     b.material("backing", {"type": "diffuse", "reflectance": rgb(0.02, 0.02, 0.02)})
@@ -198,15 +195,15 @@ def add_materials(b: SceneBuilder, As: Assets, Ad: Assets, ctx: BuildContext) ->
     b.material("door", principled((0.16, 0.19, 0.22), 0.5, specular=0.5))
     b.material("rubber", principled((0.03, 0.03, 0.03), 0.8))
     b.material("cord", principled((0.85, 0.85, 0.82), 0.7))
-    gr = png(As, "grass", lambda: T.grass(31))
-    b.material("grass", principled(tex(gr, scale=(1 / 8.0, 1 / 8.0)), 0.92))
-    b.material("path", principled((0.47, 0.46, 0.43), 0.85))
+    b.material("grass", W.surface("leafy_grass"))
+    b.material("path", W.surface("concrete_pavement_02"))
     b.material("bark", principled((0.12, 0.09, 0.06), 0.9))
     b.material("leaf", {"type": "twosided", "bsdf": principled((0.08, 0.24, 0.05), 0.5)})
     b.material("leaf2", {"type": "twosided", "bsdf": principled((0.14, 0.30, 0.06), 0.5)})
     b.material("hedge", {"type": "twosided", "bsdf": principled((0.04, 0.16, 0.04), 0.55)})
-    fac = png(As, "facade", lambda: T.window_grid(41))
-    b.material("facade", principled(tex(fac, scale=(1 / 12.0, 1 / 12.0)), 0.5, specular=0.5))
+    b.material("facade", W.surface("rectangular_facade_tiles"))
+    b.material("facade_glass", principled((0.03, 0.04, 0.05), 0.05, specular=0.8))
+    b.material("facade_frame", principled((0.15, 0.16, 0.17), 0.4, metallic=0.5))
     for i, c in enumerate(FLOAT_COLS):
         b.material(f"float_{i}", principled(c, 0.35, specular=0.5))
     for i, c in enumerate(FLAG_COLS):
@@ -358,8 +355,7 @@ def add_deck_furniture(b: SceneBuilder, As: Assets, Ad: Assets, ctx: BuildContex
     parts = Ad.meshes("toys", toys)
     for key, path in parts.items():
         b.ply(path, G.translate((RACK[0], 0.0, RACK[1])), f"toy_{int(key[1:])}", prefix="toy")
-    mesh_once(b, As, "bin", lambda: G.lathe([(0, 0), (0.30, 0), (0.33, 0.6), (0.31, 0.6), (0.28, 0.02), (0, 0.02)], 32),
-              G.translate((BIN[0], 0.0, BIN[1])), "toy_1", "bin")
+    web(b, "plastic_container", at=(BIN[0], 0.0, BIN[1]), yaw=90.0)
     focus["kickboards"] = [RACK[0], 0.75, RACK[1]]
 
     # depth marks painted on the deck beside the coping, readable from the deck
@@ -536,20 +532,61 @@ def add_outside(b: SceneBuilder, As: Assets, ctx: BuildContext, focus: dict) -> 
     b.material("treeline", {"type": "twosided", "bsdf": principled((0.07, 0.11, 0.08), 0.9)})
     b.ply(As.mesh("treeline", lambda: P.treeline(900.0, 81)), np.eye(4), "treeline", prefix="treeline")
     b.box_mesh("path", (-11.2, -0.01, (Z_N + Z_F) / 2), (2.6, 0.04, Z_N - Z_F + 20.0), "path")
+    # Hedge runs of scanned shrubs (instanced), trees from three scanned species (each stored once).
     for i in range(3):
-        hp = As.mesh(f"hedge_{i}", lambda i=i: P.hedge(12.0, 60 + i))
-        b.ply(hp, G.compose(G.translate((-14.0, 0.0, Z_N - 6.0 - 12.0 * i)), G.rotate((0, 1, 0), 90.0)), "hedge", prefix="hedge")
-    trees = [As.meshes(f"tree_{i}", lambda i=i: P.tree(70 + i, 6.5 + i, 2.4 + 0.4 * i)) for i in range(3)]
+        z0 = Z_N - 6.0 - 12.0 * i
+        for k in range(4):
+            web(b, "shrub_02", at=(-14.0 + rng.uniform(-0.3, 0.3), 0.0, z0 - 1.5 - 3.0 * k),
+                yaw=90.0 + rng.uniform(-20, 20), height=rng.uniform(1.2, 1.5))
+    species = [("tree_small_02", 1.4), ("searsia_lucida", 1.3), ("island_tree_02", 0.9)]
     spots = []
     for j in range(7):
         x, z = rng.uniform(-36.0, -17.0), rng.uniform(-38.0, 12.0)
         spots.append((x, z))
-        t = trees[j % 3]
-        b.part_set(t, G.compose(G.translate((x, 0.0, z)), G.rotate((0, 1, 0), rng.uniform(0, 360)), G.scale(rng.uniform(0.85, 1.2))),
-                   {"trunk": "bark", "leaf": "leaf" if j % 2 else "leaf2"})
+        aid, s = species[j % 3]
+        web(b, aid, at=(x, 0.0, z), yaw=rng.uniform(0, 360), scale=s * rng.uniform(0.9, 1.1))
     near = min(spots, key=lambda s: abs(s[1] + 12.0) + 0.3 * abs(s[0]))
     focus["tree_outside"] = [near[0], 4.5, near[1]]
-    b.box_mesh("far_building", (-78.0, 11.0, -14.0), (24.0, 22.0, 70.0), "facade")
+    # Shrubs along the glazing foot soften the lawn edge; a picnic table and path lamps on the lawn.
+    for z in np.arange(Z_N - 1.0, Z_F, -3.1):
+        web(b, "shrub_04", at=(X_L - 0.9, 0.0, z + rng.uniform(-0.4, 0.4)), yaw=rng.uniform(0, 360))
+    web(b, "wooden_picnic_table", at=(-17.5, 0.0, -9.0), yaw=rng.uniform(70, 110))
+    for z in (2.0, -12.0, -26.0):
+        web(b, "street_lamp_01", at=(-12.8, 0.0, z), yaw=90.0)
+    # Far building: two masses with recessed window bands instead of one painted box.
+    for cx, cz, w, d, h in ((-78.0, -14.0, 24.0, 70.0, 22.0), (-60.0, 30.0, 18.0, 26.0, 14.0)):
+        b.box_mesh(f"far_building_{int(cz)}", (cx, h / 2, cz), (w, h, d), "facade")
+        xf_ = cx + w / 2
+        for y in np.arange(3.2, h - 1.0, 3.4):
+            b.box_mesh(f"far_band_{int(cz)}_{int(y * 10)}", (xf_ + 0.02, y, cz), (0.06, 1.5, d - 3.0), "facade_glass")
+            for zz in np.arange(cz - d / 2 + 1.5, cz + d / 2 - 1.4, 1.8):
+                b.box_mesh(f"far_mull_{int(cz)}", (xf_ + 0.07, y, zz), (0.08, 1.5, 0.08), "facade_frame")
+
+
+def add_extras(b: SceneBuilder, ctx: BuildContext, focus: dict) -> None:
+    """Things every real indoor pool has: lifebuoy, extinguisher, wet-floor sign, chairs, chemicals, hose."""
+    rng = np.random.default_rng(ctx.seed * 53 + 2)
+    zf, zn = Z_F + 0.02, Z_N - 0.02
+    web(b, "lifebuoy", at=(-7.0, 1.0, zf + 0.02), yaw=0.0)
+    focus["lifebuoy"] = [-7.0, 1.4, zf + 0.1]
+    web(b, "korean_fire_extinguisher_01", at=(6.85, 0.0, zf + 0.15), yaw=0.0)
+    if rng.random() < 0.7:
+        web(b, "WetFloorSign_01", at=(-7.0 + rng.uniform(-0.2, 0.2), 0.0, -2.6), yaw=rng.uniform(0, 360))
+    web(b, "plastic_container", at=(5.6, 0.0, zf + 0.5), yaw=0.0, prefix="deck_bin")
+    for z, yaw in ((-9.6, 95.0), (-10.3, 80.0), (-15.6, 100.0)):
+        web(b, "plastic_monobloc_chair_01", at=(-8.95, 0.0, z), yaw=yaw + rng.uniform(-8, 8))
+    for x in (-5.3, 5.3):
+        web(b, "potted_plant_01", at=(x, 0.0, zn - 0.45), yaw=rng.uniform(0, 360))
+    web(b, "potted_plant_04", at=(-8.3, 0.0, zn - 0.25), yaw=rng.uniform(0, 360))
+    # Pool chemicals on a low steel shelf by the kickboard rack.
+    sx, sz = -7.4, zn - 0.25
+    b.box_mesh("chem_shelf", (sx, 0.42, sz), (0.9, 0.03, 0.35), "steel")
+    for dx in (-0.43, 0.43):
+        b.box_mesh("chem_leg", (sx + dx, 0.21, sz), (0.03, 0.42, 0.33), "steel")
+    for k, aid in enumerate(("multi_cleaner_5_litre", "all_purpose_cleaner", "bleach_bottle", "bleach_bottle")):
+        web(b, aid, at=(sx - 0.3 + 0.2 * k, 0.435, sz + rng.uniform(-0.05, 0.05)), yaw=180.0 + rng.uniform(-20, 20))
+    web(b, "garden_hose_wall_mounted_01", at=(-1.5, 0.75, zn - 0.02), yaw=180.0)
+    web(b, "utility_box_01", at=(8.55, 0.0, zn - 0.35), yaw=180.0)
 
 
 # ---- assembly ----------------------------------------------------------------------------------------------------------------
@@ -563,6 +600,7 @@ def build(ctx: BuildContext) -> SceneBundle:
     add_hall(b, As, Ad, ctx, focus)
     add_far_wall(b, As, Ad, ctx, focus)
     add_outside(b, As, ctx, focus)
+    add_extras(b, ctx, focus)
     b.d["sky"] = env_kit.sky(ctx.env, sun_direction=SUN_DIR, scale=SKY_SCALE[ctx.env],
                              sampling_weight=max(SKY_SHARE * b.lamp_weight, 1e-3))
     focus["coping_edge"] = [-PX - 0.15, 0.015, -12.5]
@@ -577,7 +615,12 @@ def exclude_boxes() -> tuple:
              ((X_L, 0.0, BIN[1] - 0.6), (RACK[0] + 0.5, 1.6, RACK[1] + 0.8)),               # rack, noodle bin
              ((-9.3, 0.0, -7.8), (-8.4, 1.0, -5.2)), ((-9.3, 0.0, -19.8), (-8.4, 1.0, -17.2)),
              ((-9.3, 0.0, -26.8), (-8.4, 1.0, -24.2)), ((-4.8, 0.0, 4.9), (-2.2, 1.0, 5.9)),
-             ((2.2, 0.0, 4.9), (4.8, 1.0, 5.9))]                                            # bench spots
+             ((2.2, 0.0, 4.9), (4.8, 1.0, 5.9)),                                             # bench spots
+             ((-9.4, 0.0, -10.8), (-8.5, 1.0, -9.1)), ((-9.4, 0.0, -16.1), (-8.5, 1.0, -15.1)),  # monobloc chairs
+             ((-8.0, 0.0, 5.3), (-6.8, 0.8, 6.0)), ((-8.7, 0.0, 5.4), (-7.9, 0.6, 6.0)),     # chemicals shelf, plant
+             ((-5.8, 0.0, 5.0), (-4.8, 1.5, 6.0)), ((4.8, 0.0, 5.0), (5.8, 1.5, 6.0)),       # entrance plants
+             ((8.0, 0.0, 5.2), (9.0, 1.2, 6.0)), ((5.1, 0.0, -29.98), (6.1, 0.5, -29.0)),    # utility box, deck bin
+             ((6.5, 0.0, -30.0), (7.2, 0.7, -29.4))]                                        # extinguisher
     for side, z in LADDERS:
         x0 = side * PX
         boxes.append(((min(x0, x0 + side * 0.6) - 0.1, -0.2, z - 0.45), (max(x0, x0 + side * 0.6) + 0.1, 1.15, z + 0.45)))

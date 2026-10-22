@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import subprocess
 import sys
 import time
@@ -82,6 +83,12 @@ def pick_variant(requested: str) -> str:
     for variant, backend in backends:
         jb = getattr(dr.JitBackend, backend, None)
         if variant in mi.variants() and jb is not None and dr.has_backend(jb):
+            # On a GPU node a CUDA init failure (e.g. memory held by other processes) must not silently
+            # become a ~100x slower CPU render.
+            if backend != "CUDA" and (os.environ.get("CUDA_VISIBLE_DEVICES") or os.environ.get("SLURM_JOB_GPUS")):
+                raise RuntimeError(f"GPU allocated but CUDA is unavailable; refusing to fall back to {variant}. "
+                                   "Check nvidia-smi for memory held by other processes, or pass --variant.")
+            print(f"variant: {variant}", file=sys.stderr)
             mi.set_variant(variant)
             return variant
     mi.set_variant("scalar_rgb")
@@ -196,23 +203,29 @@ def save_png(path: Path, rgb01: np.ndarray) -> None:
     Image.fromarray((np.clip(rgb01, 0, 1) * 255 + 0.5).astype(np.uint8)).save(path)
 
 
-def render_beauty(scene, sensor_dict, spp, chunk, seed, label):
-    import mitsuba as mi
+def render_beauty(scene, lens: Lens, width, height, thin_lens: bool, spp, chunk, seed, label):
+    """Linear RGB through `lens` (thin lens or pinhole), `spp` samples in frozen calls of `chunk`.
 
-    sensor = mi.load_dict(sensor_dict)
-    total = np.zeros((sensor_dict["film"]["height"], sensor_dict["film"]["width"], 3), np.float64)
+    Same image as mi.render with `lens.sensor(...)` (gaussian pixel filter), without its per-call
+    retracing (lens_trace.py): the filter-weighted sums of all chunks are added, then divided once.
+    """
+    import lens_trace as LT
+
+    total = np.zeros((height, width, 4), np.float64)
     done, k, t0 = 0, 0, time.time()
     while done < spp:
         n = min(chunk, spp - done)
-        img = mi.render(scene, sensor=sensor, spp=n, seed=seed * 100003 + k)
-        total += np.asarray(img, dtype=np.float64)[..., :3] * n
+        total += LT.trace_sums(scene, lens, width, height, n, seed * 100003 + k, aperture=thin_lens)
         done += n
         k += 1
         print(f"  [{label}] {done}/{spp} spp  {time.time() - t0:6.1f}s", flush=True)
-    return (total / spp).astype(np.float32), time.time() - t0
+    return (total[..., :3] / np.maximum(total[..., 3:], 1e-12)).astype(np.float32), time.time() - t0
 
 
-def render_gbuffer(scene, sensor_dict, lens: Lens, seed):
+_AOV = {}
+
+
+def render_gbuffer(scene, lens: Lens, width, height, seed):
     """One jittered sample per pixel: every value belongs to a single surface.
 
     Averaging many samples would blend foreground and background depth along
@@ -220,12 +233,15 @@ def render_gbuffer(scene, sensor_dict, lens: Lens, seed):
     wrong ground truth for a depth-of-field study.
     """
     import mitsuba as mi
+    import lens_trace as LT
 
-    integrator = mi.load_dict({"type": "aov", "aovs": "pos:position,nn:sh_normal,alb:albedo,idx:shape_index,t:depth"})
-    sensor = mi.load_dict(sensor_dict)
+    integrator = _AOV.get("gbuffer")
+    if integrator is None:  # one instance, so its frozen recording is reused across calls
+        integrator = _AOV["gbuffer"] = mi.load_dict(
+            {"type": "aov", "aovs": "pos:position,nn:sh_normal,alb:albedo,idx:shape_index,t:depth"})
     t0 = time.time()
-    img = np.asarray(mi.render(scene, sensor=sensor, integrator=integrator, spp=1, seed=seed), np.float32)
-    names = [n.split(".")[0] for n in integrator.aov_names()]
+    img = LT.trace_aovs(scene, lens, width, height, seed, integrator)
+    names = [n.split(".")[0] for n in integrator.aov_names()] + ["coc_valid"]
     layers = {n: img[..., [i for i, m in enumerate(names) if m == n]] for n in dict.fromkeys(names)}
     pos, hit = layers["pos"], layers["t"][..., 0] > 0
     depth = np.einsum("hwc,c->hw", pos - lens.origin.astype(np.float32), lens.forward.astype(np.float32))
@@ -270,7 +286,10 @@ def git_state() -> dict:
         run = lambda *c: subprocess.run(["git", *c], cwd=REPO, capture_output=True, text=True, check=True).stdout.strip()
         return {"commit": run("rev-parse", "HEAD"), "dirty": bool(run("status", "--porcelain", "--untracked-files=no"))}
     except Exception:
-        return {"commit": None, "dirty": None}
+        try:  # a synced copy without .git (the cluster): hpc/_remote_lib.sh sync_code writes this file
+            return json.loads((REPO / "GIT_STATE.json").read_text())
+        except Exception:
+            return {"commit": None, "dirty": None}
 
 
 def main(argv=None) -> int:
@@ -324,22 +343,24 @@ def main(argv=None) -> int:
             "shapes": shapes, "triangles": tris, "passes": {}}
 
     if "sharp" in args.passes:
-        rgb, sec = render_beauty(scene, lens.sensor(args.width, args.height, args.spp, False),
-                                 args.spp, args.spp_per_pass, args.seed, "sharp")
+        rgb, sec = render_beauty(scene, lens, args.width, args.height, False, args.spp, args.spp_per_pass,
+                                 args.seed, "sharp")
         mi.Bitmap(rgb).write(str(out / "sharp.exr"))
         save_png(out / "sharp.png", tonemap(rgb, args.exposure))
         meta["passes"]["sharp"] = {"spp": args.spp, "seconds": round(sec, 2)}
     if "dof" in args.passes:
         spp = args.dof_spp or args.spp
-        rgb, sec = render_beauty(scene, lens.sensor(args.width, args.height, spp, True),
-                                 spp, args.spp_per_pass, args.seed + 1, "dof")
+        rgb, sec = render_beauty(scene, lens, args.width, args.height, True, spp, args.spp_per_pass,
+                                 args.seed + 1, "dof")
         mi.Bitmap(rgb).write(str(out / "dof.exr"))
         save_png(out / "dof.png", tonemap(rgb, args.exposure))
         meta["passes"]["dof"] = {"spp": spp, "seconds": round(sec, 2)}
     if "gbuffer" in args.passes:
-        depth, layers, sec = render_gbuffer(scene, lens.sensor(args.width, args.height, 1, False, "box"),
-                                            lens, (args.seed + 2) * 100003 + 50000)
+        depth, layers, sec = render_gbuffer(scene, lens, args.width, args.height,
+                                            (args.seed + 2) * 100003 + 50000)
         np.save(out / "depth.npy", depth)
+        np.save(out / "coc_valid.npy", layers["coc_valid"][..., 0].astype(np.uint8))
+        meta["coc_valid_fraction"] = float(layers["coc_valid"].mean())
         mi.Bitmap(np.where(np.isfinite(depth), depth, 0.0)[..., None]).write(str(out / "depth.exr"))
         finite = depth[np.isfinite(depth)]
         near, far = float(finite.min()), float(np.percentile(finite, 99.5))

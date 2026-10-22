@@ -100,7 +100,7 @@
     <div class="toast" id="toast"></div>
     <section class="keys">
       <kbd>drag</kbd> look &nbsp; <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; <kbd>Q</kbd><kbd>E</kbd> down/up<br>
-      <kbd>Shift</kbd> faster &nbsp; <kbd>click</kbd> focus there &nbsp; <kbd>scroll</kbd> focus distance<br>
+      <kbd>Shift</kbd> faster &nbsp; <kbd>click</kbd> focus there &nbsp; <kbd>scroll</kbd> focus distance &nbsp; <kbd>pinch</kbd> focal length<br>
       <kbd>1</kbd>–<kbd>5</kbd> DoF / sharp / depth / CoC / traditional &nbsp; <kbd>[</kbd> <kbd>]</kbd> aperture
     </section>
   </aside>
@@ -199,8 +199,20 @@ window.addEventListener('mouseup', async e => {
   const res = await post('/pick', {u, v});
   $('toast').textContent = res.depth ? `focused at ${res.depth.toFixed(2)} m` : 'nothing there (sky)';
 });
+// A trackpad pinch arrives as a wheel event with ctrlKey set (Chrome, Firefox, Edge): pinch zooms the focal
+// length, plain two-finger scroll keeps moving the focus distance.
+const LENS = [16, 135];
+function zoomTo(mm) { if (!S) return;
+  const v = Math.min(LENS[1], Math.max(LENS[0], mm)); S.lens_mm = v;
+  $('lens').value = Math.round(v); $('lens_o').textContent = Math.round(v) + ' mm'; set({lens_mm: v}); }
 frame.addEventListener('wheel', e => { e.preventDefault(); if (!S) return;
+  if (e.ctrlKey) { zoomTo(S.lens_mm * Math.exp(-e.deltaY * 0.01)); return; }
   const f = S.focus_m * Math.exp(-e.deltaY * 0.0015); S.focus_m = f; set({focus_m: f}); }, {passive: false});
+// Safari reports pinches as gesture events with a cumulative scale instead.
+let pinchStart = null;
+frame.addEventListener('gesturestart', e => { e.preventDefault(); pinchStart = S ? S.lens_mm : null; });
+frame.addEventListener('gesturechange', e => { e.preventDefault(); if (pinchStart) zoomTo(pinchStart * e.scale); });
+frame.addEventListener('gestureend', e => { e.preventDefault(); pinchStart = null; });
 
 // Keyboard movement, sent at a fixed rate while keys are held.
 const held = new Set();

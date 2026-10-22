@@ -94,3 +94,35 @@ Mitsuba cafe verified locally (`metal_ad_rgb`, M4 Max):
 - macOS OpenGL support is deprecated by Apple, though it remains suitable for this educational/research demo.
 - Runtime behavior depends on the current machine's OpenGL context and windowing environment; the current native smoke test passed on this machine, but future machines should rerun `--verify`.
 - Glass caustics in the Mitsuba scene converge slowly under unidirectional path tracing; DoF-pass references need 2048+ spp.
+
+## 2026-10-17 — Mitsuba DoF dataset scenes (renderer/mitsuba)
+
+- Work done: all ten artificial training scenes now use pinned CC0 web assets per `renderer/mitsuba/scenes/substitutions/<scene>.md` (statuses DONE/REVERTED per row). Committed today: workshop, museum, desk, pool, night_street (terminal, cafe, courtyard, greenhouse, rooftop earlier). `remote_run.sh` now detaches cluster steps so VPN drops do not kill renders; `pick_variant` refuses a silent LLVM fallback on GPU nodes; `web_assets` warns on mis-scaled assets.
+- Verification: per scene on the cluster — `check_scene.py` (0 failures on all five), `audit_poses.py` contact sheets for sampler seeds 0 and 1, `sampler.py --dry-run` (0 failed samples); local `tests/test_scene_api.py` passes.
+- State: pushed to `origin/ray-work`; viewers run as srun steps on the `dof-render` allocation (GPU memory fits ~8 viewers).
+- Risks: per-`mi.render` tracing overhead is ~10 s on workshop (0.5–1 s elsewhere); `dr.freeze` cuts it to 0.04 s in isolation but failed to record through `render_beauty` (memcpy_async / uncaptured variable) and was reverted. Open GPU viewers can starve render jobs of memory.
+- Next: fix frozen rendering before A100 bulk generation; val/test/test_ood scenes from the other author; haze, coc_valid, sharding.
+
+## 2026-10-20 — Fast dataset rendering, data protocol (renderer/mitsuba, ai/)
+
+- Work done: `lens_trace.py` now renders the dataset passes too. The gaussian pixel filter is splatted with Mitsuba's own ImageBlock inside a `dr.freeze` recording, and the G-buffer comes from a frozen AOV kernel. `render_beauty` / `render_gbuffer` take a `Lens` plus size, and `sampler.py`, `audit_poses.py` and `render.py` (so `check_scene.py`) use them. Bitmap-textured emitters are sampled once before recording (they broke recording on desk, museum, night_street, terminal and cafe). Viewer: trackpad pinch sets the focal length. `ai/DATA_PROTOCOL.md` v0: input `[B,4,512,512]` = sharp RGB + signed CoC, target DoF RGB, linear HDR colour (`log(1 + radiance * auto_exposure_scale)`), EXR/npy formats, G-buffer use, depth units, active learning.
+- Verification (cluster GPU): all 11 scenes record; fast vs `mi.render` on Cornell, desk and workshop: method difference equals noise (ratio 0.98–1.04, edges included), same noise, means within 0.1%; G-buffer depth median relative difference under 0.1%. `sampler.py` end to end on workshop (3 poses) and night_street (2 poses), 0 failures. Workshop DoF pass 3 s vs 92 s; a pose (sharp 128 + 2 DoF 256 spp at 960x540) about 2.3 s after a one-time ~30 s of recording per process.
+- State: committed and pushed to `origin/ray-work`. One viewer runs at a time (courtyard was last).
+- Risks: the first calls of each new (size, spp) record for 20–50 s on heavy scenes, so chunks should keep one size; the protocol's `coc_valid`, loader and sharding are still todo; held-out scenes not built.
+- Next: `coc_valid` mask, `ai/data.py` loader with its test, then a first generation run per scene on the cluster.
+
+## 2026-10-21 — 10k training set generating (renderer/mitsuba, ai/)
+
+- Work done: data protocol v1 (`ai/DATA_PROTOCOL.md`): x = sharp HDR RGB + 1/z + 6 broadcast camera settings (f, N, A, 1/s, sensor h, frame H), y = DoF RGB, colour log(1 + L * exposure), no masks; `ai/data.py` implements it. `generate.py` (plan / work / status / release / sheet) with an NFS-safe chunk queue, per-worker manifests, self-requeueing jobs (`hpc/ws_generate.slurm`) and orphan adoption. Blur floor raised to 0.5% of image height (5.4 px p95 at 1080p); poses that cannot reach it are redrawn.
+- Verification: protocol check on 64 pilot samples (0 bad; blur computed from x matches coc.npy within 5e-6). Pilot: all 10 scenes, 80 poses, 0 failures, ~75 s/pose on an RTX 5000 Ada. CIAI A100 benchmark: ~11 min/pose on cafe (12x slower, no RT cores; GPU not shared), so rendering stays on the RTX cluster. Requeue tested on a 12-minute job.
+- State: 10k run (5,000 poses, clear + overcast) started 2026-10-21 10:04 into `~/dof_dev/dataset/train10k` on the student-lab cluster: job 241177 plus a worker step in the interactive job 240004; a local watcher submits a second job when 240004 ends. ETA about 2.2 days.
+- Risks: wet and snow presets look wrong (night_street wet renders daylight; courtyard snow/wet look like clear), so they are excluded until fixed. The 2-job QoS cap limits the run to 2 GPUs.
+- Next: check sheets from the first finished chunks; fix the wet and snow presets; held-out scenes from the other author.
+
+## 2026-10-22 — 10k run: renders shipped to CIAI /nfs-stor (renderer/mitsuba)
+
+- Work done: the student-lab home quota (hidden; hit at ~52 GB) stopped both workers on 2026-10-21 at 12:36 after 322 poses. The data was copied to CIAI `/nfs-stor` over a restricted ssh key (`ciai-copy` on the student-lab cluster) and `generate.py work --ship-to` now copies each finished chunk there and empties it locally, so home holds only chunks in progress. Generation was paused 21:00–10:45 while `/nfs-stor/rui.gao` was reorganized into `Researches/<project>/`; jobs were resubmitted with the new destination, and the CIAI paths in `ciai_generate.slurm` follow the new layout.
+- Verification: test write through the key to the new path; first automatic ship `shipped 38 poses`, CIAI then holds 360 finished poses (322 + 38, 49 GB) and the home staging dir 2.3 GB.
+- State: jobs 242566 / 242567 on ws-l1-002 / ws-l5-013 shipping to `ciai-copy:/nfs-stor/rui.gao/Researches/dof/dof_dataset/train10k`; 7 of 100 chunks done, ~4,640 poses left, ETA about 36 h (Friday night).
+- Risks: if shipping fails repeatedly, poses accumulate in home and the quota fills again. Do not use the student-lab `/l` (storage migration).
+- Next: check sheets from shipped chunks on CIAI; fix wet/snow presets; decide whether to drop gbuffer/coc to save space.

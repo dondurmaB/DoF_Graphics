@@ -29,6 +29,28 @@ from scene_api import BuildContext, SceneBundle, SceneDef, View
 from scene_kit import Assets, SceneBuilder, luminance, principled, rgb
 from scenes import _night_street_facade as F
 from scenes import _night_street_props as P
+import web_assets as W
+
+# Scanned CC0 wall textures per facade colour; stucco is one plaster scan tinted per colour.
+WALL_SCANS = {"brick_red": "red_brick_03", "brick_brown": "brick_wall_02", "brick_buff": "yellow_bricks",
+              "stone_grey": "stone_brick_wall_001", "stone_beige": "sandstone_blocks_05"}
+
+
+def web(b, aid: str, at, yaw: float = 0.0, scale: float = 1.0, height=None, prefix=None):
+    m = W.model(aid)
+    hide = {p.name: {"type": "null"} for p in m.parts if p.name.endswith("_glass") or p.name.endswith("_graffiti")}
+    W.add(b, m, W.place(m, at=at, yaw=yaw, scale=scale, height=height), prefix=prefix, overrides=hide or None)
+    return m
+
+
+def wet_surface(aid: str, wet: bool, darken: float, roughness=None, **kw) -> dict:
+    """Scanned surface, darkened when wet; `roughness` (a texture dict or float) replaces the scan's own."""
+    s = W.surface(aid, tint=(darken,) * 3 if wet else None, **kw)
+    bsdf = s["bsdf"] if s.get("type") == "normalmap" else s
+    if roughness is not None:
+        bsdf["roughness"] = roughness
+    bsdf["specular"] = 0.5
+    return s
 
 ROAD_HALF, KERB_W, PAVE_OUT, Z_NEAR, Z_FAR = 4.5, 0.15, 7.5, 10.0, -68.0
 CROSSING = (-21.5, -18.5)
@@ -56,6 +78,32 @@ BUILDINGS = {
          (9, 6, "stucco", "stucco_ochre", {}), (14, 4, "brick", "brick_red", {}), (12, 5, "stone", "stone_beige", {})],
 }
 END_CAPS = [(Z_FAR, 7, "stone", "stone_grey", 0.0), (Z_NEAR, 6, "brick", "brick_brown", 180.0)]
+
+# Scanned street clutter: (model, x, y, z, yaw, scale); y = 0.15 is pavement level. Seed-independent.
+PAVE_Y = 0.15
+STREET_PROPS = [
+    ("fire_hydrant", -4.95, PAVE_Y, -11.4, 90.0, 1.0), ("fire_hydrant", 5.0, PAVE_Y, -33.6, -90.0, 1.0),
+    ("trashbag", 7.1, PAVE_Y, -2.7, 20.0, 1.0), ("trashbag", 6.75, PAVE_Y, -3.2, 140.0, 0.9),
+    ("trashbag", 7.15, PAVE_Y, -3.45, 260.0, 0.8), ("street_rat", 6.6, PAVE_Y, -2.4, 200.0, 1.0),
+    ("cardboard_box_01", 7.15, PAVE_Y, -4.3, 10.0, 1.0), ("cardboard_box_01", 7.1, PAVE_Y + 0.3, -4.25, 35.0, 0.85),
+    ("trashbag", -7.1, PAVE_Y, -38.6, 0.0, 1.0), ("trashbag", -6.8, PAVE_Y, -38.1, 90.0, 0.9),
+    ("trashbag", -7.15, PAVE_Y, -37.7, 200.0, 0.85),
+    ("plastic_crate_01", -7.15, PAVE_Y, -21.2, 90.0, 1.0), ("plastic_crate_02", -7.15, PAVE_Y + 0.3, -21.2, 95.0, 1.0),
+    ("plastic_crate_03", -7.15, PAVE_Y, -21.75, 85.0, 1.0), ("wooden_crate_01", -7.05, PAVE_Y, -22.6, 90.0, 0.8),
+    ("metal_trash_can", -6.95, PAVE_Y, -45.5, 90.0, 1.0),
+    ("utility_box_01", 7.2, PAVE_Y, -52.0, -90.0, 1.0), ("utility_box_02", -7.25, PAVE_Y, -55.0, 90.0, 1.0),
+    ("modular_street_seating", 7.0, PAVE_Y, -43.0, -90.0, 1.0),
+    ("potted_plant_02", 7.15, PAVE_Y, -8.2, 0.0, 1.0), ("potted_plant_04", -7.2, PAVE_Y, -27.6, 0.0, 1.3),
+    ("planter_box_02", -7.2, PAVE_Y, -15.2, 90.0, 1.0),
+    ("concrete_road_barrier_02", -1.3, 0.0, -11.6, 0.0, 1.0), ("concrete_road_barrier_02", -1.3, 0.0, -9.9, 0.0, 1.0),
+    ("covered_car", 3.45, 0.0, -55.5, 0.0, 1.0),
+]
+WALL_PROPS = [   # on facades (x = +-PAVE_OUT): model, x, y, z, yaw
+    ("security_camera_01", 7.42, 3.3, -2.0, -90.0), ("security_camera_02", -7.42, 3.3, -30.5, 90.0),
+    ("industrial_wall_lamp", -7.42, 2.55, -45.5, 90.0), ("street_lamp_02", -7.42, 1.9, -14.4, 90.0),
+    ("street_lamp_02", 7.42, 1.9, -57.8, -90.0),
+]
+SERVICE_LAMP = (-7.2, 2.4, -45.5)
 
 RIGHT_BAYS, LEFT_BAYS = [-3.0, -8.7, -25.0, -30.7, -37.5, -44.5], [-1.5, -7.2, -12.9, -26.5, -32.2, -39.0, -46.0]
 MOVING = [(+1.25, -30.0, 0.0, "head"), (-1.30, -15.0, 180.0, "tail"), (+1.25, -56.0, 0.0, "head")]
@@ -99,30 +147,30 @@ def diffuse(c) -> dict:
 def add_materials(b: SceneBuilder, As: Assets, Ad: Assets, wet: bool) -> None:
     A = As
     # ground
-    b.material("asphalt", principled(                                         # wet asphalt is darker
-        tex(A.texture(f"asphalt_{'wet' if wet else 'dry'}", lambda: P.asphalt(2048, 3)[0] * (0.55 if wet else 1.0)),
-            scale=(1 / P.ASPHALT_TILE_M,) * 2, wrap="mirror"),
-        tex(Ad.texture("road_rough", lambda: P.road_roughness(wet, 11, P.puddle_list(11, HERO_PUDDLE)), gray=True), raw=True,
-            scale=(1 / 9.0, 1 / 80.0), wrap="clamp"), specular=0.5))
+    # Scanned asphalt albedo and normal; roughness stays the seeded puddle map (wet asphalt is darker).
+    b.material("asphalt", wet_surface("asphalt_02", wet, 0.55, roughness=tex(
+        Ad.texture("road_rough", lambda: P.road_roughness(wet, 11, P.puddle_list(11, HERO_PUDDLE)), gray=True), raw=True,
+        scale=(1 / 9.0, 1 / 80.0), wrap="clamp")))
     b.material("asphalt_patch", principled(tex(A.texture(f"asphalt_patch_{'wet' if wet else 'dry'}",
                                                          lambda: P.asphalt(1024, 8, patch=True)[0] * (0.6 if wet else 1.0)), scale=(1 / P.ASPHALT_TILE_M,) * 2, wrap="mirror"),
                                            0.10 if wet else 0.55, specular=0.5))
-    b.material("paving", principled(tex(A.texture(f"paving_{'wet' if wet else 'dry'}", lambda: P.paving(2048, 5)[0] * (0.7 if wet else 1.0)), scale=(1 / P.PAVING_TILE_M,) * 2), 0.22 if wet else 0.78,
-                                    specular=0.5))
-    b.material("granite", principled(tex(A.texture("granite", lambda: P.granite()), scale=(1 / 0.6, 1 / 0.6)), 0.25 if wet else 0.6))
+    b.material("paving", wet_surface("concrete_pavers_02", wet, 0.7, roughness=0.22 if wet else None))
+    b.material("granite", wet_surface("granite_tile_02", wet, 0.8, roughness=0.25 if wet else None))
+    b.material("grate", W.surface("metal_grate_rusty"))
     b.material("tactile", principled((0.55, 0.45, 0.20), 0.3 if wet else 0.7))
     b.material("paint", principled((0.70, 0.70, 0.66), 0.15 if wet else 0.55, specular=0.5))
     b.material("crack", principled((0.012, 0.012, 0.012), 0.9))
     b.material("manhole", principled(tex(A.texture("manhole", lambda: P.manhole()[0])), 0.25 if wet else 0.55, metallic=0.6))
     b.material("gully_hole", diffuse((0.0, 0.0, 0.0)))
     # facades
-    for name, (kind, _c) in F.WALLS.items():
-        tw, th = F.TILE[kind]
-        b.material(f"wall_{name}", principled(tex(A.texture(f"wall_{name}", lambda name=name: F.wall_texture(name)), scale=(1 / tw, 1 / th)),
-                                              0.8 if kind != "stone" else 0.7, specular=0.35))
+    for name, (kind, c) in F.WALLS.items():
+        if name in WALL_SCANS:
+            b.material(f"wall_{name}", W.surface(WALL_SCANS[name]))
+        else:                                                    # stucco: one plaster scan, tinted per colour
+            b.material(f"wall_{name}", W.surface("white_plaster_rough_01", tint=tuple(v / 0.8 for v in c)))
     b.material("wall_glass_frame", principled((0.10, 0.11, 0.12), 0.35, metallic=0.5))
-    b.material("stone_trim", principled((0.62, 0.58, 0.50), 0.7, specular=0.3))
-    b.material("stucco_trim", principled((0.82, 0.80, 0.74), 0.6, specular=0.3))
+    b.material("stone_trim", W.surface("beige_wall_001", tint=(0.92, 0.88, 0.78)))
+    b.material("stucco_trim", W.surface("white_plaster_02"))
     b.material("frame_white", principled((0.80, 0.80, 0.77), 0.4))
     b.material("frame_dark", principled((0.04, 0.05, 0.05), 0.4))
     b.material("frame_wood", principled((0.22, 0.12, 0.06), 0.45))
@@ -132,8 +180,8 @@ def add_materials(b: SceneBuilder, As: Assets, Ad: Assets, wet: bool) -> None:
     b.material("glass_curtain", {"type": "plastic", "diffuse_reflectance": rgb(0.005, 0.009, 0.013), "int_ior": 1.52})
     b.material("spandrel", principled((0.02, 0.03, 0.035), 0.1, specular=0.8))
     b.material("shop_glass", {"type": "thindielectric"})
-    b.material("roof", diffuse((0.08, 0.08, 0.08)))
-    b.material("slate", principled((0.08, 0.09, 0.10), 0.45))
+    b.material("roof", W.surface("bitumen"))
+    b.material("slate", W.surface("roof_slates_02"))
     b.material("ac_unit", principled((0.62, 0.62, 0.60), 0.45))
     b.material("drain", principled((0.05, 0.05, 0.05), 0.4))
     b.material("iron", principled((0.025, 0.025, 0.028), 0.45, metallic=0.5))
@@ -148,7 +196,7 @@ def add_materials(b: SceneBuilder, As: Assets, Ad: Assets, wet: bool) -> None:
     b.material("letters_gold", {"type": "roughconductor", "material": "Au", "alpha": 0.15})
     b.material("letters_white", principled((0.85, 0.85, 0.82), 0.3))
     b.material("letters_dark", principled((0.02, 0.02, 0.02), 0.4))
-    b.material("shutter", principled((0.40, 0.41, 0.42), 0.35, metallic=0.8))
+    b.material("shutter", W.surface("painted_metal_shutter"))
     for i, c in enumerate([(0.30, 0.05, 0.05), (0.03, 0.08, 0.04), (0.05, 0.07, 0.18), (0.02, 0.02, 0.02)]):
         b.material(f"door_{i}", principled(c, 0.25, clearcoat=0.6))
     # interiors
@@ -229,13 +277,13 @@ def facade(b: SceneBuilder, Ad: Assets, idx: int, spec: dict, seed: int, M: np.n
     d = Path(Ad.root) / "facades" / f"b{idx:02d}"
     meta = d / "meta.json"
     if Ad.rebuild or not meta.exists():
-        meshes, emit, signs = F.build_facade(spec, np.random.default_rng([seed, idx]))
+        meshes, emit, signs, props = F.build_facade(spec, np.random.default_rng([seed, idx]))
         areas = {}
         for k, m in meshes.items():
             m.write_ply(d / f"{k}.ply")
             a, bb, c = (m.p[m.f[:, i]] for i in range(3))
             areas[k] = float(0.5 * np.linalg.norm(np.cross(bb - a, c - a), axis=1).sum())
-        meta.write_text(json.dumps({"parts": sorted(meshes), "emit": emit, "area": areas, "signs": signs}))
+        meta.write_text(json.dumps({"parts": sorted(meshes), "emit": emit, "area": areas, "signs": signs, "props": props}))
     data = json.loads(meta.read_text())
     for k in data["parts"]:
         path = str(d / f"{k}.ply")
@@ -245,6 +293,10 @@ def facade(b: SceneBuilder, Ad: Assets, idx: int, spec: dict, seed: int, M: np.n
             b.ply(path, M, "emitter_backing", emission=tuple(L), prefix="facadelight", power=share * luminance(L) * data["area"][k])
         else:
             b.ply(path, M, k, prefix="facade")
+    for aid, x, y, z_back in data.get("props", []):          # scanned AC units and shop plants
+        m = W.model(aid)
+        depth = m.bounds[1][2] - m.bounds[0][2]
+        W.add(b, m, M @ W.place(m, at=(x, y, z_back + depth / 2)))
     return [(M @ np.array([*p, 1.0]))[:3].tolist() for p in data["signs"]]
 
 
@@ -278,8 +330,7 @@ def build(ctx: BuildContext) -> SceneBundle:
         path = As.mesh(f"decal_{k}", lambda m=m: m)
         b.ply(path, np.eye(4), k, prefix="decal")
     for x, z in MANHOLES:
-        disc = As.mesh("manhole_disc", lambda: G.lathe([(0.0, 0.003), (0.33, 0.003), (0.35, 0.0)], 40))
-        b.ply(disc, G.translate((x, 0.0, z)), "manhole", prefix="manhole")
+        web(b, "water_manhole_cover", at=(x, -0.065, z), yaw=37.0 * x + 11.0 * z)
     for x, z in GULLIES:
         b.rect(G.compose(G.translate((x, 0.0012, z)), G.rotate((1, 0, 0), -90.0), G.scale((0.22, 0.35, 1.0))), "gully_hole", prefix="gully")
         bars = As.mesh("gully_bars", lambda: P.join(*[P.box((0.40, 0.012, 0.02), (0.0, 0.006, zz)) for zz in np.arange(-0.32, 0.33, 0.06)]
@@ -362,10 +413,15 @@ def build(ctx: BuildContext) -> SceneBundle:
 
     # --- trees with grates ---------------------------------------------------------------------------
     grate = As.mesh("tree_grate", P.tree_grate)
+    scans = {0: ("tree_small_02", 1.25), 2: ("island_tree_02", 0.75)}   # nearest the lamps/puddle_car views
     for k, (x, z) in enumerate(TREES):
-        parts = As.meshes(f"tree_{k}", lambda k=k: P.tree(k + 1))
-        b.part_set(parts, G.compose(G.translate((x, 0.15, z)), G.rotate((0, 1, 0), 70.0 * k)), {"bark": "bark", "leaf": "leaf"})
-        b.ply(grate, G.translate((x, 0.15, z)), "iron", prefix="grate")
+        if k in scans:
+            aid, s = scans[k]
+            web(b, aid, at=(x, 0.15, z), yaw=70.0 * k, scale=s)
+        else:
+            parts = As.meshes(f"tree_{k}", lambda k=k: P.tree(k + 1))
+            b.part_set(parts, G.compose(G.translate((x, 0.15, z)), G.rotate((0, 1, 0), 70.0 * k)), {"bark": "bark", "leaf": "leaf"})
+        b.ply(grate, G.translate((x, 0.15, z)), "grate", prefix="grate")
         b.rect(G.compose(G.translate((x, 0.152, z)), G.rotate((1, 0, 0), -90.0), G.scale((0.58, 0.58, 1.0))), "soil", prefix="pit")
     focus["tree_r"] = [TREES[0][0], 2.0, TREES[0][1] + 0.17]
 
@@ -425,6 +481,15 @@ def build(ctx: BuildContext) -> SceneBundle:
             b.sphere((sx, yy, -19.2 + 0.12), 0.1, "emitter_backing" if on else "signal_lens_off",
                      emission=tuple(SIGNAL_L * c for c in colour) if on else None, prefix="signal")
     focus["signal"] = [4.85, 3.49, -19.2 + 0.22]
+
+    # scanned street clutter, wall-mounted cameras and lamps
+    for aid, x, y, z, yaw, s in STREET_PROPS:
+        web(b, aid, at=(x, y, z), yaw=yaw, scale=s)
+    for aid, x, y, z, yaw in WALL_PROPS:
+        web(b, aid, at=(x, y, z), yaw=yaw)
+    b.sphere(SERVICE_LAMP, 0.04, "emitter_backing", emission=(14.0, 9.0, 4.5), prefix="lamp")   # service-door lamp
+    focus["hydrant"] = [-4.95, 0.6, -11.4]
+    focus["trashbags"] = [6.9, 0.4, -3.1]
 
     # street-name sign on the first right-hand building
     b.rect(G.compose(G.translate((PAVE_OUT - 0.02, 4.75, 7.2)), G.rotate((0, 1, 0), -90.0), G.scale((0.75, 0.16, 1.0))), "street_name", prefix="streetname")
@@ -520,6 +585,10 @@ def exclude_boxes() -> tuple:
     boxes.append(((RACK[0] - 0.6, 0.0, RACK[1] - 0.6), (RACK[0] + 0.8, 1.5, RACK[1] + 2.4)))
     for s in (-1, 1):
         boxes.append(((s * 4.85 - 0.5, 0.0, -19.9), (s * 4.85 + 0.5, 4.2, -18.5)))
+    for aid, x, y, z, _yaw, _s in STREET_PROPS:
+        r = {"covered_car": (1.2, 2.5), "modular_street_seating": (0.6, 2.4), "metal_trash_can": (0.6, 1.1),
+             "concrete_road_barrier_02": (0.5, 1.0)}.get(aid, (0.45, 0.45))
+        boxes.append(((x - r[0], 0.0, z - r[1]), (x + r[0], y + 1.5, z + r[1])))
     return tuple(boxes)
 
 
@@ -543,5 +612,5 @@ SCENE = SceneDef(
     exclude_boxes=exclude_boxes(),
     envs=("clear", "wet"),
     tags=("outdoor", "night", "bokeh", "specular", "architecture", "artificial_light"),
-    default_seed=3, asset_version=11, max_depth=8, rr_depth=5, spp_hint=4096,
+    default_seed=3, asset_version=12, max_depth=8, rr_depth=5, spp_hint=4096,
 )

@@ -202,13 +202,16 @@ an underwater reef). The five scenes are still to be chosen.
 
 ## 7. What the shared side produces
 
+What a model receives from these files (input channels, settings, colour transform) is fixed in
+`ai/DATA_PROTOCOL.md` and implemented by `ai/data.py`.
+
 For each sample (scene, scene seed, env, camera pose and roll, lens, render seed):
 
 ```
 dataset/mitsuba/<scene_id>/s<seed>/<env>/
   manifest.jsonl                                          # one line per (pose, lens) sample
   p<index>_<hash>/                                        # a pose: position, target, roll, focal length
-    pose.json, depth.npy, gbuffer.exr, sharp.exr, .done
+    pose.json, depth.npy, coc_valid.npy, gbuffer.exr, sharp.exr, .done
     lens_<hash>/dof.exr, coc.npy, metadata.json           # a lens variant: focus distance, f-number
 ```
 
@@ -232,12 +235,15 @@ formula; timings. `sample_id` hashes only the rounded sampler inputs, not the
 git commit, and each sample's random stream is derived from its ids with
 `SeedSequence`, never drawn from one shared stream. A changed `fingerprint`
 marks old samples stale. **[done in `render.py` and `sampler.py`: metadata, `--roll`, poses, the manifest,
-resume; shared, todo: sharding into archives, `coc_valid`]**
+resume, `coc_valid`; shared, todo: sharding into archives]**
 
 **`coc_valid`.** Depth is the first surface, but behind a mirror, window or glass
 the eye focuses on the virtual image, so analytic CoC is wrong there. The mask
 marks pixels whose first hit has a specular or transmissive BSDF (rule 9), and the
-loss can ignore or down-weight them.
+loss can ignore or down-weight them. **[done]** `coc_valid.npy` (uint8, 1 = trust the CoC) is
+written per pose from the first-hit BSDF flags in the G-buffer kernel (`lens_trace._aov_kernel`):
+0 where the surface has a delta or glossy lobe and no diffuse one, or is a `null` surface
+(invisible, yet depth records it). Rough metal is masked too, which is conservative.
 
 **Augmentation after rendering.** Only horizontal flip and 90-degree rotations
 are applied to finished passes, because they are exact for beauty, depth, CoC and
@@ -269,7 +275,8 @@ Crops are free and preserve everything (the CoC does not depend on the crop).
   `mean(dof) = mean(sharp)` within 1%. There is no denoising unless we decide on
   one later.
 - **Balance [done in `sampler.py` v0].** The target p95 blur (as a fraction of image
-  height, 0.05% to 4%, which is 0.5 to 43 px at 1080p) is drawn log-uniformly from what
+  height, 0.5% to 4%, which is 5.4 to 43 px at 1080p; the floor was 0.05% until a third of the pilot
+  showed no visible blur) is drawn log-uniformly from what
   the pose's focal length and the focus can reach with the allowed f-numbers, then the
   f-number is solved for it. Asking a wide lens for a huge blur is physically
   unreachable, so the achieved distribution is skewed toward mid and large blur

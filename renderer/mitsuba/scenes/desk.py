@@ -19,8 +19,8 @@ from __future__ import annotations
 import numpy as np
 
 import env_kit
+import web_assets as W
 import procedural as G
-import props as P
 from procedural import Mesh
 from scene_api import BuildContext, SceneBundle, SceneDef, View
 from scene_kit import Assets, SceneBuilder, bitmap, luminance, principled, rgb
@@ -35,12 +35,45 @@ SUN_ELEVATION, SUN_AZIMUTH = 28.0, -55.0
 # until the median of the sharp pass sits in the contract's band. Not the cafe's 60: its interior is darker.
 SKY_SCALE = 28.0
 LAMP = (120.0, 76.0, 32.0)          # warm bulb radiance; about 0.4 m above the notebook
-CEILING = (5.8, 5.1, 4.3)           # two warm ceiling panels: daylight alone leaves the far end of the room dark
+CEILING = (5.8, 5.1, 4.3)           # ceiling light level: daylight alone leaves the far end of the room dark
+# The two pendants' frosted shades are the emitters (about 0.42 m^2 each, where the old panels were 0.72 m^2).
+PENDANT = tuple(1.7 * c for c in CEILING)
+OUTER_X = ROOM_X0 - 0.25            # outside face of the window wall
 STRIP = (8.0, 6.8, 5.0)             # LED strip along the top of the bookcase, washing the spines
 MONITOR_POS = (-0.20, DESK_Y, -0.60)
 NOTEBOOK_POS = (0.52, DESK_Y, -0.30)
 LAMP_BASE = (0.82, DESK_Y, -0.62)
 CUP_POS = (-0.64, DESK_Y, -0.52)
+
+
+def slab(b: SceneBuilder, centre, size, material: str, yaw: float = 0.0) -> None:
+    """A box whose uv is in meters, so the scanned textures land at their real-world scale."""
+    b.box_mesh("x".join(f"{s:.4f}" for s in size), centre, size, material, yaw)
+
+
+def web(b: SceneBuilder, aid: str, at=(0.0, 0.0, 0.0), yaw: float = 0.0, scale: float = 1.0, height=None, prefix=None,
+        emit=None, skip=("glass",), overrides=None):
+    """Place a scanned model. Parts named in `emit` become emitters {part: (radiance, power)}; glass parts are skipped
+    (their transmission is not converted, and a pane would hide what is behind it from light sampling)."""
+    m = W.model(aid)
+    M = W.place(m, at=at, yaw=yaw, height=height, scale=scale)
+    prefix = prefix or f"web_{aid}"
+    for part in m.parts:
+        if emit and part.name in emit:
+            rad, power = emit[part.name]
+            b.ply(part.ply, M, "emitter_backing", emission=rad, prefix=prefix, power=power)
+            continue
+        if any(s in part.name.lower() for s in skip):
+            continue
+        mid = f"{prefix}__{part.name}"
+        if mid not in b.d:
+            b.material(mid, (overrides or {}).get(part.name, part.bsdf))
+        b.ply(part.ply, M, mid, prefix=prefix)
+    return M
+
+
+def world(M, p) -> list:
+    return (np.asarray(M) @ np.array([*p, 1.0]))[:3].tolist()
 
 
 def rng_for(ctx: BuildContext, k: int) -> np.random.Generator:
@@ -60,28 +93,30 @@ def add_materials(b: SceneBuilder, local: Assets, ctx: BuildContext) -> None:
     A = b.assets
     rng = rng_for(ctx, 0)
 
-    b.material("floor", principled(
-        bitmap(A.texture("floor_albedo", lambda: G.wood_planks(2048, 1536, planks=36, board_len=0.2, seed=2)[0])),
-        bitmap(A.texture("floor_rough", lambda: G.wood_planks(2048, 1536, planks=36, board_len=0.2, seed=2)[1], gray=True), raw=True),
-        specular=0.5, clearcoat=0.1, clearcoat_gloss=0.3))
+    wall_tint = [(1.16, 1.10, 0.97), (1.12, 1.10, 1.02), (1.14, 1.05, 0.92)][ctx.seed % 3]
+    b.material("floor", W.surface("herringbone_parquet"))
     b.material("rug", {"type": "diffuse", "reflectance": bitmap(A.texture("rug", lambda: T.rug(512, 768, 8)))})
-    b.material("wall", {"type": "diffuse", "reflectance": bitmap(A.texture(
-        "plaster_cream", lambda: G.plaster(1024, 2048, (0.80, 0.76, 0.68), seed=7)))})
-    b.material("wall_back", {"type": "diffuse", "reflectance": bitmap(A.texture(
-        "plaster_blue", lambda: G.plaster(1024, 2048, (0.30, 0.37, 0.40), seed=8)))})
-    b.material("ceiling", {"type": "diffuse", "reflectance": rgb(0.85, 0.84, 0.80)})
+    b.material("wall", W.surface("painted_plaster_wall", tint=wall_tint))
+    b.material("wall_back", W.surface("painted_plaster_wall", tint=(0.34, 0.47, 0.40)))
+    b.material("ceiling", W.surface("white_plaster_02", tint=(1.5, 1.5, 1.55)))
     b.material("ground", env_kit.ground("clear"))
-    b.material("hedge", {"type": "diffuse", "reflectance": bitmap(A.texture(
-        "hedge", lambda: np.clip(np.stack([0.10 + 0.12 * (n := G.fbm(256, 256, 5, 8, seed=11)), 0.22 + 0.2 * n,
-                                           0.08 + 0.08 * n], -1), 0, 1)))})
-
-    b.material("desk_wood", principled(bitmap(A.texture("desk_wood", lambda: T.wood_top(1024, 2048, 3)),
-                                              uv_scale=(1 / 2.0, 1 / 1.0)), 0.38, specular=0.5, clearcoat=0.25, clearcoat_gloss=0.4))
-    b.material("desk_dark", principled((0.16, 0.10, 0.06), 0.45, clearcoat=0.2))
-    b.material("case_wood", principled((0.62, 0.52, 0.38), 0.5))
-    b.material("leather", principled(bitmap(A.texture("leather", lambda: T.leather_mat(512, 1024)), uv_scale=(1 / 1.0, 1 / 0.5)),
-                                     0.5, specular=0.4))
-    b.material("white_paint", principled((0.86, 0.86, 0.83), 0.4))
+    b.material("desk_wood", W.surface("american_walnut_veneer", tint=(1.15, 0.78, 0.58)))
+    b.material("desk_dark", W.surface("black_walnut_veneer_01", tint=(0.50, 0.38, 0.30)))
+    b.material("case_wood", W.surface("oak_veneer_01"))
+    b.material("leather", W.surface("brown_leather"))
+    b.material("white_paint", W.surface("acg:PaintedWood009C"))
+    b.material("curtain", {"type": "twosided", "bsdf": W.surface("acg:Fabric045")})
+    # outside
+    b.material("grass", W.surface("leafy_grass"))
+    b.material("pavement", W.surface("brick_pavement"))
+    b.material("asphalt", W.surface("asphalt_02"))
+    b.material("kerb", principled((0.55, 0.54, 0.52), 0.8))
+    b.material("garden_brick", W.surface("brick_wall_006"))
+    for i, tex in enumerate(("brick_wall_006", "white_stucco", "plastered_stone_wall")):
+        b.material(f"facade_{i}", W.surface(tex))
+    b.material("window_glass", principled((0.015, 0.018, 0.022), 0.04, specular=0.6))
+    b.material("roof_slate", principled((0.10, 0.10, 0.11), 0.6))
+    b.material("front_door", principled((0.08, 0.16, 0.12), 0.35, clearcoat=0.4))
     b.material("aluminium", {"type": "roughconductor", "material": "Al", "alpha": 0.2})
     b.material("chrome", {"type": "roughconductor", "material": "Cr", "alpha": 0.06})
     b.material("brass", {"type": "roughconductor", "material": "Au", "alpha": 0.2})
@@ -116,9 +151,13 @@ def add_materials(b: SceneBuilder, local: Assets, ctx: BuildContext) -> None:
         b.material(f"pencil_{i}", principled(c, 0.35, clearcoat=0.3))
     for i, c in enumerate([(0.9, 0.88, 0.84), (0.07, 0.19, 0.36), (0.45, 0.55, 0.47), (0.75, 0.32, 0.2)]):
         b.material(f"mug_{i}", principled(c, 0.15, specular=0.6, clearcoat=0.5, clearcoat_gloss=0.5))
+    # Desk book stack: cloth covers (tinted) and two in leather. The cubes' uv spans 0-1 per face, about 0.25 m.
     for i, c in enumerate([(0.45, 0.08, 0.06), (0.08, 0.2, 0.3), (0.55, 0.42, 0.12), (0.12, 0.25, 0.14), (0.3, 0.12, 0.25),
                            (0.75, 0.7, 0.6)]):
-        b.material(f"book_{i}", principled(c, 0.55))
+        if i in (0, 4):
+            b.material(f"book_{i}", W.surface("acg:Leather026", uv_scale=0.25, tint=tuple(min(2.5, 2.2 * v) for v in c)))
+        else:
+            b.material(f"book_{i}", W.surface("acg:Fabric030", uv_scale=0.25, tint=tuple(min(2.5, 2.2 * v) for v in c)))
 
     # Seed-dependent pages: the text itself changes with the seed.
     seed = ctx.seed
@@ -132,10 +171,6 @@ def add_materials(b: SceneBuilder, local: Assets, ctx: BuildContext) -> None:
         b.material(f"sticky_{i}", {"type": "diffuse", "reflectance": bitmap(local.texture(
             f"sticky_{i}", lambda i=i, c=c: np.flipud(T.sticky_note(512, seed * 7 + i, c))))})
     b.material("pinboard", {"type": "diffuse", "reflectance": bitmap(A.texture("pinboard", lambda: np.flipud(T.pinboard(768, 1024, 7))))})
-    b.material("art_a", {"type": "diffuse", "reflectance": bitmap(A.texture(
-        "art_a", lambda: np.flipud(G.abstract_art(768, 576, [(0.85, 0.78, 0.62), (0.78, 0.35, 0.18), (0.14, 0.26, 0.36), (0.9, 0.62, 0.2)], seed=13))))})
-    b.material("art_b", {"type": "diffuse", "reflectance": bitmap(A.texture(
-        "art_b", lambda: np.flipud(G.abstract_art(576, 768, [(0.2, 0.3, 0.28), (0.85, 0.82, 0.7), (0.55, 0.2, 0.2), (0.3, 0.45, 0.6)], seed=17))))})
 
 
 # ----------------------------------------------------------------------------
@@ -144,112 +179,179 @@ def add_materials(b: SceneBuilder, local: Assets, ctx: BuildContext) -> None:
 
 def add_room(b: SceneBuilder) -> None:
     cx, cz = 0.5 * (ROOM_X0 + ROOM_X1), 0.5 * (ROOM_Z0 + ROOM_Z1)
-    hx, hz = 0.5 * (ROOM_X1 - ROOM_X0), 0.5 * (ROOM_Z1 - ROOM_Z0)
-    b.rect(G.compose(G.translate((cx, 0, cz)), G.rotate((1, 0, 0), -90), G.scale((hx, hz, 1))), "floor")
+    wx, wz = ROOM_X1 - ROOM_X0, ROOM_Z1 - ROOM_Z0
+    slab(b, (cx, -0.02, cz), (wx, 0.04, wz), "floor")
     b.rect(G.compose(G.translate((0.0, 0.004, -0.35)), G.rotate((1, 0, 0), -90), G.scale((1.3, 0.95, 1))), "rug")
-    b.rect(G.compose(G.translate((cx, ROOM_H, cz)), G.rotate((1, 0, 0), 90), G.scale((hx, hz, 1))), "ceiling")
-    b.rect(G.compose(G.translate((cx, 0.5 * ROOM_H, ROOM_Z0)), G.scale((hx, 0.5 * ROOM_H, 1))), "wall_back")
-    b.rect(G.compose(G.translate((cx, 0.5 * ROOM_H, ROOM_Z1)), G.rotate((0, 1, 0), 180), G.scale((hx, 0.5 * ROOM_H, 1))), "wall")
-    b.rect(G.compose(G.translate((ROOM_X1, 0.5 * ROOM_H, cz)), G.rotate((0, 1, 0), -90), G.scale((hz, 0.5 * ROOM_H, 1))), "wall")
-    for z in (ROOM_Z1 - 0.01,):
-        b.cube((cx, 0.05, z), (2 * hx, 0.1, 0.02), "white_paint")
-    b.cube((ROOM_X1 - 0.01, 0.05, cz), (0.02, 0.1, 2 * hz), "white_paint")
-    b.cube((ROOM_X0 + 0.01, 0.05, cz), (0.02, 0.1, 2 * hz), "white_paint")
-    b.cube((cx, 0.05, ROOM_Z0 + 0.01), (2 * hx, 0.1, 0.02), "white_paint")
+    slab(b, (cx, ROOM_H + 0.02, cz), (wx, 0.04, wz), "ceiling")
+    slab(b, (cx, ROOM_H / 2, ROOM_Z0 - 0.02), (wx, ROOM_H, 0.04), "wall_back")
+    slab(b, (cx, ROOM_H / 2, ROOM_Z1 + 0.02), (wx, ROOM_H, 0.04), "wall")
+    slab(b, (ROOM_X1 + 0.02, ROOM_H / 2, cz), (0.04, ROOM_H, wz), "wall")
+    # skirting, and a cornice where the walls meet the ceiling
+    for c, s in (((cx, 0.05, ROOM_Z1 - 0.01), (wx, 0.1, 0.02)), ((ROOM_X1 - 0.01, 0.05, cz), (0.02, 0.1, wz)),
+                 ((ROOM_X0 + 0.01, 0.05, cz), (0.02, 0.1, wz)), ((cx, 0.05, ROOM_Z0 + 0.01), (wx, 0.1, 0.02)),
+                 ((cx, ROOM_H - 0.04, ROOM_Z1 - 0.03), (wx, 0.08, 0.06)), ((ROOM_X1 - 0.03, ROOM_H - 0.04, cz), (0.06, 0.08, wz)),
+                 ((ROOM_X0 + 0.03, ROOM_H - 0.04, cz), (0.06, 0.08, wz)), ((cx, ROOM_H - 0.04, ROOM_Z0 + 0.03), (wx, 0.08, 0.06))):
+        slab(b, c, s, "white_paint")
 
     # Left wall with the window opening; thick blocks give the opening real reveals.
     t = 0.25
-    wx = ROOM_X0 - t / 2
+    wxc = ROOM_X0 - t / 2
     z0, z1 = WINDOW_Z
     y0, y1 = WINDOW_Y
-    b.cube((wx, ROOM_H / 2, 0.5 * (ROOM_Z0 + z0)), (t, ROOM_H, z0 - ROOM_Z0), "wall")
-    b.cube((wx, ROOM_H / 2, 0.5 * (z1 + ROOM_Z1)), (t, ROOM_H, ROOM_Z1 - z1), "wall")
-    b.cube((wx, y0 / 2, 0.5 * (z0 + z1)), (t, y0, z1 - z0), "wall")
-    b.cube((wx, 0.5 * (y1 + ROOM_H), 0.5 * (z0 + z1)), (t, ROOM_H - y1, z1 - z0), "wall")
+    slab(b, (wxc, ROOM_H / 2, 0.5 * (ROOM_Z0 + z0)), (t, ROOM_H, z0 - ROOM_Z0), "wall")
+    slab(b, (wxc, ROOM_H / 2, 0.5 * (z1 + ROOM_Z1)), (t, ROOM_H, ROOM_Z1 - z1), "wall")
+    slab(b, (wxc, y0 / 2, 0.5 * (z0 + z1)), (t, y0, z1 - z0), "wall")
+    slab(b, (wxc, 0.5 * (y1 + ROOM_H), 0.5 * (z0 + z1)), (t, ROOM_H - y1, z1 - z0), "wall")
     zc = 0.5 * (z0 + z1)
     f = 0.05
     for z in (z0 + f / 2, z1 - f / 2, zc):
-        b.cube((wx + 0.06, 0.5 * (y0 + y1), z), (0.06, y1 - y0, f if z != zc else 0.035), "white_paint")
+        slab(b, (wxc + 0.06, 0.5 * (y0 + y1), z), (0.06, y1 - y0, f if z != zc else 0.035), "white_paint")
     for y in (y0 + f / 2, y1 - f / 2, y0 + 0.62):
-        b.cube((wx + 0.06, y, zc), (0.06, f if y != y0 + 0.62 else 0.035, z1 - z0), "white_paint")
-    b.cube((ROOM_X0 + 0.07, y0 - 0.02, zc), (0.30, 0.04, z1 - z0 + 0.1), "white_paint")
-    # Outside: ground and a hedge. sunsky is black below the horizon, so the ground must reach it.
-    b.rect(G.compose(G.translate((0, -0.02, 0)), G.rotate((1, 0, 0), -90), G.scale((400.0, 400.0, 1))), "ground")
-    b.cube((-8.0, 0.9, 0.0), (1.6, 1.8, 60.0), "hedge")
+        slab(b, (wxc + 0.06, y, zc), (0.06, f if y != y0 + 0.62 else 0.035, z1 - z0), "white_paint")
+    slab(b, (ROOM_X0 + 0.07, y0 - 0.02, zc), (0.30, 0.04, z1 - z0 + 0.1), "white_paint")
+    # Curtains gathered beside the opening (never across it) on a brass rod.
+    for i, (za, zb) in enumerate(((z0 - 0.62, z0 - 0.04), (z1 + 0.03, ROOM_Z1 - 0.03))):
+        cur = b.assets.mesh(f"curtain_{i}", lambda za=za, zb=zb, i=i: D.curtain(zb - za, 2.38, seed=i))
+        b.ply(cur, G.translate((ROOM_X0 + 0.07, 0.04, za)), "curtain", prefix="curtain")
+    rod = b.assets.mesh("curtain_rod", lambda: D.tube((0, 0, z0 - 0.7), (0, 0, ROOM_Z1 - 0.02), 0.012, 12))
+    b.ply(rod, G.translate((ROOM_X0 + 0.07, 2.44, 0)), "brass", prefix="curtain_rod")
+
+    # Front wall: a four-panel door with casing, a light switch.
+    door = b.assets.meshes("panel_door", D.panel_door)
+    dm = G.compose(G.translate((1.6, 0.0, ROOM_Z1 - 0.03)), G.rotate((0, 1, 0), 180))
+    b.part_set(door, dm, {"slab": "case_wood", "mould": "case_wood", "handle": "brass"})
+    for c, s in (((1.6 - 0.48, 1.07, ROOM_Z1 - 0.015), (0.08, 2.14, 0.03)), ((1.6 + 0.48, 1.07, ROOM_Z1 - 0.015), (0.08, 2.14, 0.03)),
+                 ((1.6, 2.1, ROOM_Z1 - 0.015), (1.04, 0.08, 0.03))):
+        slab(b, c, s, "white_paint")
+    slab(b, (0.95, 1.2, ROOM_Z1 - 0.006), (0.08, 0.12, 0.012), "white_paint")
+    b.focus_points["door"] = [1.6, 1.2, ROOM_Z1 - 0.06]
 
 
 def add_bookcase(b: SceneBuilder, local: Assets, ctx: BuildContext) -> None:
     w, depth, h = 3.0, 0.34, 2.28
     zc = ROOM_Z0 + depth / 2
     levels = [0.10, 0.54, 0.98, 1.42, 1.86]
-    b.cube((-w / 2 + 0.015, h / 2, zc), (0.03, h, depth), "case_wood")
-    b.cube((w / 2 - 0.015, h / 2, zc), (0.03, h, depth), "case_wood")
-    b.cube((0, h - 0.015, zc), (w, 0.03, depth), "case_wood")
-    b.cube((0, 0.04, zc), (w - 0.06, 0.08, depth), "case_wood")
+    slab(b, (-w / 2 + 0.015, h / 2, zc), (0.03, h, depth), "case_wood")
+    slab(b, (w / 2 - 0.015, h / 2, zc), (0.03, h, depth), "case_wood")
+    slab(b, (0, h - 0.015, zc), (w, 0.03, depth), "case_wood")
+    slab(b, (0, 0.04, zc), (w - 0.06, 0.08, depth), "case_wood")
     for y in levels:
-        b.cube((0, y - 0.0125, zc), (w - 0.06, 0.025, depth), "case_wood")
+        slab(b, (0, y - 0.0125, zc), (w - 0.06, 0.025, depth), "case_wood")
     z_front = ROOM_Z0 + depth - 0.03
     rng = rng_for(ctx, 5)
-    gap_levels = {1: 1.02, 3: 1.05}        # shelves that end early, leaving room for ornaments
+    ends = {0: (-1.46, 1.08), 1: (-1.46, 1.02), 2: (-0.66, 1.46), 3: (-1.46, 1.05), 4: (-1.46, 1.0)}   # gaps hold ornaments
 
     def build() -> Mesh:
         out = Mesh()
         for i, y in enumerate(levels):
-            out += D.shelf_row(rng, -1.46, gap_levels.get(i, 1.46), y, z_front, 0.37)
+            out += D.shelf_row(rng, *ends[i], y, z_front, 0.37)
         return out
 
-    b.ply(local.mesh("books", build), np.eye(4), "spines", prefix="books")
-    small = lambda: P.potted_plant(52, stems=6, height=0.25, leaf_len=0.09, leaf_w=0.045, leaves_per_stem=6,
-                                   pot_radius=0.06, pot_height=0.1, spread=0.12)
-    for i, x in ((1, 1.25), (3, 1.28)):
-        parts = b.assets.meshes("plant_shelf", small)
-        b.part_set(parts, G.translate((x, levels[i], z_front - 0.1)), {"pot": "terracotta", "soil": "soil", "stems": "stem", "leaves": "leaf"})
-    jar = b.assets.meshes("jar", P.jar)
-    b.part_set(jar, G.compose(G.translate((1.28, levels[1], z_front - 0.1)), G.scale(0.8)), {"glass": "mug_0", "lid": "case_wood"})
+    b.ply(local.mesh("books_v2", build), np.eye(4), "spines", prefix="books")
+    orng = rng_for(ctx, 6)
+    zo = z_front - 0.12
+    web(b, "book_encyclopedia_set_01", (-1.17, levels[2], z_front - 0.09))
+    web(b, "cassette_player", (-0.8, levels[2], zo), yaw=float(orng.uniform(-20, 20)))
+    for i in (1, 3):
+        web(b, "potted_plant_04", (1.3, levels[i], zo), yaw=float(orng.uniform(0, 360)), prefix="plant_shelf")
+    web(b, "brass_vase_03", (1.12, levels[1], zo))
+    web(b, "alarm_clock_01", (1.14, levels[3], zo), yaw=float(orng.uniform(-25, 10)))
+    web(b, "Camera_01", (1.14, levels[4], zo), yaw=float(orng.uniform(-30, 30)))
+    web(b, "standing_picture_frame_02", (1.34, levels[4], zo), yaw=-90 + float(orng.uniform(-15, 15)))
+    web(b, "ceramic_vase_04", (1.2, levels[0], zo))
+    web(b, "brass_vase_04", (1.4, levels[0], zo), yaw=float(orng.uniform(0, 360)))
+    web(b, "cardboard_box_01", (-0.95, h, ROOM_Z0 + 0.19), yaw=float(orng.uniform(-8, 8)), scale=0.7)
+    web(b, "cardboard_box_01", (0.55, h, ROOM_Z0 + 0.19), yaw=90 + float(orng.uniform(-8, 8)), scale=0.55, prefix="box_small")
     b.focus_points["shelf_books"] = [-0.3, levels[2] + 0.2, z_front]
 
 
-def add_walls_decor(b: SceneBuilder) -> None:
+def add_walls_decor(b: SceneBuilder, ctx: BuildContext) -> None:
+    rng = rng_for(ctx, 7)
     face_left = G.rotate((0, 1, 0), -90)
     b.rect(G.compose(G.translate((ROOM_X1 - 0.012, 1.45, -1.4)), face_left, G.scale((0.62, 0.42, 1))), "pinboard")
     for dz, dy, ww, hh in ((0, 0.42, 1.28, 0.04), (0, -0.42, 1.28, 0.04), (0.62, 0, 0.04, 0.88), (-0.62, 0, 0.04, 0.88)):
-        b.cube((ROOM_X1 - 0.02, 1.45 + dy, -1.4 + dz), (0.03, hh, ww), "desk_dark")
+        slab(b, (ROOM_X1 - 0.02, 1.45 + dy, -1.4 + dz), (0.03, hh, ww), "desk_dark")
     b.focus_points["pinboard"] = [ROOM_X1 - 0.02, 1.5, -1.4]
-    back = G.rotate((0, 1, 0), 180)
-    for art, x, w, h in (("art_a", -1.2, 0.6, 0.8), ("art_b", 0.5, 0.75, 0.56)):
-        c = (x, 1.6, ROOM_Z1 - 0.02)
-        b.rect(G.compose(G.translate(c), back, G.scale((w / 2, h / 2, 1))), art)
-        for dx, dy, ww, hh in ((0, h / 2, w + 0.05, 0.035), (0, -h / 2, w + 0.05, 0.035), (w / 2, 0, 0.035, h), (-w / 2, 0, 0.035, h)):
-            b.cube((c[0] + dx, c[1] + dy, c[2] - 0.005), (ww, hh, 0.03), "black")
-    # Sideboard against the right wall with a plant.
-    b.cube((ROOM_X1 - 0.24, 0.4, -2.4), (0.46, 0.8, 1.5), "desk_dark")
+    # Scanned frames with their own art on the front wall, hung by their backs (local +z faces the room).
+    web(b, "hanging_picture_frame_01", (-1.2, 1.6 - 0.42, ROOM_Z1 - 0.009), yaw=180)
+    web(b, "hanging_picture_frame_02", (0.5, 1.6 - 0.28, ROOM_Z1 - 0.019), yaw=180)
+    web(b, "vintage_telephone_wall_clock", (ROOM_X1 - 0.097, 1.55, -3.3), yaw=-90)
+
+    # Sideboard against the right wall, with things on it.
+    sz = -2.0
+    slab(b, (ROOM_X1 - 0.24, 0.4, sz), (0.46, 0.8, 1.5), "desk_dark")
     for k in range(3):
-        b.cube((ROOM_X1 - 0.47, 0.18 + 0.27 * k, -2.4), (0.012, 0.22, 1.42), "case_wood")
-    big = lambda: P.potted_plant(31, stems=8, height=0.7, leaf_len=0.2, leaf_w=0.1, leaves_per_stem=8, pot_radius=0.12,
-                                 pot_height=0.2, spread=0.3)
-    b.part_set(b.assets.meshes("plant_side", big), G.translate((ROOM_X1 - 0.24, 0.8, -2.9)),
-               {"pot": "mug_0", "soil": "soil", "stems": "stem", "leaves": "leaf_dark"})
-    floor_plant = lambda: P.potted_plant(37, stems=9, height=1.2, leaf_len=0.26, leaf_w=0.12, leaves_per_stem=9,
-                                         pot_radius=0.2, pot_height=0.38, spread=0.5)
-    b.part_set(b.assets.meshes("plant_floor", floor_plant), G.translate((-2.0, 0, -2.6)),
-               {"pot": "mug_0", "soil": "soil", "stems": "stem", "leaves": "leaf_dark"})
+        slab(b, (ROOM_X1 - 0.475, 0.18 + 0.27 * k, sz), (0.012, 0.22, 1.42), "case_wood")
+    top = 0.8
+    web(b, "potted_plant_02", (ROOM_X1 - 0.26, top, sz - 0.5), yaw=float(rng.uniform(0, 360)), scale=0.75)
+    web(b, "wicker_basket_01", (ROOM_X1 - 0.25, top, sz - 0.02), yaw=90 + float(rng.uniform(-10, 10)))
+    web(b, "binder_notebook", (ROOM_X1 - 0.25, top, sz + 0.42), yaw=90 + float(rng.uniform(-6, 6)))
+    web(b, "clipboard", (ROOM_X1 - 0.27, top + 0.025, sz + 0.47), yaw=95 + float(rng.uniform(-10, 10)))
+    web(b, "mantel_clock_01", (ROOM_X1 - 0.24, top, sz + 0.12), yaw=-90)
+    # Reading corner at the back right: armchair, cushions, side table with a vase.
+    web(b, "ArmChair_01", (1.98, 0.0, -3.3), yaw=-90 + float(rng.uniform(-12, 12)))
+    web(b, "throw_pillows_01", (2.02, 0.43, -3.3), yaw=-90, scale=0.55)
+    web(b, "side_table_01", (2.1, 0.0, -3.96))
+    web(b, "antique_ceramic_vase_01", (2.1, 0.551, -3.96), yaw=float(rng.uniform(0, 360)), scale=0.8)
+    # Plants and a floor vase on the window side.
+    web(b, "potted_plant_01", (-2.0, 0.0, -2.6), yaw=float(rng.uniform(0, 360)))
+    web(b, "ceramic_vase_01", (-2.05, 0.0, -3.9), yaw=float(rng.uniform(0, 360)))
+    b.focus_points["armchair"] = [1.98, 0.6, -3.3]
 
 
-# ----------------------------------------------------------------------------
-# The desk and everything on it
-# ----------------------------------------------------------------------------
+def add_outside(b: SceneBuilder, ctx: BuildContext) -> None:
+    """The street seen through the window, all real geometry at real distances (the window wall is at x = -2.65):
+    front garden 0-3.5 m, a low brick wall, pavement to 6 m, the road to 13 m, the far pavement, then a terrace of
+    houses about 15.5 m away. Nothing taller than the sun's line through the window stands in its way."""
+    rng = rng_for(ctx, 8)
+    span = 80.0
+    x_wall, x_kerb, x_road, x_far = OUTER_X - 3.5, OUTER_X - 6.0, OUTER_X - 13.0, OUTER_X - 15.5
+    slab(b, ((OUTER_X + x_wall) / 2, -0.02, 0), (OUTER_X - x_wall, 0.04, span), "grass")
+    slab(b, (x_wall - 0.125, 0.33, 0), (0.25, 0.7, span), "garden_brick")
+    slab(b, (x_wall - 0.125, 0.70, 0), (0.32, 0.05, span), "kerb")
+    slab(b, ((x_wall - 0.25 + x_kerb) / 2, -0.02, 0), (x_wall - 0.25 - x_kerb, 0.04, span), "pavement")
+    for xk in (x_kerb, x_road):
+        slab(b, (xk, -0.07, 0), (0.15, 0.14, span), "kerb")
+    slab(b, ((x_kerb + x_road) / 2, -0.15, 0), (x_kerb - x_road, 0.04, span), "asphalt")
+    slab(b, ((x_road + x_far) / 2, -0.02, 0), (x_road - x_far, 0.04, span), "pavement")
+    b.rect(G.compose(G.translate((0, -0.3, 0)), G.rotate((1, 0, 0), -90), G.scale((400.0, 400.0, 1))), "ground")
+    # Terraced houses across the road, front faces toward the window.
+    z = -30.0
+    k = 0
+    while z < 30.0:
+        width = float(rng.uniform(7.5, 10.0))
+        height = float(rng.uniform(7.0, 8.6))
+        parts = b.assets.meshes(f"facade_{k % 5}", lambda w=width, h=height, k=k: D.facade(w, h, 2 if h < 7.8 else 3, 3, 40 + k))
+        b.part_set(parts, G.translate((x_far, 0.0, z)), {"wall": f"facade_{k % 3}", "glass": "window_glass",
+                                                          "frame": "white_paint", "roof": "roof_slate", "door": "front_door"})
+        z += width + 0.02
+        k += 1
+    # Garden, pavement and street furniture.
+    web(b, "planter_box_02", (OUTER_X - 0.5, 0.0, 0.45), yaw=90)
+    for zz, yaw in ((-4.8, 90.0), (6.8, 270.0)):
+        web(b, "shrub_02", (x_wall + 0.9, 0.0, zz), yaw=yaw, scale=0.7)
+    web(b, "tree_small_02", (x_kerb + 0.9, 0.0, -3.6), yaw=float(rng.uniform(0, 360)), scale=1.25)
+    web(b, "street_lamp_01", (x_kerb + 0.35, 0.0, 3.6), yaw=90)
+    web(b, "painted_wooden_bench", (x_kerb + 1.2, 0.0, 1.4), yaw=90)
+    web(b, "fire_hydrant", (x_kerb + 0.5, 0.0, -1.2), yaw=float(rng.uniform(0, 360)), scale=0.6)
+    web(b, "utility_box_01", (x_wall - 0.6, 0.0, -7.2), yaw=90)
+    web(b, "covered_car", (x_kerb - 1.3, -0.13, float(rng.uniform(-1.5, 0.5))), yaw=float(rng.choice([0.0, 180.0])))
+    b.focus_points["street"] = [x_kerb - 1.3, 0.8, -0.5]
+    b.focus_points["houses"] = [x_far, 3.5, 0.5]
+
 
 def add_desk(b: SceneBuilder, local: Assets, ctx: BuildContext) -> None:
     A = b.assets
     rng = rng_for(ctx, 1)
     mx, my, mz = MONITOR_POS
     b.box_mesh("desk_top", (0, DESK_Y - 0.0175, -0.4), (1.8, 0.035, 0.8), "desk_wood")
-    b.cube((-0.865, 0.3575, -0.4), (0.03, 0.715, 0.7), "desk_dark")                 # left side panel
-    b.cube((0.65, 0.3575, -0.42), (0.46, 0.715, 0.68), "desk_dark")                 # drawer pedestal
+    slab(b, (-0.865, 0.3575, -0.4), (0.03, 0.715, 0.7), "desk_dark")                 # left side panel
+    slab(b, (0.65, 0.3575, -0.42), (0.46, 0.715, 0.68), "desk_dark")                 # drawer pedestal
     for k in range(3):
-        b.cube((0.65, 0.12 + 0.22 * k, -0.077), (0.42, 0.2, 0.012), "desk_wood")
+        slab(b, (0.65, 0.12 + 0.22 * k, -0.077), (0.42, 0.2, 0.012), "desk_wood")
         b.cube((0.65, 0.17 + 0.22 * k, -0.066), (0.16, 0.012, 0.012), "brass")
-    b.cube((0.0, 0.55, -0.76), (1.7, 0.3, 0.02), "desk_dark")                       # modesty panel
+    slab(b, (0.0, 0.55, -0.76), (1.7, 0.3, 0.02), "desk_dark")                       # modesty panel
+    web(b, "wicker_basket_02", (-0.45, 0.0, -0.42), yaw=float(rng.uniform(0, 360)))   # wastepaper basket
     b.box_mesh("mat", (-0.12, DESK_Y + 0.0015, -0.22), (0.78, 0.003, 0.36), "leather")
 
     # Keyboard and mouse
@@ -336,60 +438,32 @@ def add_desk(b: SceneBuilder, local: Assets, ctx: BuildContext) -> None:
         b.part_set(hp, G.compose(G.translate((0.77, DESK_Y, -0.06)), G.rotate((0, 1, 0), float(rng.uniform(-12, 12)))),
                    {"plastic": "headphone_plastic", "cushion": "headphone_pad", "metal": "chrome"})
         b.focus_points["headphones"] = [0.77, DESK_Y + 0.1, -0.06]
-    variant = ctx.seed % 2
-    plant = lambda: P.potted_plant(41 + variant, stems=6 + variant, height=0.2 + 0.05 * variant, leaf_len=0.075, leaf_w=0.038,
-                                   leaves_per_stem=6, pot_radius=0.06, pot_height=0.09, spread=0.1)
-    b.part_set(A.meshes(f"plant_desk_{variant}", plant), G.translate((-0.80, DESK_Y, -0.68)),
-               {"pot": "terracotta", "soil": "soil", "stems": "stem", "leaves": "leaf"})
+    web(b, "potted_plant_04", (-0.80, DESK_Y, -0.68), yaw=float(rng.uniform(0, 360)), prefix="plant_desk")
     b.focus_points["plant"] = [-0.80, DESK_Y + 0.2, -0.68]
+    web(b, "standing_picture_frame_01", (-0.46, DESK_Y, -0.74), yaw=-100 + float(rng.uniform(-10, 10)))
 
 
 def add_lamp(b: SceneBuilder) -> None:
-    """Articulated desk lamp: parallel rods, joints and a shade aimed at the notebook; the warm bulb is the emitter."""
-    base = np.array(LAMP_BASE)
-    A_, B_, C_ = (base + np.array(v) for v in ((0.0, 0.07, 0.0), (-0.07, 0.60, 0.04), (-0.30, 0.46, 0.24)))
-
-    def rods(p0, p1, off):
-        d = np.asarray(p1) - np.asarray(p0)
-        side = np.cross(d, (0, 1, 0))
-        side = side / np.linalg.norm(side) * off
-        return D.join(D.tube(p0 + side, p1 + side, 0.0042, 8), D.tube(p0 - side, p1 - side, 0.0042, 8))
-
-    arms = D.join(rods(A_, B_, 0.011), rods(B_, C_, 0.011))
-    for p, r in ((A_, 0.015), (B_, 0.015), (C_, 0.014)):
-        arms += G.ellipsoid((r, r, r), 10, 16).transformed(G.translate(p))
-    b.ply(b.assets.mesh("lamp_base", lambda: G.lathe([(0, 0), (0.075, 0), (0.078, 0.004), (0.07, 0.018), (0.03, 0.026), (0, 0.026)], 48)),
-          G.translate(base), "lamp_metal")
-    b.ply(b.assets.mesh("lamp_arms", lambda: arms), np.eye(4), "lamp_metal", prefix="lamp_arms")
-    aim = np.array(NOTEBOOK_POS) + np.array([0.0, 0.02, 0.0]) - C_
-    aim = aim / np.linalg.norm(aim)
-    head = G.compose(G.translate(C_), D.rot_between((0, -1, 0), aim))
-    outer = [(0.078, -0.13), (0.060, -0.095), (0.040, -0.055), (0.024, -0.02), (0.016, 0.0), (0.016, 0.03), (0.010, 0.034)]
-    inner = [(0.0, -0.004), (0.020, -0.022), (0.037, -0.058), (0.056, -0.098), (0.075, -0.13)]
-    b.ply(b.assets.mesh("lamp_shade_out", lambda: G.lathe(outer, 56)), head, "lamp_metal")
-    # The interior reflects about as much light as the bulb gives directly. A diffuse interior would make every
-    # lit pixel noisy (the bulb is reached only through two bounces), so it is an explicit emitter instead:
-    # albedo 0.88 x irradiance at ~0.07 m from the bulb / pi, which is about 8.5 for the 120 bulb.
-    b.ply(b.assets.mesh("lamp_shade_in", lambda: G.lathe(inner, 56)), head, "emitter_backing",
-          emission=tuple(0.071 * c for c in LAMP), prefix="shade_glow", power=0.1)
-    bulb = C_ + aim * 0.055
-    b.sphere(bulb, 0.02, "emitter_backing", emission=LAMP, prefix="bulb")
-    b.focus_points["lamp"] = bulb.tolist()
+    """Scanned architect lamp; its bulb is the emitter. The head (local -z of the model) hangs over the notebook."""
+    to_nb = np.array([NOTEBOOK_POS[0] - LAMP_BASE[0], NOTEBOOK_POS[2] - LAMP_BASE[2]])
+    yaw = float(np.degrees(np.arctan2(-to_nb[0], -to_nb[1])))
+    at = (LAMP_BASE[0] + 0.55 * to_nb[0], DESK_Y, LAMP_BASE[2] + 0.55 * to_nb[1])
+    M = web(b, "desk_lamp_arm_01", at, yaw=yaw,
+            emit={"desk_lamp_arm_01_light": (LAMP, 0.015 * float(np.dot(LAMP, (0.2126, 0.7152, 0.0722))))})
+    b.focus_points["lamp"] = world(M, (-0.005, 0.695, -0.176))
 
 
 def add_chair(b: SceneBuilder, ctx: BuildContext) -> None:
     rng = rng_for(ctx, 4)
-    parts = b.assets.meshes("office_chair", D.office_chair)
-    b.part_set(parts, G.compose(G.translate((float(rng.uniform(-0.1, 0.1)), 0, 0.52)),
-                                G.rotate((0, 1, 0), 180 + float(rng.uniform(-18, 18)))),
-               {"fabric": "chair_fabric", "plastic": "black", "chrome": "chrome"})
+    web(b, "gallinera_chair", (float(rng.uniform(-0.1, 0.1)), 0.0, 0.5), yaw=180 + float(rng.uniform(-18, 18)))
     b.focus_points["chair"] = [0.0, 0.85, 0.30]
 
 
 def add_room_lights(b: SceneBuilder) -> None:
     for z in (-1.2, -2.9):
-        b.rect(G.compose(G.translate((0.2, ROOM_H - 0.01, z)), G.rotate((1, 0, 0), 90), G.scale((0.6, 0.3, 1))),
-               "emitter_backing", emission=CEILING, prefix="ceiling_panel", power=1.2 * 0.6 * luminance(CEILING))
+        web(b, "modern_ceiling_lamp_01", (0.2, ROOM_H - 0.952, z), prefix="pendant",
+            emit={"modern_ceiling_lamp_01_glass": (PENDANT, 0.42 * luminance(PENDANT))})
+    web(b, "ceiling_fan", (0.0, ROOM_H - 0.516, 0.45))
     b.rect(G.compose(G.translate((0.0, 2.23, ROOM_Z0 + 0.36)), G.rotate((1, 0, 0), 60), G.scale((1.4, 0.015, 1))),
            "emitter_backing", emission=STRIP, prefix="case_strip", power=2.8 * 0.03 * luminance(STRIP))
 
@@ -400,11 +474,12 @@ def build(ctx: BuildContext) -> SceneBundle:
     add_materials(b, local, ctx)
     add_room(b)
     add_bookcase(b, local, ctx)
-    add_walls_decor(b)
+    add_walls_decor(b, ctx)
     add_desk(b, local, ctx)
     add_lamp(b)
     add_room_lights(b)
     add_chair(b, ctx)
+    add_outside(b, ctx)
     sun = env_kit.default_sun_direction(SUN_ELEVATION, SUN_AZIMUTH)
     b.d["sky"] = env_kit.sky("clear", sun_direction=sun, scale=SKY_SCALE, sampling_weight=2.0 * b.lamp_weight)
     b.focus_points["window"] = [ROOM_X0 - 0.1, 1.6, 0.5 * sum(WINDOW_Z)]
@@ -422,21 +497,23 @@ SCENE = SceneDef(
         "along": View((-0.55, 0.98, 0.40), (0.10, 0.92, -2.5), focus="mug"),
         # Wider, from the front right: desk, lamp, chair edge, the whole bookcase behind.
         "wide": View((1.35, 1.55, 1.15), (-0.15, 0.85, -2.2), focus="monitor"),
+        # From the chair side toward the window: curtains, the garden and the houses across the street.
+        "window": View((0.9, 1.35, 0.6), (-2.2, 1.3, 0.45), focus="street"),
     },
     default_view="close",
     camera_box=((-1.6, 0.85, -0.4), (1.7, 1.9, 1.2)),
-    target_box=((-1.2, 0.55, -4.0), (1.2, 1.9, -0.1)),   # the desk and the bookcase, not the side walls
+    target_box=((-2.3, 0.5, -4.0), (2.3, 1.65, 1.4)),   # desk-to-shelf height, not the ceiling
+    lens_mm=(24.0, 70.0),   # a 4.6 m study: longer lenses mostly frame a patch of wall or floor
     exclude_boxes=(
         ((-1.0, 0.0, -0.9), (1.0, 0.80, 0.1)),        # desk body
         ((-0.52, 0.75, -0.72), (0.12, 1.2, -0.46)),   # monitor
-        ((0.68, 0.75, -0.78), (0.98, 1.45, -0.50)),   # lamp base and lower arm
-        ((0.38, 1.05, -0.58), (0.82, 1.40, -0.20)),   # lamp upper arm and head
+        ((0.45, 0.75, -0.82), (0.98, 1.70, -0.22)),   # architect lamp
         ((-0.40, 0.0, 0.10), (0.40, 1.15, 0.80)),     # chair
         ((-0.9, 0.75, -0.8), (-0.55, 0.95, -0.45)),   # pen cup and plant
         ((-2.4, 0.0, -3.0), (-1.5, 1.9, -2.0)),       # floor plant
     ),
     tags=("indoor", "day", "artificial_light", "closeup", "clutter", "metal"),
     default_seed=3,
-    asset_version=3,
+    asset_version=4,
     spp_hint=2048,
 )
