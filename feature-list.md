@@ -22,15 +22,12 @@
 | Experiments 15-17 | Shipped | Extends the teaching sequence past basic DoF into why it fails and what fixes it. | Documentation and reproducible commands over the shared `DoFApproaches` target rather than three source snapshots. |
 | Mitsuba 3 physically based cafe | In progress | Gives a realistic scene with global illumination, sun and sky, soft shadows, refraction and metals, plus ground-truth thin-lens DoF. | `renderer/mitsuba/`: procedural, asset-free, about 626k triangles; renders pixel-aligned all-in-focus, thin-lens DoF and a 1-spp G-buffer with planar z-depth. Runs on Apple Metal locally and CUDA on the HPC via `hpc/render_cafe.slurm`. |
 | Shader copy dependency tracking | Shipped | Keeps edited `shaders/dof_scene/*` files synchronized into the app bundle during rebuilds. | Source shader changes now trigger copy/link dependency updates. |
-| Mitsuba dataset scenes | In progress | Ten artificial training scenes with pinned CC0 web assets, a sampler for camera poses, and a scene checker. | `renderer/mitsuba/scenes/`; held-out val/test/test_ood scenes from the other author are not built yet. |
-| Fast frozen lens tracer | Shipped | Renders sharp, DoF and G-buffer passes about 30x faster than `mi.render` (workshop DoF pass 3 s vs 92 s). | `lens_trace.py`; matches `mi.render` within noise on Cornell, desk and workshop (2026-10-20). |
-| Data protocol v1 | Shipped | Fixes the model input and target: sharp HDR RGB + 1/z + 6 camera settings in, DoF RGB out. | `ai/DATA_PROTOCOL.md`, loader in `ai/data.py`; protocol check on 64 pilot samples found 0 bad. |
-| 10k training set generation | In progress | 5,000 poses x 2 lenses over 10 scenes, clear and overcast. | 48 of 100 chunks done on 2026-10-23, 0 failed, shipping to CIAI `/nfs-stor`; see `renderer/mitsuba/run_records/train10k/RUN_STATUS.md`. Wet and snow presets excluded until fixed. |
 
 ## Planned
 
 | Feature | Status | User value | Notes |
 | --- | --- | --- | --- |
+| Dataset generation | Planned | Produces RGB/depth pairs and camera metadata for AI depth experiments. | Later stage of the roadmap. |
 | Monocular depth integration | Planned | Compares predicted depth to renderer depth and drives DoF from both. | Later stage of the roadmap. |
 | Stronger DoF artifact handling | Planned | Reduces single-layer screen-space limitations near occlusion edges. | Experiments 15-17 measured the gap; applying multi-view or layered depth to `DoFScene` itself is still open. |
 | Accelerated ray-traced reference | Planned | Lets the reference scale past 64 analytic primitives. | The current ray tracer tests every ray against every primitive from uniform arrays, with no acceleration structure. |
