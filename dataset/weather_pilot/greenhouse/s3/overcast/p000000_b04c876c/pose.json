@@ -1,0 +1,73 @@
+{
+  "scene": "greenhouse",
+  "seed": 3,
+  "env": "overcast",
+  "sampler_seed": 0,
+  "origin": [
+    2.0203,
+    1.6579,
+    -7.1711
+  ],
+  "target": [
+    -1.9032,
+    0.5593,
+    -1.3841
+  ],
+  "roll": -1.103,
+  "focal": 28.432,
+  "res": [
+    1920,
+    1080
+  ],
+  "pose_id": "p000000_b04c876c",
+  "rejected_before": {},
+  "sharp": {
+    "spp": 1024,
+    "seconds": 28.75,
+    "seed": 4281
+  },
+  "sharp_median_luminance": 0.03684878721833229,
+  "exposure_gate_ok": true,
+  "auto_exposure_scale": 3.9885175228118896,
+  "coc_valid_fraction": 1.0,
+  "camera": {
+    "origin": [
+      2.020337629490089,
+      1.657927525806834,
+      -7.1710602340452585
+    ],
+    "target": [
+      -1.903177678133069,
+      0.5593456609392714,
+      -1.3840822313422922
+    ],
+    "up": [
+      -0.07115570315071293,
+      0.9876963045001901,
+      0.1392583067030317
+    ],
+    "roll_deg": -1.1031468052130176,
+    "aperture": {
+      "shape": "disc",
+      "rotation_deg": 0.0
+    },
+    "forward": [
+      -0.554370319380304,
+      -0.15522334731528856,
+      0.817666962423221
+    ],
+    "focal_length_mm": 28.432298130184332,
+    "sensor_height_mm": 24.0,
+    "f_number": 100000.0,
+    "aperture_radius_m": 1.4216149065092166e-07,
+    "focus_distance_m": 1.0,
+    "fov_y_deg": 45.76486125506018,
+    "intrinsics_px": {
+      "fx": 1279.453415858295,
+      "fy": 1279.453415858295,
+      "cx": 960.0,
+      "cy": 540.0
+    },
+    "coc_diameter_px_at_infinity": 0.00036377800963365757
+  }
+}

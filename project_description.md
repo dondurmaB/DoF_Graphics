@@ -14,6 +14,10 @@ The render path writes HDR color and depth to an offscreen framebuffer, then app
 
 The `DoFApproaches` target is a third, separate app for method comparison. It renders one shared scene through three depth-of-field methods - single-layer screen-space gather, multi-view aperture accumulation, and lens-sampled ray tracing - selected with `--method 1|2|3`. Its scene is built from analytic primitives so the rasterized and ray-traced paths describe identical geometry, and both shade through one shared GLSL file; the three methods therefore differ in exactly one respect, how visibility through the aperture is resolved. That equivalence is what makes their difference images and error metrics meaningful, and it is verified by rendering the rasterized and ray-traced paths at f/22, where they agree to 0.518 of 255. It is the code behind Experiments 15-17.
 
+## Mitsuba Dataset Pipeline
+
+`renderer/mitsuba/` holds the physically based path used to make training data: ten procedural-plus-CC0-asset scenes, a pose sampler, a scene checker, and a frozen thin-lens tracer (`lens_trace.py`) that renders the sharp, DoF and G-buffer passes quickly. `ai/DATA_PROTOCOL.md` (v1) defines what a sample is and `ai/data.py` loads it. `renderer/mitsuba/generate.py` plans, runs and ships a bulk dataset through an NFS-safe chunk queue. Rendering ran on the student-lab RTX 5000 Ada cluster with finished chunks copied to CIAI `/nfs-stor/rui.gao/Researches/dof/dof_dataset/train10k`; the dataset is not in git. The student-lab cluster is no longer used for this task as of 2026-10-23, and its scratch scripts and run metadata are kept in `renderer/mitsuba/scratch/` and `renderer/mitsuba/run_records/train10k/`. Status and decisions are in `progress.md`.
+
 ## Constraints
 
 - macOS native OpenGL 3.3 Core Profile through GLFW.

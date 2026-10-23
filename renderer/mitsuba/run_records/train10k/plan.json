@@ -1,0 +1,709 @@
+{
+ "samples": 10000,
+ "lenses_per_pose": 2,
+ "envs": "clear,overcast",
+ "sampler_args": [],
+ "created": "2026-10-21 09:58:31",
+ "chunks": [
+  {
+   "id": "cafe.clear.000000",
+   "scene": "cafe",
+   "env": "clear",
+   "start": 0,
+   "count": 50
+  },
+  {
+   "id": "cafe.clear.000050",
+   "scene": "cafe",
+   "env": "clear",
+   "start": 50,
+   "count": 50
+  },
+  {
+   "id": "cafe.clear.000100",
+   "scene": "cafe",
+   "env": "clear",
+   "start": 100,
+   "count": 50
+  },
+  {
+   "id": "cafe.clear.000150",
+   "scene": "cafe",
+   "env": "clear",
+   "start": 150,
+   "count": 50
+  },
+  {
+   "id": "cafe.clear.000200",
+   "scene": "cafe",
+   "env": "clear",
+   "start": 200,
+   "count": 50
+  },
+  {
+   "id": "cafe.clear.000250",
+   "scene": "cafe",
+   "env": "clear",
+   "start": 250,
+   "count": 50
+  },
+  {
+   "id": "cafe.clear.000300",
+   "scene": "cafe",
+   "env": "clear",
+   "start": 300,
+   "count": 50
+  },
+  {
+   "id": "cafe.clear.000350",
+   "scene": "cafe",
+   "env": "clear",
+   "start": 350,
+   "count": 50
+  },
+  {
+   "id": "cafe.clear.000400",
+   "scene": "cafe",
+   "env": "clear",
+   "start": 400,
+   "count": 50
+  },
+  {
+   "id": "cafe.clear.000450",
+   "scene": "cafe",
+   "env": "clear",
+   "start": 450,
+   "count": 50
+  },
+  {
+   "id": "courtyard.clear.000000",
+   "scene": "courtyard",
+   "env": "clear",
+   "start": 0,
+   "count": 50
+  },
+  {
+   "id": "courtyard.clear.000050",
+   "scene": "courtyard",
+   "env": "clear",
+   "start": 50,
+   "count": 50
+  },
+  {
+   "id": "courtyard.clear.000100",
+   "scene": "courtyard",
+   "env": "clear",
+   "start": 100,
+   "count": 50
+  },
+  {
+   "id": "courtyard.clear.000150",
+   "scene": "courtyard",
+   "env": "clear",
+   "start": 150,
+   "count": 50
+  },
+  {
+   "id": "courtyard.clear.000200",
+   "scene": "courtyard",
+   "env": "clear",
+   "start": 200,
+   "count": 50
+  },
+  {
+   "id": "courtyard.overcast.000000",
+   "scene": "courtyard",
+   "env": "overcast",
+   "start": 0,
+   "count": 50
+  },
+  {
+   "id": "courtyard.overcast.000050",
+   "scene": "courtyard",
+   "env": "overcast",
+   "start": 50,
+   "count": 50
+  },
+  {
+   "id": "courtyard.overcast.000100",
+   "scene": "courtyard",
+   "env": "overcast",
+   "start": 100,
+   "count": 50
+  },
+  {
+   "id": "courtyard.overcast.000150",
+   "scene": "courtyard",
+   "env": "overcast",
+   "start": 150,
+   "count": 50
+  },
+  {
+   "id": "courtyard.overcast.000200",
+   "scene": "courtyard",
+   "env": "overcast",
+   "start": 200,
+   "count": 50
+  },
+  {
+   "id": "desk.clear.000000",
+   "scene": "desk",
+   "env": "clear",
+   "start": 0,
+   "count": 50
+  },
+  {
+   "id": "desk.clear.000050",
+   "scene": "desk",
+   "env": "clear",
+   "start": 50,
+   "count": 50
+  },
+  {
+   "id": "desk.clear.000100",
+   "scene": "desk",
+   "env": "clear",
+   "start": 100,
+   "count": 50
+  },
+  {
+   "id": "desk.clear.000150",
+   "scene": "desk",
+   "env": "clear",
+   "start": 150,
+   "count": 50
+  },
+  {
+   "id": "desk.clear.000200",
+   "scene": "desk",
+   "env": "clear",
+   "start": 200,
+   "count": 50
+  },
+  {
+   "id": "desk.clear.000250",
+   "scene": "desk",
+   "env": "clear",
+   "start": 250,
+   "count": 50
+  },
+  {
+   "id": "desk.clear.000300",
+   "scene": "desk",
+   "env": "clear",
+   "start": 300,
+   "count": 50
+  },
+  {
+   "id": "desk.clear.000350",
+   "scene": "desk",
+   "env": "clear",
+   "start": 350,
+   "count": 50
+  },
+  {
+   "id": "desk.clear.000400",
+   "scene": "desk",
+   "env": "clear",
+   "start": 400,
+   "count": 50
+  },
+  {
+   "id": "desk.clear.000450",
+   "scene": "desk",
+   "env": "clear",
+   "start": 450,
+   "count": 50
+  },
+  {
+   "id": "greenhouse.clear.000000",
+   "scene": "greenhouse",
+   "env": "clear",
+   "start": 0,
+   "count": 50
+  },
+  {
+   "id": "greenhouse.clear.000050",
+   "scene": "greenhouse",
+   "env": "clear",
+   "start": 50,
+   "count": 50
+  },
+  {
+   "id": "greenhouse.clear.000100",
+   "scene": "greenhouse",
+   "env": "clear",
+   "start": 100,
+   "count": 50
+  },
+  {
+   "id": "greenhouse.clear.000150",
+   "scene": "greenhouse",
+   "env": "clear",
+   "start": 150,
+   "count": 50
+  },
+  {
+   "id": "greenhouse.clear.000200",
+   "scene": "greenhouse",
+   "env": "clear",
+   "start": 200,
+   "count": 50
+  },
+  {
+   "id": "greenhouse.overcast.000000",
+   "scene": "greenhouse",
+   "env": "overcast",
+   "start": 0,
+   "count": 50
+  },
+  {
+   "id": "greenhouse.overcast.000050",
+   "scene": "greenhouse",
+   "env": "overcast",
+   "start": 50,
+   "count": 50
+  },
+  {
+   "id": "greenhouse.overcast.000100",
+   "scene": "greenhouse",
+   "env": "overcast",
+   "start": 100,
+   "count": 50
+  },
+  {
+   "id": "greenhouse.overcast.000150",
+   "scene": "greenhouse",
+   "env": "overcast",
+   "start": 150,
+   "count": 50
+  },
+  {
+   "id": "greenhouse.overcast.000200",
+   "scene": "greenhouse",
+   "env": "overcast",
+   "start": 200,
+   "count": 50
+  },
+  {
+   "id": "museum.clear.000000",
+   "scene": "museum",
+   "env": "clear",
+   "start": 0,
+   "count": 50
+  },
+  {
+   "id": "museum.clear.000050",
+   "scene": "museum",
+   "env": "clear",
+   "start": 50,
+   "count": 50
+  },
+  {
+   "id": "museum.clear.000100",
+   "scene": "museum",
+   "env": "clear",
+   "start": 100,
+   "count": 50
+  },
+  {
+   "id": "museum.clear.000150",
+   "scene": "museum",
+   "env": "clear",
+   "start": 150,
+   "count": 50
+  },
+  {
+   "id": "museum.clear.000200",
+   "scene": "museum",
+   "env": "clear",
+   "start": 200,
+   "count": 50
+  },
+  {
+   "id": "museum.clear.000250",
+   "scene": "museum",
+   "env": "clear",
+   "start": 250,
+   "count": 50
+  },
+  {
+   "id": "museum.clear.000300",
+   "scene": "museum",
+   "env": "clear",
+   "start": 300,
+   "count": 50
+  },
+  {
+   "id": "museum.clear.000350",
+   "scene": "museum",
+   "env": "clear",
+   "start": 350,
+   "count": 50
+  },
+  {
+   "id": "museum.clear.000400",
+   "scene": "museum",
+   "env": "clear",
+   "start": 400,
+   "count": 50
+  },
+  {
+   "id": "museum.clear.000450",
+   "scene": "museum",
+   "env": "clear",
+   "start": 450,
+   "count": 50
+  },
+  {
+   "id": "night_street.clear.000000",
+   "scene": "night_street",
+   "env": "clear",
+   "start": 0,
+   "count": 50
+  },
+  {
+   "id": "night_street.clear.000050",
+   "scene": "night_street",
+   "env": "clear",
+   "start": 50,
+   "count": 50
+  },
+  {
+   "id": "night_street.clear.000100",
+   "scene": "night_street",
+   "env": "clear",
+   "start": 100,
+   "count": 50
+  },
+  {
+   "id": "night_street.clear.000150",
+   "scene": "night_street",
+   "env": "clear",
+   "start": 150,
+   "count": 50
+  },
+  {
+   "id": "night_street.clear.000200",
+   "scene": "night_street",
+   "env": "clear",
+   "start": 200,
+   "count": 50
+  },
+  {
+   "id": "night_street.clear.000250",
+   "scene": "night_street",
+   "env": "clear",
+   "start": 250,
+   "count": 50
+  },
+  {
+   "id": "night_street.clear.000300",
+   "scene": "night_street",
+   "env": "clear",
+   "start": 300,
+   "count": 50
+  },
+  {
+   "id": "night_street.clear.000350",
+   "scene": "night_street",
+   "env": "clear",
+   "start": 350,
+   "count": 50
+  },
+  {
+   "id": "night_street.clear.000400",
+   "scene": "night_street",
+   "env": "clear",
+   "start": 400,
+   "count": 50
+  },
+  {
+   "id": "night_street.clear.000450",
+   "scene": "night_street",
+   "env": "clear",
+   "start": 450,
+   "count": 50
+  },
+  {
+   "id": "pool.clear.000000",
+   "scene": "pool",
+   "env": "clear",
+   "start": 0,
+   "count": 50
+  },
+  {
+   "id": "pool.clear.000050",
+   "scene": "pool",
+   "env": "clear",
+   "start": 50,
+   "count": 50
+  },
+  {
+   "id": "pool.clear.000100",
+   "scene": "pool",
+   "env": "clear",
+   "start": 100,
+   "count": 50
+  },
+  {
+   "id": "pool.clear.000150",
+   "scene": "pool",
+   "env": "clear",
+   "start": 150,
+   "count": 50
+  },
+  {
+   "id": "pool.clear.000200",
+   "scene": "pool",
+   "env": "clear",
+   "start": 200,
+   "count": 50
+  },
+  {
+   "id": "pool.overcast.000000",
+   "scene": "pool",
+   "env": "overcast",
+   "start": 0,
+   "count": 50
+  },
+  {
+   "id": "pool.overcast.000050",
+   "scene": "pool",
+   "env": "overcast",
+   "start": 50,
+   "count": 50
+  },
+  {
+   "id": "pool.overcast.000100",
+   "scene": "pool",
+   "env": "overcast",
+   "start": 100,
+   "count": 50
+  },
+  {
+   "id": "pool.overcast.000150",
+   "scene": "pool",
+   "env": "overcast",
+   "start": 150,
+   "count": 50
+  },
+  {
+   "id": "pool.overcast.000200",
+   "scene": "pool",
+   "env": "overcast",
+   "start": 200,
+   "count": 50
+  },
+  {
+   "id": "rooftop.clear.000000",
+   "scene": "rooftop",
+   "env": "clear",
+   "start": 0,
+   "count": 50
+  },
+  {
+   "id": "rooftop.clear.000050",
+   "scene": "rooftop",
+   "env": "clear",
+   "start": 50,
+   "count": 50
+  },
+  {
+   "id": "rooftop.clear.000100",
+   "scene": "rooftop",
+   "env": "clear",
+   "start": 100,
+   "count": 50
+  },
+  {
+   "id": "rooftop.clear.000150",
+   "scene": "rooftop",
+   "env": "clear",
+   "start": 150,
+   "count": 50
+  },
+  {
+   "id": "rooftop.clear.000200",
+   "scene": "rooftop",
+   "env": "clear",
+   "start": 200,
+   "count": 50
+  },
+  {
+   "id": "rooftop.overcast.000000",
+   "scene": "rooftop",
+   "env": "overcast",
+   "start": 0,
+   "count": 50
+  },
+  {
+   "id": "rooftop.overcast.000050",
+   "scene": "rooftop",
+   "env": "overcast",
+   "start": 50,
+   "count": 50
+  },
+  {
+   "id": "rooftop.overcast.000100",
+   "scene": "rooftop",
+   "env": "overcast",
+   "start": 100,
+   "count": 50
+  },
+  {
+   "id": "rooftop.overcast.000150",
+   "scene": "rooftop",
+   "env": "overcast",
+   "start": 150,
+   "count": 50
+  },
+  {
+   "id": "rooftop.overcast.000200",
+   "scene": "rooftop",
+   "env": "overcast",
+   "start": 200,
+   "count": 50
+  },
+  {
+   "id": "terminal.clear.000000",
+   "scene": "terminal",
+   "env": "clear",
+   "start": 0,
+   "count": 50
+  },
+  {
+   "id": "terminal.clear.000050",
+   "scene": "terminal",
+   "env": "clear",
+   "start": 50,
+   "count": 50
+  },
+  {
+   "id": "terminal.clear.000100",
+   "scene": "terminal",
+   "env": "clear",
+   "start": 100,
+   "count": 50
+  },
+  {
+   "id": "terminal.clear.000150",
+   "scene": "terminal",
+   "env": "clear",
+   "start": 150,
+   "count": 50
+  },
+  {
+   "id": "terminal.clear.000200",
+   "scene": "terminal",
+   "env": "clear",
+   "start": 200,
+   "count": 50
+  },
+  {
+   "id": "terminal.overcast.000000",
+   "scene": "terminal",
+   "env": "overcast",
+   "start": 0,
+   "count": 50
+  },
+  {
+   "id": "terminal.overcast.000050",
+   "scene": "terminal",
+   "env": "overcast",
+   "start": 50,
+   "count": 50
+  },
+  {
+   "id": "terminal.overcast.000100",
+   "scene": "terminal",
+   "env": "overcast",
+   "start": 100,
+   "count": 50
+  },
+  {
+   "id": "terminal.overcast.000150",
+   "scene": "terminal",
+   "env": "overcast",
+   "start": 150,
+   "count": 50
+  },
+  {
+   "id": "terminal.overcast.000200",
+   "scene": "terminal",
+   "env": "overcast",
+   "start": 200,
+   "count": 50
+  },
+  {
+   "id": "workshop.clear.000000",
+   "scene": "workshop",
+   "env": "clear",
+   "start": 0,
+   "count": 50
+  },
+  {
+   "id": "workshop.clear.000050",
+   "scene": "workshop",
+   "env": "clear",
+   "start": 50,
+   "count": 50
+  },
+  {
+   "id": "workshop.clear.000100",
+   "scene": "workshop",
+   "env": "clear",
+   "start": 100,
+   "count": 50
+  },
+  {
+   "id": "workshop.clear.000150",
+   "scene": "workshop",
+   "env": "clear",
+   "start": 150,
+   "count": 50
+  },
+  {
+   "id": "workshop.clear.000200",
+   "scene": "workshop",
+   "env": "clear",
+   "start": 200,
+   "count": 50
+  },
+  {
+   "id": "workshop.clear.000250",
+   "scene": "workshop",
+   "env": "clear",
+   "start": 250,
+   "count": 50
+  },
+  {
+   "id": "workshop.clear.000300",
+   "scene": "workshop",
+   "env": "clear",
+   "start": 300,
+   "count": 50
+  },
+  {
+   "id": "workshop.clear.000350",
+   "scene": "workshop",
+   "env": "clear",
+   "start": 350,
+   "count": 50
+  },
+  {
+   "id": "workshop.clear.000400",
+   "scene": "workshop",
+   "env": "clear",
+   "start": 400,
+   "count": 50
+  },
+  {
+   "id": "workshop.clear.000450",
+   "scene": "workshop",
+   "env": "clear",
+   "start": 450,
+   "count": 50
+  }
+ ]
+}

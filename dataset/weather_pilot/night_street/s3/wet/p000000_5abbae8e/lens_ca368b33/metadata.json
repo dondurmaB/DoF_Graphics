@@ -1,0 +1,98 @@
+{
+  "contract_version": 1,
+  "sample_id": "efc77471df",
+  "pose_id": "p000000_5abbae8e",
+  "lens_id": "lens_ca368b33",
+  "scene": {
+    "id": "night_street",
+    "seed": 3,
+    "env": "wet",
+    "fingerprint": "4cb7d30869a2202b",
+    "asset_version": 12,
+    "buildings": 16,
+    "puddle_hero": [
+      -0.3,
+      -4.0,
+      2.2,
+      2.8
+    ]
+  },
+  "git": {
+    "commit": "9509e2dd0dbcb226b6aaf52899c480fdcfefca9e",
+    "dirty": false
+  },
+  "variant": "cuda_ad_rgb",
+  "mitsuba": "3.9.1",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "camera": {
+    "origin": [
+      1.0208955623085014,
+      3.218917947758883,
+      3.2770718748537977
+    ],
+    "target": [
+      -5.686942035368216,
+      2.169114509474257,
+      -47.86717078219791
+    ],
+    "up": [
+      0.03698428156413659,
+      0.9989941029637714,
+      -0.02535636331956917
+    ],
+    "roll_deg": 2.290585633672105,
+    "aperture": {
+      "shape": "disc",
+      "rotation_deg": 0.0
+    },
+    "forward": [
+      -0.13001465928175968,
+      -0.020347814680049682,
+      -0.9913032607681639
+    ],
+    "focal_length_mm": 96.06487845353827,
+    "sensor_height_mm": 24.0,
+    "f_number": 2.9078151482686994,
+    "aperture_radius_m": 0.016518395007112968,
+    "focus_distance_m": 50.41073989868164,
+    "fov_y_deg": 14.240507596098356,
+    "intrinsics_px": {
+      "fx": 4322.919530409223,
+      "fy": 4322.919530409223,
+      "cx": 960.0,
+      "cy": 540.0
+    },
+    "coc_diameter_px_at_infinity": 2.833034886247734
+  },
+  "lens_draw": {
+    "focus": 50.41073989868164,
+    "f_number": 2.9078151482686994,
+    "focus_source": "depth_quantile",
+    "achieved_frac": 0.00536451914586146,
+    "stratum": 0,
+    "coc_out_of_range": false
+  },
+  "coc": {
+    "definition": "signed diameter in px, positive behind the focus plane; sky = at infinity",
+    "formula": "H f^2 (z - s) / (N z s sensor_h)"
+  },
+  "passes": {
+    "sharp": {
+      "spp": 1024,
+      "seconds": 16.63,
+      "seed": 3149
+    },
+    "dof": {
+      "spp": 4096,
+      "seconds": 46.16,
+      "seed": 14448
+    }
+  },
+  "sampler": {
+    "sampler_seed": 0,
+    "index": 0
+  }
+}

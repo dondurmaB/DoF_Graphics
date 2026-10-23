@@ -1,0 +1,98 @@
+{
+  "contract_version": 1,
+  "sample_id": "5c2cc95da5",
+  "pose_id": "p000000_b04c876c",
+  "lens_id": "lens_21a5bc4d",
+  "scene": {
+    "id": "greenhouse",
+    "seed": 3,
+    "env": "overcast",
+    "fingerprint": "53beded14353e956",
+    "asset_version": 9,
+    "sun_direction": [
+      0.28278681373688086,
+      0.7431448254773942,
+      0.6064382790875885
+    ],
+    "clear_roof_panes": 275,
+    "glass": "clear panes are open cells; shading-painted panes are principledthin; see module docstring"
+  },
+  "git": {
+    "commit": "9509e2dd0dbcb226b6aaf52899c480fdcfefca9e",
+    "dirty": false
+  },
+  "variant": "cuda_ad_rgb",
+  "mitsuba": "3.9.1",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "camera": {
+    "origin": [
+      2.020337629490089,
+      1.657927525806834,
+      -7.1710602340452585
+    ],
+    "target": [
+      -1.903177678133069,
+      0.5593456609392714,
+      -1.3840822313422922
+    ],
+    "up": [
+      -0.07115570315071293,
+      0.9876963045001901,
+      0.1392583067030317
+    ],
+    "roll_deg": -1.1031468052130176,
+    "aperture": {
+      "shape": "disc",
+      "rotation_deg": 0.0
+    },
+    "forward": [
+      -0.554370319380304,
+      -0.15522334731528856,
+      0.817666962423221
+    ],
+    "focal_length_mm": 28.432298130184332,
+    "sensor_height_mm": 24.0,
+    "f_number": 1.6266681756702226,
+    "aperture_radius_m": 0.008739427793400338,
+    "focus_distance_m": 4.095053195953369,
+    "fov_y_deg": 45.76486125506018,
+    "intrinsics_px": {
+      "fx": 1279.453415858295,
+      "fy": 1279.453415858295,
+      "cx": 960.0,
+      "cy": 540.0
+    },
+    "coc_diameter_px_at_infinity": 5.461072278114705
+  },
+  "lens_draw": {
+    "focus": 4.095053195953369,
+    "f_number": 1.6266681756702226,
+    "focus_source": "depth_quantile",
+    "achieved_frac": 0.0050565482917154965,
+    "stratum": 0,
+    "coc_out_of_range": false
+  },
+  "coc": {
+    "definition": "signed diameter in px, positive behind the focus plane; sky = at infinity",
+    "formula": "H f^2 (z - s) / (N z s sensor_h)"
+  },
+  "passes": {
+    "sharp": {
+      "spp": 1024,
+      "seconds": 28.75,
+      "seed": 4281
+    },
+    "dof": {
+      "spp": 2048,
+      "seconds": 12.73,
+      "seed": 13159
+    }
+  },
+  "sampler": {
+    "sampler_seed": 0,
+    "index": 0
+  }
+}

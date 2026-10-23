@@ -1,0 +1,142 @@
+{
+  "contract_version": 1,
+  "sample_id": "169c194927",
+  "pose_id": "p000001_45a2efd2",
+  "lens_id": "lens_490a1982",
+  "scene": {
+    "id": "courtyard",
+    "seed": 11,
+    "env": "snow",
+    "fingerprint": "9db6143f52de085d",
+    "asset_version": 8,
+    "sun_direction": [
+      0.3796405494054582,
+      0.49999999999999994,
+      0.7783784768652856
+    ],
+    "shutters": {
+      "n@8.6": "open",
+      "n@11.2": "open",
+      "n@18.2": "open",
+      "n@15.1": "closed",
+      "e@3.6": "open",
+      "e@6.4": "ajar",
+      "e@12.8": "open",
+      "e@15.2": "open",
+      "e@9.2": "ajar",
+      "w@2.35": "open",
+      "w@4.85": "open",
+      "w@7.35": "closed",
+      "w@9.85": "ajar",
+      "w@12.35": "ajar",
+      "w@14.85": "closed",
+      "s@12.2": "open",
+      "s@3.0": "open",
+      "s@12.6": "open",
+      "s@10.2": "closed",
+      "s@7.6": "open",
+      "s@5.0": "ajar",
+      "s@2.6": "ajar"
+    },
+    "paint": {
+      "n": [
+        0.32,
+        0.45,
+        0.36
+      ],
+      "e": [
+        0.2,
+        0.36,
+        0.4
+      ],
+      "w": [
+        0.42,
+        0.52,
+        0.6
+      ],
+      "s": [
+        0.66,
+        0.52,
+        0.25
+      ]
+    }
+  },
+  "git": {
+    "commit": "9509e2dd0dbcb226b6aaf52899c480fdcfefca9e",
+    "dirty": false
+  },
+  "variant": "cuda_ad_rgb",
+  "mitsuba": "3.9.1",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "camera": {
+    "origin": [
+      -5.983447660139814,
+      1.940145112168513,
+      -3.47248183311103
+    ],
+    "target": [
+      -5.370405074879204,
+      3.94293674955227,
+      2.1738482514001163
+    ],
+    "up": [
+      -0.051675444988156544,
+      0.9429622347907954,
+      -0.3288645194356253
+    ],
+    "roll_deg": 0.9096732825954899,
+    "aperture": {
+      "shape": "disc",
+      "rotation_deg": 0.0
+    },
+    "forward": [
+      0.10179550638339709,
+      0.3325628493186055,
+      0.9375711312392453
+    ],
+    "focal_length_mm": 33.87905348438654,
+    "sensor_height_mm": 24.0,
+    "f_number": 2.5213298939893436,
+    "aperture_radius_m": 0.006718488835029401,
+    "focus_distance_m": 10.94831371307373,
+    "fov_y_deg": 39.00840895045421,
+    "intrinsics_px": {
+      "fx": 1524.5574067973942,
+      "fy": 1524.5574067973942,
+      "cx": 960.0,
+      "cy": 540.0
+    },
+    "coc_diameter_px_at_infinity": 1.8711049362238332
+  },
+  "lens_draw": {
+    "focus": 10.94831371307373,
+    "f_number": 2.5213298939893436,
+    "focus_source": "depth_quantile",
+    "achieved_frac": 0.012394821525776029,
+    "stratum": 3,
+    "coc_out_of_range": false
+  },
+  "coc": {
+    "definition": "signed diameter in px, positive behind the focus plane; sky = at infinity",
+    "formula": "H f^2 (z - s) / (N z s sensor_h)"
+  },
+  "passes": {
+    "sharp": {
+      "spp": 1024,
+      "seconds": 6.12,
+      "seed": 3868
+    },
+    "dof": {
+      "spp": 2048,
+      "seconds": 12.35,
+      "seed": 16011
+    }
+  },
+  "sampler": {
+    "sampler_seed": 0,
+    "index": 1
+  }
+}

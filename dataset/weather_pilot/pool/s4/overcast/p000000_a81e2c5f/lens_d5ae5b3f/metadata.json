@@ -1,0 +1,99 @@
+{
+  "contract_version": 1,
+  "sample_id": "323c2e4b22",
+  "pose_id": "p000000_a81e2c5f",
+  "lens_id": "lens_d5ae5b3f",
+  "scene": {
+    "id": "pool",
+    "seed": 4,
+    "env": "overcast",
+    "fingerprint": "9b726abd4bb450c8",
+    "asset_version": 5,
+    "sun_direction": [
+      0.6463305338424854,
+      0.7431448254773942,
+      0.17318374458667038
+    ],
+    "sky_scale": 40.0,
+    "water_ior": 1.333,
+    "water_level_m": -0.15
+  },
+  "git": {
+    "commit": "9509e2dd0dbcb226b6aaf52899c480fdcfefca9e",
+    "dirty": false
+  },
+  "variant": "cuda_ad_rgb",
+  "mitsuba": "3.9.1",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "camera": {
+    "origin": [
+      0.7288534400487183,
+      0.8737822706981926,
+      -6.916758611728298
+    ],
+    "target": [
+      -3.5311062813854637,
+      7.397296125258672,
+      -0.5072119550986507
+    ],
+    "up": [
+      0.3985211359691124,
+      0.7618992869861676,
+      -0.5105784765105729
+    ],
+    "roll_deg": -2.8249303625212456,
+    "aperture": {
+      "shape": "disc",
+      "rotation_deg": 0.0
+    },
+    "forward": [
+      -0.42224249797045404,
+      0.6466034811632291,
+      0.6353071785012859
+    ],
+    "focal_length_mm": 47.387729670494835,
+    "sensor_height_mm": 24.0,
+    "f_number": 2.086423965178343,
+    "aperture_radius_m": 0.01135620814881798,
+    "focus_distance_m": 2.1243790107473264,
+    "fov_y_deg": 28.420591505376045,
+    "intrinsics_px": {
+      "fx": 2132.4478351722673,
+      "fy": 2132.4478351722673,
+      "cx": 960.0,
+      "cy": 540.0
+    },
+    "coc_diameter_px_at_infinity": 22.798682683457255
+  },
+  "lens_draw": {
+    "focus": 2.1243790107473264,
+    "f_number": 2.086423965178343,
+    "focus_source": "point:flags_near",
+    "achieved_frac": 0.01795850152969231,
+    "stratum": 4,
+    "coc_out_of_range": false
+  },
+  "coc": {
+    "definition": "signed diameter in px, positive behind the focus plane; sky = at infinity",
+    "formula": "H f^2 (z - s) / (N z s sensor_h)"
+  },
+  "passes": {
+    "sharp": {
+      "spp": 1024,
+      "seconds": 12.86,
+      "seed": 9365
+    },
+    "dof": {
+      "spp": 4096,
+      "seconds": 39.69,
+      "seed": 16155
+    }
+  },
+  "sampler": {
+    "sampler_seed": 0,
+    "index": 0
+  }
+}

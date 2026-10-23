@@ -1,0 +1,98 @@
+{
+  "contract_version": 1,
+  "sample_id": "2713a043ea",
+  "pose_id": "p000000_defd4512",
+  "lens_id": "lens_6c990a53",
+  "scene": {
+    "id": "rooftop",
+    "seed": 5,
+    "env": "overcast",
+    "fingerprint": "9b35ef1a1301e517",
+    "asset_version": 8,
+    "sun_direction": [
+      -0.6320240717455935,
+      0.18223552549214747,
+      0.7532169581088318
+    ],
+    "sky_scale": 2.6,
+    "haze": "aerial perspective by distance tiers, T = exp(-d / 3.5 km); see module docstring"
+  },
+  "git": {
+    "commit": "9509e2dd0dbcb226b6aaf52899c480fdcfefca9e",
+    "dirty": false
+  },
+  "variant": "cuda_ad_rgb",
+  "mitsuba": "3.9.1",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "camera": {
+    "origin": [
+      -5.6928884817409315,
+      42.660496504771565,
+      1.9276346671604978
+    ],
+    "target": [
+      -54.19913507232841,
+      41.16270899324,
+      -38.42497647351678
+    ],
+    "up": [
+      -0.012984443815341008,
+      0.999684576750932,
+      -0.02149770278695136
+    ],
+    "roll_deg": 0.47112378710505987,
+    "aperture": {
+      "shape": "disc",
+      "rotation_deg": 0.0
+    },
+    "forward": [
+      -0.7685443536960728,
+      -0.02373129681090281,
+      -0.6393562402554296
+    ],
+    "focal_length_mm": 39.10310337324773,
+    "sensor_height_mm": 24.0,
+    "f_number": 1.557001783205886,
+    "aperture_radius_m": 0.012557180022213574,
+    "focus_distance_m": 6.634452676591194,
+    "fov_y_deg": 34.120511561321436,
+    "intrinsics_px": {
+      "fx": 1759.6396517961475,
+      "fy": 1759.6396517961475,
+      "cx": 960.0,
+      "cy": 540.0
+    },
+    "coc_diameter_px_at_infinity": 6.661020270682673
+  },
+  "lens_draw": {
+    "focus": 6.634452676591194,
+    "f_number": 1.557001783205886,
+    "focus_source": "point:lavender",
+    "achieved_frac": 0.012407657511845567,
+    "stratum": 3,
+    "coc_out_of_range": false
+  },
+  "coc": {
+    "definition": "signed diameter in px, positive behind the focus plane; sky = at infinity",
+    "formula": "H f^2 (z - s) / (N z s sensor_h)"
+  },
+  "passes": {
+    "sharp": {
+      "spp": 1024,
+      "seconds": 52.68,
+      "seed": 4530
+    },
+    "dof": {
+      "spp": 2048,
+      "seconds": 16.29,
+      "seed": 16670
+    }
+  },
+  "sampler": {
+    "sampler_seed": 0,
+    "index": 0
+  }
+}
