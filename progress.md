@@ -126,3 +126,11 @@ Mitsuba cafe verified locally (`metal_ad_rgb`, M4 Max):
 - State: jobs 242566 / 242567 on ws-l1-002 / ws-l5-013 shipping to `ciai-copy:/nfs-stor/rui.gao/Researches/dof/dof_dataset/train10k`; 7 of 100 chunks done, ~4,640 poses left, ETA about 36 h (Friday night).
 - Risks: if shipping fails repeatedly, poses accumulate in home and the quota fills again. Do not use the student-lab `/l` (storage migration).
 - Next: check sheets from shipped chunks on CIAI; fix wet/snow presets; decide whether to drop gbuffer/coc to save space.
+
+## 2026-10-25 — 10k set finished and checked; smoke training passes (renderer/mitsuba, ai/)
+
+- Work done: the 10k run finished at 01:15 (100/100 chunks, 5,000 poses, 9,999 unique samples, 634 GB on CIAI `/nfs-stor/rui.gao/Researches/dof/dof_dataset/train10k`). One pose (cafe p000281) has a single lens: both lens draws hit the same named focus point with a collapsed blur window, so they hashed to the same lens dir (sampler bug, fix before the next run). Render noise on glossy sunlit materials noted in `denoising.md` (deferred). Smoke training added: `ai/model.py` (8M-param residual U-Net, starts as identity), `ai/smoke_train.py` (bench / overfit / train, ~2% of poses held out by pose-id hash), `ai/smoke.slurm` (one A100 on cscc-gpu-p). PyTorch 2.5.1 (cu121) and OpenEXR 3.5.2 installed in the CIAI env.
+- Verification: protocol check over all 9,999 samples: 10 bad (1 NaN in a museum DoF, 9 with DoF/sharp mean brightness >5% apart, 7 of them night_street), listed in `runs/bad_samples.txt` on CIAI and excluded. 20 samples inspected by eye (`inspect_data/`, git-ignored). Overfit on 16 crops: L1 0.0209 (identity) -> 0.0035. Short run (2,000 steps, batch 8): held-out L1 0.0166 vs identity 0.0215, PSNR 27.8 vs 25.4 dB, improving at every eval.
+- State: dataset complete; no jobs running.
+- Risks: training is loader-bound (0.49 s/step at batch 8, ~16 samples/s, vs ~62 samples/s the GPU can take); each sample decodes two 1080p EXRs for one 512 crop. The 9 brightness outliers may be real optics (lens seeing around occluders to bright lights), not render faults.
+- Next: speed up the loader (one thread per worker, several crops per decoded frame, or a pre-cropped copy); pick the real architecture; decide on denoising and on Beibarys's scenes and evaluation sets.
