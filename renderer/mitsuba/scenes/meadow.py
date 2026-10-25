@@ -46,7 +46,7 @@ import web_assets as W
 ASSET_VERSION = 1
 EYE = np.eye(4)
 SUN = env_kit.default_sun_direction(46.0, 125.0)
-SKY_SCALE = {"clear": 12.0, "overcast": 30.0, "wet": 40.0}      # provisional: calibrate on the first check_scene
+SKY_SCALE = {"clear": 10.0, "overcast": 30.0, "wet": 40.0}      # provisional: calibrate on the first check_scene
 GRASS_DARKEN = 0.8
 TERRAIN = P.TERRAIN
 
