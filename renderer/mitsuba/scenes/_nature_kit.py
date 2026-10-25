@@ -389,3 +389,20 @@ def log(rng, length, radius, sides=18, rings=24) -> G.Mesh:
     mesh.p = axis + (mesh.p - axis) * lump[:, None]
     mesh.uv = mesh.uv * np.array([math.tau * radius, length])
     return mesh
+
+
+# --------------------------------------------------------------------------
+# Materials
+# --------------------------------------------------------------------------
+def stone(bsdf: dict, wet: bool = False) -> dict:
+    """The rock scan as an opaque stone (stream and forest_floor). web_assets classes rock_moss_set_01 as foliage (its name contains
+    "moss", one of web_assets.FOLIAGE_WORDS) and converts it to a thin leaf BSDF (principledthin, 35% diffuse
+    transmission): light would pass through the stones, and principledthin has no clear coat for the wet look.
+    This keeps the scan's albedo, roughness and normal maps on an opaque principled BSDF; wet stones (in and at
+    the edge of the stream) add a glossy clear coat. Scene-local: web_assets itself is left alone."""
+    nm = bsdf if bsdf["type"] == "normalmap" else None
+    inner = nm["bsdf"] if nm else bsdf
+    new = {"type": "principled", "base_color": inner["base_color"], "roughness": inner["roughness"], "specular": 0.5}
+    if wet:
+        new.update(clearcoat=0.8, clearcoat_gloss=0.92)
+    return {"type": "normalmap", "normalmap": nm["normalmap"], "bsdf": new} if nm else new

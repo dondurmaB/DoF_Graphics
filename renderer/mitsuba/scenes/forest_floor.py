@@ -38,7 +38,7 @@ from scene_kit import Assets, SceneBuilder, bitmap, principled, rgb
 from scenes import _nature_kit as N
 import web_assets as W
 
-ASSET_VERSION = 2                                       # 2: geometric skyline backdrop replaces the sawtooth band
+ASSET_VERSION = 3                                       # 2: geometric skyline backdrop; 3: opaque stones (N.stone)
 EYE = np.eye(4)
 SUN = env_kit.default_sun_direction(55.0, 70.0)
 SKY_SCALE = {"clear": 22.0, "overcast": 50.0, "wet": 70.0}
@@ -65,7 +65,7 @@ def rng_for(ctx: BuildContext, k: int) -> np.random.Generator:
     return np.random.default_rng([ctx.seed, 5381, k])
 
 
-def add_materials(b: SceneBuilder, ctx: BuildContext) -> None:
+def add_materials(b: SceneBuilder, L: N.Library, ctx: BuildContext) -> None:
     wet = ctx.env == "wet"
 
     def surf(aid, darken=1.0, coat=False, uv_scale=None):
@@ -80,6 +80,8 @@ def add_materials(b: SceneBuilder, ctx: BuildContext) -> None:
     alb = b.assets.texture("backdrop_albedo_v2", lambda: N.backdrop_albedo(61, BACKDROP["tile"], BACKDROP["y0"], BACKDROP["y_tex"]))
     b.material("backdrop", {"type": "twosided", "bsdf": principled(bitmap(alb), 0.9)})
     b.material("backdrop_leaf", {"type": "twosided", "bsdf": principled((0.010, 0.018, 0.006), 0.85)})
+    # Stones opaque, not the converter's leaf BSDF (see N.stone); clear-coated in `wet`.
+    L.material_set("rock_moss_set_01", "_stone", lambda bsdf: N.stone(bsdf, wet=wet))
 
 
 def add_ground(b: SceneBuilder) -> None:
@@ -134,7 +136,8 @@ def add_hero(b: SceneBuilder, L: N.Library, ctx: BuildContext, focus: dict) -> N
     # boulder: the largest rock in the sheet, mossy
     rocks = L.variants("rock_moss_set_01")
     big = int(np.argmax([h * w for _, h, w in rocks]))
-    rh = L.plant("rock_moss_set_01", big, TERRAIN.at(*ROCK, -0.12), yaw=float(rng.uniform(0, 360)), height=0.85)
+    rh = L.plant("rock_moss_set_01", big, TERRAIN.at(*ROCK, -0.12), yaw=float(rng.uniform(0, 360)), height=0.85,
+                 tag="_stone")
     focus["rock"] = TERRAIN.at(*ROCK, rh - 0.1)
     for k in range(5):                                    # small ferns tucked against it
         a = rng.uniform(0, math.tau)
@@ -178,7 +181,7 @@ def add_undergrowth(b: SceneBuilder, L: N.Library, ctx: BuildContext, trees: lis
                     height=rng.uniform(1.0, 1.8))
     for x, z in N.scatter(rng, region, 60, 3.0, avoid=hero + trunks):           # rocks, mostly sunk
         batch.plant("rock_moss_set_01", int(rng.integers(6)), TERRAIN.at(x, z, -0.15), yaw=float(rng.uniform(0, 360)),
-                    height=rng.uniform(0.3, 0.9))
+                    height=rng.uniform(0.3, 0.9), tag="_stone")
     for x, z in N.scatter(rng, region, 50, 3.0, avoid=hero + trunks):           # grass tufts
         batch.plant("grass_medium_02", int(rng.integers(2)), TERRAIN.at(x, z, -0.02), yaw=float(rng.uniform(0, 360)),
                     height=rng.uniform(0.3, 0.5))
@@ -196,7 +199,7 @@ def build(ctx: BuildContext) -> SceneBundle:
     b = SceneBuilder(Assets(ctx.shared_dir, ctx.rebuild))
     L = N.Library(b)
     focus: dict[str, list] = {}
-    add_materials(b, ctx)
+    add_materials(b, L, ctx)
     add_ground(b)
     trees = add_trees(L, ctx, focus)
     add_hero(b, L, ctx, focus)

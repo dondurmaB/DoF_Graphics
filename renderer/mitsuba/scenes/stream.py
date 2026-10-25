@@ -80,20 +80,6 @@ def in_water(x, z, margin=0.0) -> bool:
     return abs(x - cx(z)) < hw(z) + margin
 
 
-def stone(bsdf: dict, wet: bool = False) -> dict:
-    """The rock scan as an opaque stone. web_assets classes rock_moss_set_01 as foliage (its name contains
-    "moss", one of web_assets.FOLIAGE_WORDS) and converts it to a thin leaf BSDF (principledthin, 35% diffuse
-    transmission): light would pass through the stones, and principledthin has no clear coat for the wet look.
-    This keeps the scan's albedo, roughness and normal maps on an opaque principled BSDF; wet stones (in and at
-    the edge of the stream) add a glossy clear coat. Scene-local: web_assets itself is left alone."""
-    nm = bsdf if bsdf["type"] == "normalmap" else None
-    inner = nm["bsdf"] if nm else bsdf
-    new = {"type": "principled", "base_color": inner["base_color"], "roughness": inner["roughness"], "specular": 0.5}
-    if wet:
-        new.update(clearcoat=0.8, clearcoat_gloss=0.92)
-    return {"type": "normalmap", "normalmap": nm["normalmap"], "bsdf": new} if nm else new
-
-
 # --------------------------------------------------------------------------
 # Materials and ground
 # --------------------------------------------------------------------------
@@ -114,8 +100,8 @@ def add_materials(b: SceneBuilder, L: N.Library, ctx: BuildContext) -> None:
     b.material("backdrop", {"type": "twosided", "bsdf": principled(bitmap(alb), 0.9)})
     leaf = (0.035, 0.035, 0.03) if snow else (0.010, 0.018, 0.006)       # bare winter twigs vs leaf clusters
     b.material("backdrop_leaf", {"type": "twosided", "bsdf": principled(leaf, 0.85)})
-    L.material_set("rock_moss_set_01", "_wet", lambda bsdf: stone(bsdf, wet=True))
-    L.material_set("rock_moss_set_01", "_dry", lambda bsdf: stone(bsdf, wet=False))
+    L.material_set("rock_moss_set_01", "_wet", lambda bsdf: N.stone(bsdf, wet=True))
+    L.material_set("rock_moss_set_01", "_dry", lambda bsdf: N.stone(bsdf, wet=False))
 
 
 def add_ground(b: SceneBuilder) -> None:
