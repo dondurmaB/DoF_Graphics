@@ -1,4 +1,4 @@
-# Data protocol (v1)
+# Data protocol (v1.1)
 
 The exact form of one training example: input, target, units, normalisation and the files they
 come from. What is rendered and stored on disk is `renderer/mitsuba/SCENE_CONTRACT.md`, section 7.
@@ -80,7 +80,8 @@ Gamma, sRGB and tone mapping are for viewing only (`render.tonemap`), never for 
 ## 3. Target
 
 `y = T(L_dof)` with the same `e` as the input: the DoF render under exactly the settings in `x`.
-There is no mask and no reweighting. A model's output `t` turns into radiance as
+The target is never masked. A training loss may weight pixels by the lens's CoC map (v1.1, section 4);
+the target values themselves are unchanged. A model's output `t` turns into radiance as
 `(exp(t) - 1) / e`.
 
 ## 4. From files to tensors
@@ -102,8 +103,12 @@ turns, settings planes. Flips and 90-degree turns are exact for a disc aperture 
 the settings. Vertical flips and 90-degree turns get probability 0.1 each (they put the sky
 sideways); horizontal flips 0.5. No resizing and no arbitrary-angle rotation.
 
-The renderer also writes `coc.npy`, `coc_valid.npy` and `gbuffer.exr`. They are for analysis only
-and are not part of an example.
+The renderer also writes `coc.npy`, `coc_valid.npy` and `gbuffer.exr`. They are not part of an
+example and never a model input.
+
+v1.1 (2026-10-26): the loader may return the lens's `coc.npy` as an auxiliary field (`coc`, the signed
+CoC diameter in pixels), cropped with a margin and flipped or turned together with the example. It is for
+loss weights and metrics only (`ai/LOSS_PLAN.md`). A model that reads it as an input breaks the protocol.
 
 ## 5. Formats
 

@@ -20,6 +20,7 @@ shift
 CODE=${DOF_CODE:-/nfs-stor/rui.gao/Researches/dof/dof_dev}
 PY=${DOF_PY:-/nfs-stor/rui.gao/envs/dof-graphics/bin/python}
 DATA=${DOF_DATA:-/nfs-stor/rui.gao/Researches/dof/dof_dataset/train10k}
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1   # loader workers decode in parallel processes
 cd "$CODE"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 "$PY" -u ai/smoke_train.py "$MODE" "$DATA" --out "runs/smoke-$MODE-$SLURM_JOB_ID" "$@"

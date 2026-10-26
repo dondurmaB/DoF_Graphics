@@ -126,8 +126,13 @@ def settings_vector(meta: dict) -> np.ndarray:
 
 
 def load_example(sample: Sample, crop: int | None = CROP, rng: np.random.Generator | None = None,
-                 augment: bool = True, validate: bool = False) -> dict:
-    """x [10, H, W], y [3, H, W], settings [6] float32 and meta. crop=None keeps the full frame."""
+                 augment: bool = True, validate: bool = False, coc_margin: int | None = None) -> dict:
+    """x [10, H, W], y [3, H, W], settings [6] float32 and meta. crop=None keeps the full frame.
+
+    coc_margin=M also returns `coc` [H + 2M, W + 2M]: the lens's signed CoC diameter in px around the same
+    window (0 outside the frame), flipped and turned with the example. Loss weights and metrics only
+    (DATA_PROTOCOL.md v1.1), never an input. It draws nothing from rng, so crops are the same with or without it.
+    """
     rng = rng or np.random.default_rng()
     meta = json.loads((sample.lens_dir / "metadata.json").read_text())
     scale = float(sample.entry.get("auto_exposure_scale")
@@ -144,20 +149,28 @@ def load_example(sample: Sample, crop: int | None = CROP, rng: np.random.Generat
     # Order fixed by the protocol: colour transform and inverse depth, crop, flips / rot90, settings planes.
     inv_depth = np.where(np.isfinite(depth), 1.0 / np.maximum(depth, MIN_DEPTH_M), 0.0).astype(np.float32)
     planes = np.concatenate([to_model(sharp, scale), inv_depth[..., None], to_model(dof, scale)], -1)
+    coc = None
+    if coc_margin is not None:
+        coc = np.pad(np.load(sample.lens_dir / "coc.npy").astype(np.float32), coc_margin)
     if crop is not None:
         if h < crop or w < crop:
             raise ValueError(f"{sample.lens_dir}: {w}x{h} is smaller than the {crop} crop")
         y0, x0 = int(rng.integers(0, h - crop + 1)), int(rng.integers(0, w - crop + 1))
         planes = planes[y0:y0 + crop, x0:x0 + crop]
+        if coc is not None:
+            coc = coc[y0:y0 + crop + 2 * coc_margin, x0:x0 + crop + 2 * coc_margin]
     ops = []
     if augment:
         if rng.random() < HFLIP_PROB:
             planes, ops = planes[:, ::-1], ops + ["hflip"]
+            coc = None if coc is None else coc[:, ::-1]
         if rng.random() < VFLIP_PROB:
             planes, ops = planes[::-1], ops + ["vflip"]
+            coc = None if coc is None else coc[::-1]
         if planes.shape[0] == planes.shape[1] and rng.random() < ROT90_PROB:
             k = int(rng.choice([1, 3]))
             planes, ops = np.rot90(planes, k), ops + [f"rot90x{k}"]
+            coc = None if coc is None else np.rot90(coc, k)
     planes = np.ascontiguousarray(planes.transpose(2, 0, 1))      # HWC -> CHW
     settings = settings_vector(meta)
     x = np.concatenate([planes[0:4], np.broadcast_to(settings[:, None, None], (6, *planes.shape[1:]))])
@@ -167,11 +180,18 @@ def load_example(sample: Sample, crop: int | None = CROP, rng: np.random.Generat
             "aperture_mm": cam["focal_length_mm"] / cam["f_number"], "focus_m": cam["focus_distance_m"],
             "sensor_mm": cam["sensor_height_mm"], "frame_px": meta["resolution"][1],
             "auto_exposure_scale": scale, "augment": ops, "lens_dir": str(sample.lens_dir)}
-    return {"x": x.astype(np.float32), "y": planes[4:7].copy(), "settings": settings, "meta": info}
+    out = {"x": x.astype(np.float32), "y": planes[4:7].copy(), "settings": settings, "meta": info}
+    if coc is not None:
+        out["coc"] = np.ascontiguousarray(coc)
+    return out
 
 
-def DofDataset(root, split="train", crop=CROP, augment=True, seed=0, scenes=None):
-    """PyTorch Dataset over find_samples(); each worker gets its own random stream."""
+def DofDataset(root, split="train", crop=CROP, augment=True, seed=0, scenes=None, coc_margin=None,
+               deterministic=False):
+    """PyTorch Dataset over find_samples(); each worker gets its own random stream.
+
+    deterministic=True ties each sample's crop to (seed, index) only, so every run and epoch sees the same
+    pixels (held-out evaluation). coc_margin adds the `coc` field (see load_example)."""
     import torch
     from torch.utils.data import Dataset
 
@@ -184,11 +204,17 @@ def DofDataset(root, split="train", crop=CROP, augment=True, seed=0, scenes=None
             return len(self.samples)
 
         def __getitem__(self, i):
-            info = torch.utils.data.get_worker_info()
-            rng = np.random.default_rng([self.seed, i, info.id if info else 0, torch.initial_seed() % 2 ** 32])
-            ex = load_example(self.samples[i], crop, rng, augment)
-            return {"x": torch.from_numpy(ex["x"]), "y": torch.from_numpy(ex["y"]),
-                    "settings": torch.from_numpy(ex["settings"]), "meta": ex["meta"]}
+            if deterministic:
+                rng = np.random.default_rng([self.seed, i])
+            else:
+                info = torch.utils.data.get_worker_info()
+                rng = np.random.default_rng([self.seed, i, info.id if info else 0, torch.initial_seed() % 2 ** 32])
+            ex = load_example(self.samples[i], crop, rng, augment, coc_margin=coc_margin)
+            out = {"x": torch.from_numpy(ex["x"]), "y": torch.from_numpy(ex["y"]),
+                   "settings": torch.from_numpy(ex["settings"]), "meta": ex["meta"]}
+            if "coc" in ex:
+                out["coc"] = torch.from_numpy(ex["coc"])
+            return out
 
     return _Dof()
 
