@@ -126,3 +126,34 @@ Findings:
 
 Next: occlusion-aware regions and weights (split boundary into foreground spill and background edge),
 FiLM conditioning, and a longer run; judge by the in-focus and both boundary ratios.
+
+## 8. Second A/B: occlusion-aware weights x FiLM conditioning (2026-10-26)
+
+Correction to section 7.3: a loss weight only changes how much a pixel's error counts; it cannot push blur
+in a direction. What was wrong with the first weights: the boundary metric mixed two opposite cases, the
+boost (5 on < 1% of pixels) was too small to matter, and the alpha term spread a blurred *background*'s
+weight onto the sharp objects in front of it.
+
+Regions (signed CoC, negative = in front of the focus plane; every pixel in exactly one of the first four):
+
+| Region | Definition | Target there |
+|---|---|---|
+| in_focus | own CoC < 1 px, no spill, no blurred background disc | unchanged (noise only) |
+| fg_spill | own CoC < 1 px, inside the disc of an in-front pixel with CoC <= -4 px | changes: foreground blur over it |
+| bg_edge | own CoC < 1 px, inside the disc of a behind pixel with CoC >= 4 px, not fg_spill | stays sharp (occludes it) |
+| defocused | own CoC >= 1 px | blurred |
+
+Weight: `w = 1 + alpha * min(blur / c0, cap) + beta * fg_spill + gamma * bg_edge`, where
+`blur = max(|own CoC|, dilated in-front CoC)`: the blur that actually reaches the pixel.
+
+FiLM: the 6 settings go through a 2-layer MLP to a per-channel scale and shift after every U-Net block
+(zero-initialised, so the model still starts as the identity); +0.38 M parameters.
+
+| Run | Loss | Conditioning |
+|---|---|---|
+| E | plain L1 | input planes only (= run A, with the new metrics) |
+| F | alpha 1, beta 5, gamma 5 | input planes only |
+| G | plain L1 | FiLM |
+| H | alpha 1, beta 5, gamma 5 | FiLM |
+
+Judge by the in_focus, fg_spill and bg_edge ratios (all should reach < 1) and the large-CoC bins.

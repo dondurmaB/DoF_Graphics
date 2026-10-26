@@ -8,7 +8,7 @@
 Held-out poses: pose_id hash % 50 == 0 (about 2%), never seen in training, evaluated on fixed crops so every
 run sees the same pixels. `--exclude FILE` drops lens dirs listed one per line (samples the protocol check
 marks BAD). Losses and metrics are in model space (log(1 + L e)); the CoC map is a loss weight and a metric
-region only, never an input (DATA_PROTOCOL.md v1.1).
+region only, never an input (DATA_PROTOCOL.md v1.1). Regions are occlusion-aware (LOSS_PLAN.md section 8).
 """
 
 import argparse
@@ -46,22 +46,37 @@ def held_out(sample) -> bool:
     return int(hashlib.md5(sample.pose_dir.name.encode()).hexdigest(), 16) % 50 == 0
 
 
-def regions(coc):
-    """coc [B, H+2M, W+2M] signed -> own |CoC| and dilated CoC D, both [B, 1, H, W], and the boundary mask.
-
-    D(p) is the largest |coc(q)| whose disc (radius |coc(q)| / 2) covers p, so the weight follows the blur
-    onto the sharp pixels it spills over (square windows, LOSS_PLAN.md section 4)."""
-    c = coc.abs().unsqueeze(1)
-    d = c.clone()
+def dilate(c):
+    """c [B, 1, H+2M, W+2M] >= 0 -> the largest c(q) whose disc (radius c(q) / 2) covers each pixel, cropped
+    to the window (square max-pools, LOSS_PLAN.md section 4)."""
+    d = torch.zeros_like(c)
     for r in RADII:
         d = torch.maximum(d, F.max_pool2d(torch.where(c >= 2 * r, c, 0.0), 2 * r + 1, 1, r))
-    own, d = c[..., MARGIN:-MARGIN, MARGIN:-MARGIN], d[..., MARGIN:-MARGIN, MARGIN:-MARGIN]
-    return own, d, (own < 1) & (d >= BOUNDARY_D)
+    return d[..., MARGIN:-MARGIN, MARGIN:-MARGIN]
+
+
+def regions(coc):
+    """Occlusion-aware regions from the signed CoC (negative = in front of the focus plane), [B, 1, H, W].
+
+    A blurred disc in front of the focus plane spreads over the in-focus pixels behind it (fg_spill: the
+    target changes there). A blurred disc behind the focus plane cannot spread over an in-focus object in
+    front of it (bg_edge: the target stays sharp). LOSS_PLAN.md section 8."""
+    c = coc.unsqueeze(1)
+    own = c.abs()[..., MARGIN:-MARGIN, MARGIN:-MARGIN]
+    d_fg = dilate((-c).clamp(min=0))                    # spill from nearer, in-front discs only
+    d_bg = dilate(c.clamp(min=0))
+    sharp = own < 1
+    fg_spill = sharp & (d_fg >= BOUNDARY_D)
+    bg_edge = sharp & (d_bg >= BOUNDARY_D) & ~fg_spill
+    return {"own": own, "blur": torch.maximum(own, d_fg), "in_focus": sharp & ~fg_spill & ~bg_edge,
+            "fg_spill": fg_spill, "bg_edge": bg_edge, "defocused": ~sharp}
 
 
 def weights(coc, args):
-    _, d, boundary = regions(coc)
-    return 1 + args.alpha * (d / args.c0).clamp(max=args.cap) + args.beta * boundary.float()
+    """1 + alpha * blur reaching the pixel (own or spilled from in front) + boosts for both kinds of edge."""
+    g = regions(coc)
+    return (1 + args.alpha * (g["blur"] / args.c0).clamp(max=args.cap)
+            + args.beta * g["fg_spill"].float() + args.gamma * g["bg_edge"].float())
 
 
 def datasets(args):
@@ -99,14 +114,14 @@ def evaluate(model, dl, dev):
     for b in dl:
         x, y = b["x"].to(dev), b["y"].to(dev)
         with torch.autocast("cuda", torch.bfloat16):
-            yh = model(x).float()
+            yh = model(x, b["settings"].to(dev)).float()
         e = (yh - y).abs().mean(1, keepdim=True)
         e_id = (x[:, :3] - y).abs().mean(1, keepdim=True)
-        own, d, boundary = regions(b["coc"].to(dev))
+        g = regions(b["coc"].to(dev))
+        own = g["own"]
         add("all", torch.ones_like(own, dtype=torch.bool), e, e_id)
-        add("in_focus", (own < 1) & ~boundary, e, e_id)
-        add("boundary", boundary, e, e_id)
-        add("defocused", own >= 1, e, e_id)
+        for k in ("in_focus", "fg_spill", "bg_edge", "defocused"):
+            add(k, g[k], e, e_id)
         for lo, hi in BINS:
             add(f"coc_{lo}_{hi if hi < float('inf') else 'up'}", (own >= lo) & (own < hi), e, e_id)
     model.train()
@@ -143,7 +158,7 @@ def train(args, overfit=False):
         pick = [tr[i] for i in rng.choice(len(tr), args.n, replace=False)]
         exs = [D.load_example(full.samples[i], args.crop, np.random.default_rng(i), augment=False,
                               coc_margin=MARGIN) for i in pick]
-        fixed = {k: torch.from_numpy(np.stack([e[k] for e in exs])).to(dev) for k in ("x", "y", "coc")}
+        fixed = {k: torch.from_numpy(np.stack([e[k] for e in exs])).to(dev) for k in ("x", "y", "settings", "coc")}
         batches = lambda: iter([fixed])    # noqa: E731
     else:
         dl_tr, dl_va = loader(full, tr, args, True), loader(evalset, va, args, False)
@@ -152,9 +167,9 @@ def train(args, overfit=False):
             while True:
                 yield from dl_tr
 
-    model = UNet(width=args.width).to(dev).to(memory_format=torch.channels_last)
-    print(f"params {sum(p.numel() for p in model.parameters()) / 1e6:.1f} M | loss alpha {args.alpha} "
-          f"beta {args.beta} c0 {args.c0} cap {args.cap}", flush=True)
+    model = UNet(width=args.width, film=args.film).to(dev).to(memory_format=torch.channels_last)
+    print(f"params {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M | film {args.film} | loss alpha "
+          f"{args.alpha} beta {args.beta} gamma {args.gamma} c0 {args.c0} cap {args.cap}", flush=True)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, args.lr, total_steps=args.steps, pct_start=0.05)
     out = Path(args.out)
@@ -172,7 +187,7 @@ def train(args, overfit=False):
         y = b["y"].to(dev, non_blocking=True)
         w = weights(b["coc"].to(dev, non_blocking=True), args)
         with torch.autocast("cuda", torch.bfloat16):
-            yh = model(x).float()
+            yh = model(x, b["settings"].to(dev, non_blocking=True)).float()
         err = (yh - y).abs().mean(1, keepdim=True)
         loss = (w * err).sum() / w.sum()
         opt.zero_grad(set_to_none=True)
@@ -211,7 +226,9 @@ def main():
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--width", type=int, default=32)
     ap.add_argument("--alpha", type=float, default=0.0, help="extra weight for large dilated CoC")
-    ap.add_argument("--beta", type=float, default=0.0, help="extra weight for boundary pixels")
+    ap.add_argument("--beta", type=float, default=0.0, help="extra weight for in-focus pixels under a nearer blur")
+    ap.add_argument("--gamma", type=float, default=0.0, help="extra weight for in-focus edges over a blurred background")
+    ap.add_argument("--film", action="store_true", help="condition every U-Net level on the camera settings")
     ap.add_argument("--c0", type=float, default=8.0, help="CoC (px) at which the alpha term reaches alpha")
     ap.add_argument("--cap", type=float, default=4.0, help="cap on D / c0")
     ap.add_argument("--n", type=int, default=16, help="overfit: number of fixed crops")
