@@ -180,3 +180,37 @@ Ratio to identity at step 2,000 (below 1 = better than leaving the sharp image u
 
 Next: gamma alone (no alpha), a longer FiLM run to see the bg_edge trend, then occlusion-aware architecture
 (depth-ordered kernel prediction, or a sharpness gate) if neither helps.
+
+## 10. Edge penalty alone, and a longer run (2026-10-26, jobs 345647, 345648)
+
+(a) FiLM + gamma 20 on bg_edge only (alpha = beta = 0), 2,000 steps, vs G (FiLM, plain L1):
+
+| Region | G | gamma 20 |
+|---|---|---|
+| all | 0.757 | **0.737** |
+| in_focus | 1.034 | **0.958** |
+| fg_spill | 0.886 | **0.831** |
+| bg_edge | 4.52 | **1.74** |
+| defocused | 0.686 | **0.683** |
+| CoC 4-16 px | **0.635** | 0.650 |
+| CoC 16-64 px | 0.637 | **0.629** |
+
+Penalising the halo pixels directly works and costs almost nothing elsewhere; the earlier weighted runs
+failed because of the alpha term.
+
+(b) FiLM, plain L1, 10,000 steps (ratio to identity):
+
+| Step | all | in_focus | fg_spill | bg_edge | CoC 16-64 |
+|---|---|---|---|---|---|
+| 1,000 | 0.824 | 1.067 | 0.923 | 3.84 | 0.843 |
+| 2,000 | 0.740 | 0.944 | 0.876 | 3.39 | 0.630 |
+| 4,000 | 0.641 | 0.922 | 0.711 | 1.82 | 0.476 |
+| 6,000 | 0.573 | 0.899 | 0.575 | 1.83 | 0.396 |
+| 8,000 | 0.551 | 0.885 | 0.553 | 1.53 | 0.362 |
+| 10,000 | 0.545 | 0.882 | 0.544 | 1.74 | 0.351 |
+
+Longer training keeps improving everything, but bg_edge stalls around 1.5-1.8: with plain L1 sharp edges
+over a blurred background stay worse than identity. gamma 20 reaches that level in 2,000 steps.
+The fixed held-out crops contain no CoC >= 64 px, so the largest blurs are not evaluated yet.
+
+Next: FiLM + gamma 20 for 10,000 steps; add held-out crops with CoC >= 64 px.

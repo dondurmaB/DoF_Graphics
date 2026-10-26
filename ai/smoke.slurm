@@ -9,8 +9,8 @@
 #SBATCH --job-name=dof-smoke
 #SBATCH --partition=cscc-gpu-p
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=32
-#SBATCH --mem=96G
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=24G   # small enough to fit next to other jobs on a partly used node
 #SBATCH --time=04:00:00
 #SBATCH --output=/nfs-stor/rui.gao/Researches/dof/dof_dev/logs/dof-smoke-%j.out
 
