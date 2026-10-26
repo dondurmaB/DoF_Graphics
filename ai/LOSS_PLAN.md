@@ -157,3 +157,26 @@ FiLM: the 6 settings go through a 2-layer MLP to a per-channel scale and shift a
 | H | alpha 1, beta 5, gamma 5 | FiLM |
 
 Judge by the in_focus, fg_spill and bg_edge ratios (all should reach < 1) and the large-CoC bins.
+
+## 9. Result of the second A/B (2026-10-26, jobs 345109-345112, 2,000 steps, one seed)
+
+Ratio to identity at step 2,000 (below 1 = better than leaving the sharp image unchanged):
+
+| Region | Pixels | E plain | F weighted | G FiLM | H FiLM + weighted |
+|---|---|---|---|---|---|
+| all | 100% | 0.772 | 0.814 | **0.757** | 0.818 |
+| in_focus | 31% | **1.034** | 1.198 | **1.034** | 1.205 |
+| fg_spill | 0.56% | 0.911 | **0.873** | 0.886 | **0.873** |
+| bg_edge | 0.26% | 5.49 | 6.46 | **4.52** | 6.63 |
+| defocused | 68% | 0.703 | 0.716 | **0.686** | 0.719 |
+| CoC 16-64 px | 6% | 0.661 | 0.655 | **0.637** | 0.655 |
+
+1. FiLM helps (G best or tied on almost every region, bg_edge -18%). Keep it.
+2. The weighted loss (alpha 1, beta 5, gamma 5) helps fg_spill slightly and hurts in_focus and bg_edge in
+   both pairs. Dropped in this form.
+3. The halo is the failure: on sharp edges in front of a blurred background every run is 4.5-6.6x worse
+   than identity, and it grows with training (G: 3.1, 3.3, 4.7, 4.5 at steps 500-2,000) as the model learns
+   to blur backgrounds and bleeds that over the objects in front. The earlier "boundary > 1" was all bg_edge.
+
+Next: gamma alone (no alpha), a longer FiLM run to see the bg_edge trend, then occlusion-aware architecture
+(depth-ordered kernel prediction, or a sharpness gate) if neither helps.
