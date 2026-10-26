@@ -93,3 +93,36 @@ floor.
 2. Perceptual or gradient losses for bokeh shape: after this A/B.
 3. Effective receptive field: if the >= 64 px bin stays bad under every loss, the architecture (not the
    loss) is the limit.
+
+## 7. Result of the A/B (2026-10-26, jobs 344947-344950, 2,000 steps each, one seed)
+
+Ratio of model L1 to identity L1 on the same held-out pixels (fixed crops), step 2,000. Below 1 = better
+than leaving the sharp image unchanged.
+
+| Region | Pixels | A (0, 0) | B (1, 0) | C (1, 5) | D (3, 10) |
+|---|---|---|---|---|---|
+| all | 100% | **0.772** | 0.812 | 0.812 | 0.852 |
+| in focus | 31% | **1.034** | 1.191 | 1.187 | 1.327 |
+| boundary | 0.8% | **1.291** | 1.391 | 1.316 | 1.363 |
+| defocused | 68% | **0.703** | 0.715 | 0.717 | 0.733 |
+| CoC 1-4 px | 35% | **0.795** | 0.877 | 0.866 | 0.949 |
+| CoC 4-16 px | 27% | 0.654 | 0.626 | 0.632 | **0.618** |
+| CoC 16-64 px | 6% | 0.661 | 0.650 | 0.668 | **0.641** |
+
+Findings:
+
+1. Weighting only helps where it pushes (CoC >= 4 px, 3-5%) and costs more elsewhere, most on in-focus
+   pixels. Plain L1 is best overall. Single short runs: differences of a few percent are near the noise.
+2. Every run is worse than identity on boundary pixels (1.29-1.39) and at or above identity in focus: the
+   model softens pixels that should stay sharp, the halo failure of screen-space DoF (Experiments 15-17).
+   Run A's boundary ratio grew during training (1.13 at step 500 -> 1.29).
+3. The boundary definition ignores occlusion. A blurred *foreground* disc does spread over sharp pixels
+   behind it (the target changes there); a blurred *background* disc cannot spread over a sharp object in
+   front of it (the target stays sharp). The max-filter dilation mixes both. Fix: dilate only discs nearer
+   than the pixel, i.e. negative signed CoC (in front of the focus plane) for in-focus pixels.
+4. Likely architectural cause: settings enter only as input planes, so the network must infer where the
+   focus plane is from them and depth alone, and gets the in-focus band wrong. FiLM conditioning on the
+   settings at every level is the standard fix.
+
+Next: occlusion-aware regions and weights (split boundary into foreground spill and background edge),
+FiLM conditioning, and a longer run; judge by the in-focus and both boundary ratios.
