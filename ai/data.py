@@ -126,12 +126,14 @@ def settings_vector(meta: dict) -> np.ndarray:
 
 
 def load_example(sample: Sample, crop: int | None = CROP, rng: np.random.Generator | None = None,
-                 augment: bool = True, validate: bool = False, coc_margin: int | None = None) -> dict:
+                 augment: bool = True, validate: bool = False, coc_margin: int | None = None,
+                 crop_at: tuple[int, int] | None = None) -> dict:
     """x [10, H, W], y [3, H, W], settings [6] float32 and meta. crop=None keeps the full frame.
 
     coc_margin=M also returns `coc` [H + 2M, W + 2M]: the lens's signed CoC diameter in px around the same
     window (0 outside the frame), flipped and turned with the example. Loss weights and metrics only
     (DATA_PROTOCOL.md v1.1), never an input. It draws nothing from rng, so crops are the same with or without it.
+    crop_at=(y0, x0) puts the crop there instead of drawing it (fixed evaluation crops).
     """
     rng = rng or np.random.default_rng()
     meta = json.loads((sample.lens_dir / "metadata.json").read_text())
@@ -155,7 +157,8 @@ def load_example(sample: Sample, crop: int | None = CROP, rng: np.random.Generat
     if crop is not None:
         if h < crop or w < crop:
             raise ValueError(f"{sample.lens_dir}: {w}x{h} is smaller than the {crop} crop")
-        y0, x0 = int(rng.integers(0, h - crop + 1)), int(rng.integers(0, w - crop + 1))
+        y0, x0 = crop_at if crop_at is not None else (int(rng.integers(0, h - crop + 1)),
+                                                       int(rng.integers(0, w - crop + 1)))
         planes = planes[y0:y0 + crop, x0:x0 + crop]
         if coc is not None:
             coc = coc[y0:y0 + crop + 2 * coc_margin, x0:x0 + crop + 2 * coc_margin]
@@ -186,12 +189,24 @@ def load_example(sample: Sample, crop: int | None = CROP, rng: np.random.Generat
     return out
 
 
+def hard_crop_at(coc: np.ndarray, crop: int, min_coc: float, step: int = 8):
+    """(y0, x0, n) of the crop window holding the most pixels with |CoC| >= min_coc (n counted on a step grid)."""
+    m = (np.abs(coc[::step, ::step]) >= min_coc).astype(np.int64)
+    cs = np.pad(m.cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+    k = crop // step
+    win = cs[k:, k:] - cs[:-k, k:] - cs[k:, :-k] + cs[:-k, :-k]
+    iy, ix = np.unravel_index(int(win.argmax()), win.shape)
+    h, w = coc.shape
+    return min(iy * step, h - crop), min(ix * step, w - crop), int(win.max()) * step * step
+
+
 def DofDataset(root, split="train", crop=CROP, augment=True, seed=0, scenes=None, coc_margin=None,
-               deterministic=False):
+               deterministic=False, hard_coc=None):
     """PyTorch Dataset over find_samples(); each worker gets its own random stream.
 
     deterministic=True ties each sample's crop to (seed, index) only, so every run and epoch sees the same
-    pixels (held-out evaluation). coc_margin adds the `coc` field (see load_example)."""
+    pixels (held-out evaluation). coc_margin adds the `coc` field (see load_example). hard_coc=T centres every
+    crop on the window with the most pixels of |CoC| >= T px (the blurs a random crop rarely contains)."""
     import torch
     from torch.utils.data import Dataset
 
@@ -209,7 +224,10 @@ def DofDataset(root, split="train", crop=CROP, augment=True, seed=0, scenes=None
             else:
                 info = torch.utils.data.get_worker_info()
                 rng = np.random.default_rng([self.seed, i, info.id if info else 0, torch.initial_seed() % 2 ** 32])
-            ex = load_example(self.samples[i], crop, rng, augment, coc_margin=coc_margin)
+            at = None
+            if hard_coc is not None:
+                at = hard_crop_at(np.load(self.samples[i].lens_dir / "coc.npy"), crop, hard_coc)[:2]
+            ex = load_example(self.samples[i], crop, rng, augment, coc_margin=coc_margin, crop_at=at)
             out = {"x": torch.from_numpy(ex["x"]), "y": torch.from_numpy(ex["y"]),
                    "settings": torch.from_numpy(ex["settings"]), "meta": ex["meta"]}
             if "coc" in ex:

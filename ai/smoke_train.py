@@ -31,6 +31,7 @@ MARGIN = 48                                   # CoC context around a crop: blur 
 RADII = (1, 2, 4, 8, 16, 24, 32, 48)          # dilation steps (disc radius in px)
 BOUNDARY_D = 4.0                              # an in-focus pixel under a neighbour's disc of >= 4 px
 BINS = ((1, 4), (4, 16), (16, 64), (64, float("inf")))
+HARD_COC, HARD_MIN_PX = 32.0, 20000           # hard crops: windows full of blur >= 32 px (>= 64 px is ~1% of samples)
 
 
 def collate(batch):
@@ -83,13 +84,18 @@ def datasets(args):
     full = D.DofDataset(args.root, split="train", crop=args.crop, seed=args.seed, coc_margin=MARGIN)
     evalset = D.DofDataset(args.root, split="train", crop=args.crop, seed=12345, coc_margin=MARGIN,
                            augment=False, deterministic=True)
+    hardset = D.DofDataset(args.root, split="train", crop=args.crop, seed=12345, coc_margin=MARGIN,
+                           augment=False, deterministic=True, hard_coc=HARD_COC)
     drop = set(Path(args.exclude).read_text().split()) if args.exclude else set()
     keep = [i for i, s in enumerate(full.samples) if str(s.lens_dir) not in drop]
     tr = [i for i in keep if not held_out(full.samples[i])]
     va = [i for i in keep if held_out(full.samples[i])]
     print(f"samples {len(full.samples)}, excluded {len(full.samples) - len(keep)}, train {len(tr)}, held-out {len(va)}",
           flush=True)
-    return full, evalset, tr, va
+    hard = [i for i in va if D.hard_crop_at(np.load(full.samples[i].lens_dir / "coc.npy"), args.crop, HARD_COC)[2]
+            >= HARD_MIN_PX]
+    print(f"hard held-out crops (>= {HARD_MIN_PX} px with CoC >= {HARD_COC:.0f}): {len(hard)} of {len(va)}", flush=True)
+    return full, evalset, hardset, tr, va, hard
 
 
 def loader(ds, idx, args, shuffle):
@@ -124,6 +130,7 @@ def evaluate(model, dl, dev):
             add(k, g[k], e, e_id)
         for lo, hi in BINS:
             add(f"coc_{lo}_{hi if hi < float('inf') else 'up'}", (own >= lo) & (own < hi), e, e_id)
+        add("coc_32_up", own >= 32, e, e_id)
     model.train()
     total = acc["all"][2]
     return {k: {"l1": s / n, "identity": si / n, "ratio": s / si, "frac": n / total}
@@ -131,7 +138,7 @@ def evaluate(model, dl, dev):
 
 
 def bench(args):
-    full, _, tr, _ = datasets(args)
+    full, _, _, tr, _, _ = datasets(args)
     for w in args.bench_workers:
         args.workers = w
         dl = loader(full, tr, args, True)
@@ -151,7 +158,7 @@ def bench(args):
 def train(args, overfit=False):
     torch.manual_seed(args.seed)
     dev = torch.device("cuda")
-    full, evalset, tr, va = datasets(args)
+    full, evalset, hardset, tr, va, hard = datasets(args)
     if overfit:
         # a fixed set of crops, loaded once, no augmentation: the model should memorise them
         rng = np.random.default_rng(0)
@@ -162,6 +169,7 @@ def train(args, overfit=False):
         batches = lambda: iter([fixed])    # noqa: E731
     else:
         dl_tr, dl_va = loader(full, tr, args, True), loader(evalset, va, args, False)
+        dl_hard = loader(hardset, hard, args, False) if hard else None
 
         def batches():
             while True:
@@ -203,9 +211,11 @@ def train(args, overfit=False):
             log.write(json.dumps(rec) + "\n")
         if not overfit and (step % args.eval_every == 0 or step == args.steps):
             ev = evaluate(model, dl_va, dev)
+            if dl_hard is not None:       # separate fixed crops full of blur >= 32 px; keys prefixed "hard_"
+                ev.update({"hard_" + k: v for k, v in evaluate(model, dl_hard, dev).items()})
             print(f"EVAL step {step}", flush=True)
             for k, v in ev.items():
-                print(f"  {k:12s} frac {v['frac']:.4f}  l1 {v['l1']:.5f}  identity {v['identity']:.5f}  "
+                print(f"  {k:18s} frac {v['frac']:.4f}  l1 {v['l1']:.5f}  identity {v['identity']:.5f}  "
                       f"ratio {v['ratio']:.3f}", flush=True)
             log.write(json.dumps({"eval": {"step": step, **ev}}) + "\n")
             log.flush()
