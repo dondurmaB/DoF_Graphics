@@ -134,3 +134,11 @@ Mitsuba cafe verified locally (`metal_ad_rgb`, M4 Max):
 - State: dataset complete; no jobs running.
 - Risks: training is loader-bound (0.49 s/step at batch 8, ~16 samples/s, vs ~62 samples/s the GPU can take); each sample decodes two 1080p EXRs for one 512 crop. The 9 brightness outliers may be real optics (lens seeing around occluders to bright lights), not render faults.
 - Next: speed up the loader (one thread per worker, several crops per decoded frame, or a pre-cropped copy); pick the real architecture; decide on denoising and on Beibarys's scenes and evaluation sets.
+
+## 2026-10-26/27 — Loss and conditioning experiments (ai/)
+
+- Work done: occlusion-aware evaluation regions (in_focus, fg_spill, bg_edge, defocused) and CoC bins in `ai/smoke_train.py`; optional FiLM conditioning on the camera settings in `ai/model.py`; weighted L1 with alpha/beta/gamma terms; 18 held-out hard crops centred on CoC >= 32 px. Plan and all results in `ai/LOSS_PLAN.md` (sections 4-11). Protocol v1.1: the CoC map may be a loss weight or metric, never an input.
+- Verification: three A/B rounds on CIAI (jobs 344947-344950, 345109-345112, 345647/345648, 347294). FiLM helps; the alpha (blur-size) weight hurts; a gamma 20 penalty on sharp edges in front of blurred background (bg_edge) cuts the halo. 10k steps, FiLM + gamma 20: held-out L1 at 0.549 of identity, bg_edge 1.03 (plain L1: 1.74), hard crops 0.444, CoC >= 32 px 0.365.
+- State: no jobs running. Default recipe: FiLM + gamma 20.
+- Risks: bg_edge never gets below identity, which points to the architecture; training is still loader-bound (~0.5 s/step at batch 8). Sampler lens-collision bug and denoising still open.
+- Next: occlusion-aware architecture (sharpness gate or depth-ordered layers); loader speedup; sampler fix; data sharing with Beibarys.

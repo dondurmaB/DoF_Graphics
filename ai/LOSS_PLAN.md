@@ -214,3 +214,42 @@ over a blurred background stay worse than identity. gamma 20 reaches that level 
 The fixed held-out crops contain no CoC >= 64 px, so the largest blurs are not evaluated yet.
 
 Next: FiLM + gamma 20 for 10,000 steps; add held-out crops with CoC >= 64 px.
+
+## 11. FiLM + gamma 20, 10,000 steps (2026-10-27, job 347294)
+
+Same as (b) in section 10 except gamma 20 on bg_edge. Ratio to identity, (b) plain L1 / gamma 20:
+
+| Step | all | in_focus | fg_spill | bg_edge | CoC 16-64 |
+|---|---|---|---|---|---|
+| 1,000 | 0.824 / 0.830 | 1.067 / 0.947 | 0.923 / 0.943 | 3.84 / 1.38 | 0.843 / 0.885 |
+| 2,000 | 0.740 / 0.777 | 0.944 / 0.948 | 0.876 / 0.857 | 3.39 / 1.30 | 0.630 / 0.765 |
+| 4,000 | 0.641 / 0.620 | 0.922 / 0.904 | 0.711 / 0.667 | 1.82 / 1.08 | 0.476 / 0.469 |
+| 6,000 | 0.573 / 0.581 | 0.899 / 0.891 | 0.575 / 0.604 | 1.83 / 1.08 | 0.396 / 0.417 |
+| 8,000 | 0.551 / 0.553 | 0.885 / 0.879 | 0.553 / 0.539 | 1.53 / 1.06 | 0.362 / 0.368 |
+| 10,000 | 0.545 / 0.549 | 0.882 / 0.872 | 0.544 / 0.534 | 1.74 / **1.03** | 0.351 / 0.366 |
+
+Hard crops (18 held-out crops centred on CoC >= 32 px; only this run has them), step 10,000:
+
+| Region | frac | ratio |
+|---|---|---|
+| all | 1.000 | 0.444 |
+| in_focus | 0.167 | 1.042 |
+| fg_spill | 0.038 | 0.637 |
+| bg_edge | 0.001 | 0.963 |
+| defocused | 0.794 | 0.425 |
+| CoC 16-64 px | 0.612 | 0.343 |
+| CoC >= 32 px | 0.556 | 0.365 |
+| CoC >= 64 px | 0.019 | 0.526 |
+
+1. gamma 20 holds bg_edge at about 1.0-1.1 from step 4,000 on, where plain L1 stays at 1.5-1.8 and
+   oscillates. The halo is about 40% smaller but not gone: sharp edges over a blurred background are only
+   as good as copying the sharp input, never better.
+2. Everywhere else the two runs end within 3% of each other (in_focus and fg_spill slightly better, CoC
+   16-64 about 4% worse). Keep gamma 20 as the default.
+3. Large blur is learned well: CoC >= 32 px error is 37% of identity. CoC >= 64 px (2% of the hard crops)
+   lags at 53%, and in-focus pixels inside the hard crops are 4% worse than identity (halo-adjacent).
+4. Both runs flatten after about 8,000 steps; the remaining gap is the model or the data, not the step count.
+   bg_edge is 0.3% of pixels, so further gains there need the architecture rather than a heavier weight.
+
+Next: occlusion-aware architecture (depth-ordered layers or a predicted sharpness gate that can copy the
+sharp input exactly where nothing in front is blurred); loader speedup before longer runs.
