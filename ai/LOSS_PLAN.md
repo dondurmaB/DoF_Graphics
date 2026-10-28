@@ -253,3 +253,48 @@ Hard crops (18 held-out crops centred on CoC >= 32 px; only this run has them), 
 
 Next: occlusion-aware architecture (depth-ordered layers or a predicted sharpness gate that can copy the
 sharp input exactly where nothing in front is blurred); loader speedup before longer runs.
+
+## 12. Architecture sweep, classic baseline and speed (2026-10-28)
+
+Goal restated by the user: the learned model does not need to beat the classic screen-space method, it needs to
+**reach its quality in the same or less time**.
+
+Setup: every run FiLM + gamma 20, 10,000 steps, batch 8, `--crops-per-image 4` (four crops per decoded frame, each
+batch drawn at random from a pool of 64 crops). Code: `ai/model.py` (`build(arch, width)`), `ai/classic_eval.py`,
+`ai/speed.py`, `ai/preview.py`. Classic = the 64-tap depth-aware gather of `renderer/mitsuba/traditional_dof.py`
+(the DoFScene shader), given only the model's inputs. Time = one 1920 x 1088 frame on an A100, batch 1; models in
+bf16 eager PyTorch, classic as a PyTorch port in fp32 (matches the numpy original to 1.2e-6). Neither is optimised.
+
+| Run | Params | ms / frame | all | in_focus | fg_spill | bg_edge | CoC 16-64 | hard all | hard CoC >= 64 |
+|---|---|---|---|---|---|---|---|---|---|
+| classic gather | - | 58 | 0.603 | 1.000 | 1.000 | 1.000 | 0.406 | 0.479 | **0.312** |
+| unet w8 | 0.61 M | **30** | 0.749 | 0.970 | 0.820 | 1.377 | 0.660 | 0.774 | 0.831 |
+| unet w16 | 2.22 M | 63 | 0.690 | 0.936 | 0.731 | 1.282 | 0.591 | 0.730 | 0.823 |
+| unet w24 | 4.85 M | 96 | 0.593 | 0.896 | 0.610 | 1.077 | 0.418 | 0.495 | 0.599 |
+| unet w32 | 8.50 M | 130 | 0.563 | 0.882 | 0.587 | 1.059 | 0.383 | 0.499 | 0.610 |
+| unet w32, 1 crop / frame (run K) | 8.50 M | 130 | 0.549 | 0.872 | 0.534 | 1.032 | 0.366 | **0.444** | 0.526 |
+| unet w64 | 33.2 M | 280 | **0.511** | **0.853** | **0.502** | 1.027 | **0.307** | 0.459 | 0.659 |
+| unet w32 without skips | 7.71 M | 118 | 0.975 | 1.002 | 0.999 | 1.052 | 0.897 | 0.947 | 0.999 |
+| two-arm | 2.95 M | 230 | 0.571 | 0.861 | 0.600 | 1.047 | 0.458 | 0.583 | 0.712 |
+| plain w64 (full res, dilation 1) | 0.97 M | 704 | cancelled | | | | | | |
+| dilated w64 (full res) | 0.97 M | 704 | cancelled | | | | | | |
+
+1. The skip links are essential: without them the U-Net learns almost nothing (0.975). Full-resolution detail has
+   to reach the output directly.
+2. Full-resolution stacks (plain, dilated) cost 12x the classic method's time at 1/9 of the U-Net's parameters;
+   cancelled before training on the user's call. The two-arm net loses on quality and time.
+3. Quality grows with U-Net width; the classic method's 0.603 is first passed at width 24 (0.593, 96 ms, 1.7x the
+   classic time). Width 16 runs at the classic speed but scores 0.690.
+4. Every model is worse than the classic method on the largest blurs (CoC >= 64 px: 0.53-0.83 vs 0.31); the
+   previews (`ai/preview.py`, run K) show it as too little blur on large defocused areas. The classic method only
+   copies the input where a pixel is sharp (1.000 on in_focus, fg_spill, bg_edge); the models win on fg_spill and,
+   by a little, on in_focus (they partly smooth the render noise).
+5. Four crops per frame halves the training time (47 vs 85 min for w32) and costs a little quality (0.563 vs
+   0.549, hard 0.499 vs 0.444): fewer distinct frames per step. Spend the time saved on more steps.
+
+Status: screening runs (10k steps, one seed, crops, A100, unoptimised). Not final numbers.
+
+Next: (a) cheaper inference for w24-w32 (torch.compile, TensorRT / fp16) and an optimised classic shader for a fair
+time; (b) a model that handles big blur at low cost (predicted gather kernels, or a coarse-resolution blur path);
+(c) bootstrap error bars over the held-out samples; (d) a proper training script (resume, config, full-frame
+PSNR / SSIM / LPIPS) and long runs with several seeds for the chosen candidates.

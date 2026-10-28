@@ -77,7 +77,7 @@ def timeit(fn, reps, warm=3):
     return float(np.median(ts))
 
 
-VARIANTS = [("unet", 8), ("unet", 16), ("unet", 32), ("unet", 64), ("unet_noskip", 32), ("twoarm", 16),
+VARIANTS = [("unet", 8), ("unet", 16), ("unet", 24), ("unet", 32), ("unet", 64), ("unet_noskip", 32), ("twoarm", 16),
             ("twoarm", 32), ("plain", 64), ("dilated", 64)]
 
 

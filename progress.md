@@ -142,3 +142,11 @@ Mitsuba cafe verified locally (`metal_ad_rgb`, M4 Max):
 - State: no jobs running. Default recipe: FiLM + gamma 20.
 - Risks: bg_edge never gets below identity, which points to the architecture; training is still loader-bound (~0.5 s/step at batch 8). Sampler lens-collision bug and denoising still open.
 - Next: occlusion-aware architecture (sharpness gate or depth-ordered layers); loader speedup; sampler fix; data sharing with Beibarys.
+
+## 2026-10-28 — Architecture sweep, classic baseline, speed (ai/)
+
+- Work done: model variants in `ai/model.py` (U-Net width / no skips, full-resolution plain and dilated stacks, two-arm net); `--crops-per-image` in the loader (four crops per decoded frame, pooled); `ai/classic_eval.py` (classic gather scored on the same crops and regions); `ai/preview.py` (full-frame previews and HDR predictions); `ai/speed.py` (1080p timing of models vs a GPU port of the classic gather); `ai/run.slurm`, `ai/multi.slurm`. Current best setting written to `notes.md`.
+- Verification: 60-step test of every variant on CIAI; 8 sweep runs at 10k steps; classic scored; speed measured. Results in `ai/LOSS_PLAN.md` section 12. Goal set by the user: reach the classic method's quality in the same or less time. Width-24 U-Net is the first to pass it (0.593 vs 0.603) at 1.7x the classic time (96 vs 58 ms, unoptimised); every model still loses on CoC >= 64 px.
+- State: no jobs running. gpu-05 excluded in the job scripts (assigns a GPU it does not expose). CIAI GPU QoS: 2 running / 4 submitted jobs, 4 GPUs per user.
+- Risks: screening only (10k steps, one seed, crops, A100, unoptimised timing). Largest blurs remain the gap.
+- Next: faster inference (compile / TensorRT / fp16) and an optimised classic shader for a fair time; a cheap large-blur path (kernel prediction or coarse blur); bootstrap error bars; a proper training script and long multi-seed runs.
