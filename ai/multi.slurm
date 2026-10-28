@@ -12,7 +12,7 @@
 #SBATCH --gres=gpu:2
 #SBATCH --exclude=gpu-05   # 2026-10-28: hands out GPU index 3 but exposes only GPUs 0-2
 #SBATCH --cpus-per-task=32
-#SBATCH --mem=40G
+#SBATCH --mem=48G   # about 20 GB of host RAM per run: three loaders (train, held-out, hard) each with their own workers
 #SBATCH --time=04:00:00
 #SBATCH --output=/nfs-stor/rui.gao/Researches/dof/dof_dev/logs/dof-multi-%j.out
 
