@@ -135,6 +135,15 @@ def load_example(sample: Sample, crop: int | None = CROP, rng: np.random.Generat
     (DATA_PROTOCOL.md v1.1), never an input. It draws nothing from rng, so crops are the same with or without it.
     crop_at=(y0, x0) puts the crop there instead of drawing it (fixed evaluation crops).
     """
+    return load_examples(sample, crop, rng, augment, validate, coc_margin, crop_at, n_crops=1)[0]
+
+
+def load_examples(sample: Sample, crop: int | None = CROP, rng: np.random.Generator | None = None,
+                  augment: bool = True, validate: bool = False, coc_margin: int | None = None,
+                  crop_at: tuple[int, int] | None = None, n_crops: int = 1) -> list[dict]:
+    """n_crops independent crops (each with its own position and flips) from one decode of the frame, as
+    load_example. Decoding the two EXRs is most of the cost, so this multiplies loader throughput. With
+    n_crops=1 it draws exactly what load_example always drew."""
     rng = rng or np.random.default_rng()
     meta = json.loads((sample.lens_dir / "metadata.json").read_text())
     scale = float(sample.entry.get("auto_exposure_scale")
@@ -150,43 +159,47 @@ def load_example(sample: Sample, crop: int | None = CROP, rng: np.random.Generat
 
     # Order fixed by the protocol: colour transform and inverse depth, crop, flips / rot90, settings planes.
     inv_depth = np.where(np.isfinite(depth), 1.0 / np.maximum(depth, MIN_DEPTH_M), 0.0).astype(np.float32)
-    planes = np.concatenate([to_model(sharp, scale), inv_depth[..., None], to_model(dof, scale)], -1)
-    coc = None
+    full = np.concatenate([to_model(sharp, scale), inv_depth[..., None], to_model(dof, scale)], -1)
+    coc_full = None
     if coc_margin is not None:
-        coc = np.pad(np.load(sample.lens_dir / "coc.npy").astype(np.float32), coc_margin)
-    if crop is not None:
-        if h < crop or w < crop:
-            raise ValueError(f"{sample.lens_dir}: {w}x{h} is smaller than the {crop} crop")
-        y0, x0 = crop_at if crop_at is not None else (int(rng.integers(0, h - crop + 1)),
-                                                       int(rng.integers(0, w - crop + 1)))
-        planes = planes[y0:y0 + crop, x0:x0 + crop]
-        if coc is not None:
-            coc = coc[y0:y0 + crop + 2 * coc_margin, x0:x0 + crop + 2 * coc_margin]
-    ops = []
-    if augment:
-        if rng.random() < HFLIP_PROB:
-            planes, ops = planes[:, ::-1], ops + ["hflip"]
-            coc = None if coc is None else coc[:, ::-1]
-        if rng.random() < VFLIP_PROB:
-            planes, ops = planes[::-1], ops + ["vflip"]
-            coc = None if coc is None else coc[::-1]
-        if planes.shape[0] == planes.shape[1] and rng.random() < ROT90_PROB:
-            k = int(rng.choice([1, 3]))
-            planes, ops = np.rot90(planes, k), ops + [f"rot90x{k}"]
-            coc = None if coc is None else np.rot90(coc, k)
-    planes = np.ascontiguousarray(planes.transpose(2, 0, 1))      # HWC -> CHW
+        coc_full = np.pad(np.load(sample.lens_dir / "coc.npy").astype(np.float32), coc_margin)
     settings = settings_vector(meta)
-    x = np.concatenate([planes[0:4], np.broadcast_to(settings[:, None, None], (6, *planes.shape[1:]))])
     cam = meta["camera"]
-    info = {"sample_id": meta["sample_id"], "scene": sample.scene, "env": sample.env,
-            "focal_mm": cam["focal_length_mm"], "f_number": cam["f_number"],
-            "aperture_mm": cam["focal_length_mm"] / cam["f_number"], "focus_m": cam["focus_distance_m"],
-            "sensor_mm": cam["sensor_height_mm"], "frame_px": meta["resolution"][1],
-            "auto_exposure_scale": scale, "augment": ops, "lens_dir": str(sample.lens_dir)}
-    out = {"x": x.astype(np.float32), "y": planes[4:7].copy(), "settings": settings, "meta": info}
-    if coc is not None:
-        out["coc"] = np.ascontiguousarray(coc)
-    return out
+    outs = []
+    for _ in range(n_crops):
+        planes, coc, y0, x0 = full, coc_full, 0, 0
+        if crop is not None:
+            if h < crop or w < crop:
+                raise ValueError(f"{sample.lens_dir}: {w}x{h} is smaller than the {crop} crop")
+            y0, x0 = crop_at if crop_at is not None else (int(rng.integers(0, h - crop + 1)),
+                                                           int(rng.integers(0, w - crop + 1)))
+            planes = planes[y0:y0 + crop, x0:x0 + crop]
+            if coc is not None:
+                coc = coc[y0:y0 + crop + 2 * coc_margin, x0:x0 + crop + 2 * coc_margin]
+        ops = []
+        if augment:
+            if rng.random() < HFLIP_PROB:
+                planes, ops = planes[:, ::-1], ops + ["hflip"]
+                coc = None if coc is None else coc[:, ::-1]
+            if rng.random() < VFLIP_PROB:
+                planes, ops = planes[::-1], ops + ["vflip"]
+                coc = None if coc is None else coc[::-1]
+            if planes.shape[0] == planes.shape[1] and rng.random() < ROT90_PROB:
+                k = int(rng.choice([1, 3]))
+                planes, ops = np.rot90(planes, k), ops + [f"rot90x{k}"]
+                coc = None if coc is None else np.rot90(coc, k)
+        planes = np.ascontiguousarray(planes.transpose(2, 0, 1))      # HWC -> CHW
+        x = np.concatenate([planes[0:4], np.broadcast_to(settings[:, None, None], (6, *planes.shape[1:]))])
+        info = {"sample_id": meta["sample_id"], "scene": sample.scene, "env": sample.env,
+                "focal_mm": cam["focal_length_mm"], "f_number": cam["f_number"],
+                "aperture_mm": cam["focal_length_mm"] / cam["f_number"], "focus_m": cam["focus_distance_m"],
+                "sensor_mm": cam["sensor_height_mm"], "frame_px": meta["resolution"][1],
+                "auto_exposure_scale": scale, "augment": ops, "crop_yx": (y0, x0), "lens_dir": str(sample.lens_dir)}
+        out = {"x": x.astype(np.float32), "y": planes[4:7].copy(), "settings": settings, "meta": info}
+        if coc is not None:
+            out["coc"] = np.ascontiguousarray(coc)
+        outs.append(out)
+    return outs
 
 
 def hard_crop_at(coc: np.ndarray, crop: int, min_coc: float, step: int = 8):
@@ -201,12 +214,14 @@ def hard_crop_at(coc: np.ndarray, crop: int, min_coc: float, step: int = 8):
 
 
 def DofDataset(root, split="train", crop=CROP, augment=True, seed=0, scenes=None, coc_margin=None,
-               deterministic=False, hard_coc=None):
+               deterministic=False, hard_coc=None, crops_per_image=1):
     """PyTorch Dataset over find_samples(); each worker gets its own random stream.
 
     deterministic=True ties each sample's crop to (seed, index) only, so every run and epoch sees the same
     pixels (held-out evaluation). coc_margin adds the `coc` field (see load_example). hard_coc=T centres every
-    crop on the window with the most pixels of |CoC| >= T px (the blurs a random crop rarely contains)."""
+    crop on the window with the most pixels of |CoC| >= T px (the blurs a random crop rarely contains).
+    crops_per_image=K > 1 cuts K crops from each decoded frame; every tensor then has a leading K dimension
+    and `meta` is a list (the training loop flattens and mixes them)."""
     import torch
     from torch.utils.data import Dataset
 
@@ -227,12 +242,13 @@ def DofDataset(root, split="train", crop=CROP, augment=True, seed=0, scenes=None
             at = None
             if hard_coc is not None:
                 at = hard_crop_at(np.load(self.samples[i].lens_dir / "coc.npy"), crop, hard_coc)[:2]
-            ex = load_example(self.samples[i], crop, rng, augment, coc_margin=coc_margin, crop_at=at)
-            out = {"x": torch.from_numpy(ex["x"]), "y": torch.from_numpy(ex["y"]),
-                   "settings": torch.from_numpy(ex["settings"]), "meta": ex["meta"]}
-            if "coc" in ex:
-                out["coc"] = torch.from_numpy(ex["coc"])
-            return out
+            exs = load_examples(self.samples[i], crop, rng, augment, coc_margin=coc_margin, crop_at=at,
+                                n_crops=crops_per_image)
+            keys = ["x", "y", "settings"] + (["coc"] if "coc" in exs[0] else [])
+            if crops_per_image == 1:
+                return {**{k: torch.from_numpy(exs[0][k]) for k in keys}, "meta": exs[0]["meta"]}
+            return {**{k: torch.from_numpy(np.stack([e[k] for e in exs])) for k in keys},
+                    "meta": [e["meta"] for e in exs]}
 
     return _Dof()
 

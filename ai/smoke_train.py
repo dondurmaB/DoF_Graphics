@@ -4,6 +4,7 @@
     python ai/smoke_train.py overfit ROOT --n 16 --steps 1500  # must drive the loss towards zero
     python ai/smoke_train.py train   ROOT --steps 2000         # must beat the identity baseline on held-out poses
     python ai/smoke_train.py train   ROOT --alpha 1 --beta 5   # CoC-weighted loss (ai/LOSS_PLAN.md)
+    python ai/smoke_train.py train   ROOT --arch dilated --film --gamma 20 --crops-per-image 4   # sweep variant
 
 Held-out poses: pose_id hash % 50 == 0 (about 2%), never seen in training, evaluated on fixed crops so every
 run sees the same pixels. `--exclude FILE` drops lens dirs listed one per line (samples the protocol check
@@ -25,7 +26,7 @@ from torch.utils.data import DataLoader, Subset
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import data as D      # noqa: E402
-from model import UNet  # noqa: E402
+from model import ARCHS, build  # noqa: E402
 
 MARGIN = 48                                   # CoC context around a crop: blur discs up to 96 px reach in
 RADII = (1, 2, 4, 8, 16, 24, 32, 48)          # dilation steps (disc radius in px)
@@ -35,8 +36,12 @@ HARD_COC, HARD_MIN_PX = 32.0, 20000           # hard crops: windows full of blur
 
 
 def collate(batch):
-    keys = ["x", "y", "settings"] + (["coc"] if "coc" in batch[0] else [])
-    return {k: torch.stack([b[k] for b in batch]) for k in keys}
+    """Stack every tensor field; items holding K crops each ([K, ...], crops_per_image > 1) are flattened."""
+    keys = [k for k, v in batch[0].items() if torch.is_tensor(v)]
+    out = {k: torch.stack([b[k] for b in batch]) for k in keys}
+    if isinstance(batch[0]["meta"], list):
+        out = {k: v.flatten(0, 1) for k, v in out.items()}
+    return out
 
 
 def one_thread(_):
@@ -81,7 +86,8 @@ def weights(coc, args):
 
 
 def datasets(args):
-    full = D.DofDataset(args.root, split="train", crop=args.crop, seed=args.seed, coc_margin=MARGIN)
+    full = D.DofDataset(args.root, split="train", crop=args.crop, seed=args.seed, coc_margin=MARGIN,
+                        crops_per_image=getattr(args, "crops_per_image", 1))
     evalset = D.DofDataset(args.root, split="train", crop=args.crop, seed=12345, coc_margin=MARGIN,
                            augment=False, deterministic=True)
     hardset = D.DofDataset(args.root, split="train", crop=args.crop, seed=12345, coc_margin=MARGIN,
@@ -98,16 +104,18 @@ def datasets(args):
     return full, evalset, hardset, tr, va, hard
 
 
-def loader(ds, idx, args, shuffle):
-    return DataLoader(Subset(ds, idx), batch_size=args.batch, shuffle=shuffle, num_workers=args.workers,
+def loader(ds, idx, args, shuffle, batch=None):
+    return DataLoader(Subset(ds, idx), batch_size=batch or args.batch, shuffle=shuffle, num_workers=args.workers,
                       collate_fn=collate, pin_memory=True, drop_last=shuffle, persistent_workers=args.workers > 0,
                       worker_init_fn=one_thread)
 
 
 @torch.no_grad()
-def evaluate(model, dl, dev):
-    """L1 of model and identity per region over all held-out crops (pixel-weighted sums, not means of means)."""
-    model.eval()
+def evaluate(model, dl, dev, pred=None):
+    """L1 of model and identity per region over all held-out crops (pixel-weighted sums, not means of means).
+    pred(batch) -> y_hat replaces the model (non-learned baselines, ai/classic_eval.py)."""
+    if model is not None:
+        model.eval()
     acc = {}
 
     def add(name, mask, e, e_id):
@@ -119,8 +127,11 @@ def evaluate(model, dl, dev):
 
     for b in dl:
         x, y = b["x"].to(dev), b["y"].to(dev)
-        with torch.autocast("cuda", torch.bfloat16):
-            yh = model(x, b["settings"].to(dev)).float()
+        if pred is not None:
+            yh = pred(b).to(dev)
+        else:
+            with torch.autocast("cuda", torch.bfloat16):
+                yh = model(x, b["settings"].to(dev)).float()
         e = (yh - y).abs().mean(1, keepdim=True)
         e_id = (x[:, :3] - y).abs().mean(1, keepdim=True)
         g = regions(b["coc"].to(dev))
@@ -131,7 +142,8 @@ def evaluate(model, dl, dev):
         for lo, hi in BINS:
             add(f"coc_{lo}_{hi if hi < float('inf') else 'up'}", (own >= lo) & (own < hi), e, e_id)
         add("coc_32_up", own >= 32, e, e_id)
-    model.train()
+    if model is not None:
+        model.train()
     total = acc["all"][2]
     return {k: {"l1": s / n, "identity": si / n, "ratio": s / si, "frac": n / total}
             for k, (s, si, n) in acc.items() if n > 0}
@@ -168,15 +180,30 @@ def train(args, overfit=False):
         fixed = {k: torch.from_numpy(np.stack([e[k] for e in exs])).to(dev) for k in ("x", "y", "settings", "coc")}
         batches = lambda: iter([fixed])    # noqa: E731
     else:
-        dl_tr, dl_va = loader(full, tr, args, True), loader(evalset, va, args, False)
+        k = args.crops_per_image
+        dl_tr = loader(full, tr, args, True, batch=max(1, args.batch // k))
+        dl_va = loader(evalset, va, args, False)
         dl_hard = loader(hardset, hard, args, False) if hard else None
+        mix = np.random.default_rng(args.seed + 1)
 
         def batches():
+            if k == 1:
+                while True:
+                    yield from dl_tr
+            # K crops per decoded frame: pool them and draw each batch at random from the pool, so a batch
+            # mixes about args.mix / K frames instead of holding K crops of the same view
+            pool = []
             while True:
-                yield from dl_tr
+                for b in dl_tr:
+                    pool += [{f: v[j].clone() for f, v in b.items()} for j in range(len(b["x"]))]
+                    while len(pool) >= args.mix:
+                        picked = [pool.pop(j) for j in sorted(mix.choice(len(pool), args.batch, replace=False),
+                                                              reverse=True)]
+                        yield {f: torch.stack([p[f] for p in picked]) for f in picked[0]}
 
-    model = UNet(width=args.width, film=args.film).to(dev).to(memory_format=torch.channels_last)
-    print(f"params {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M | film {args.film} | loss alpha "
+    model = build(args.arch, args.width, args.film).to(dev).to(memory_format=torch.channels_last)
+    print(f"arch {args.arch} | params {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M | film {args.film} | "
+          f"crops/frame {args.crops_per_image} | loss alpha "
           f"{args.alpha} beta {args.beta} gamma {args.gamma} c0 {args.c0} cap {args.cap}", flush=True)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, args.lr, total_steps=args.steps, pct_start=0.05)
@@ -206,7 +233,8 @@ def train(args, overfit=False):
         step += 1
         if step % args.log_every == 0 or step == 1:
             rec = {"step": step, "loss": loss.item(), "l1": err.mean().item(), "lr": sched.get_last_lr()[0],
-                   "s_per_step": (time.time() - t0) / step}
+                   "s_per_step": (time.time() - t0) / step,
+                   "mem_gb": torch.cuda.max_memory_allocated() / 2 ** 30}
             print(json.dumps(rec), flush=True)
             log.write(json.dumps(rec) + "\n")
         if not overfit and (step % args.eval_every == 0 or step == args.steps):
@@ -234,7 +262,10 @@ def main():
     ap.add_argument("--workers", type=int, default=16)
     ap.add_argument("--steps", type=int, default=2000)
     ap.add_argument("--lr", type=float, default=2e-4)
-    ap.add_argument("--width", type=int, default=32)
+    ap.add_argument("--arch", choices=ARCHS, default="unet")
+    ap.add_argument("--width", type=int, default=None, help="base channels; default per arch (model.build)")
+    ap.add_argument("--crops-per-image", type=int, default=1, help="crops cut from each decoded frame")
+    ap.add_argument("--mix", type=int, default=64, help="pool of crops each batch is drawn from (crops-per-image > 1)")
     ap.add_argument("--alpha", type=float, default=0.0, help="extra weight for large dilated CoC")
     ap.add_argument("--beta", type=float, default=0.0, help="extra weight for in-focus pixels under a nearer blur")
     ap.add_argument("--gamma", type=float, default=0.0, help="extra weight for in-focus edges over a blurred background")
