@@ -151,3 +151,42 @@ the data, so they come before the long runs (E10).
 4. OIDN on input only, or input and target?
 5. Speed target hardware.
 6. Do Beibarys's natural scenes follow the same lens sampling, or do they need the same top-up?
+
+## 8. Results log
+
+### E1. Lens and blur audit (2026-10-29, job 352533; `runs/audit/` on CIAI)
+- f-number: **only f/1.4-8 occurs**. None at f/1.2-1.4 and **none at f/8-16** (small apertures, deep focus).
+  68% of samples are below f/2.8 (median f/2.05).
+- Focal length 24-135 mm, weighted to wide (median 51 mm).
+- Focus: median 7.2 m; **under 2 m in only 7.8%** of samples (1.4% under 1 m). Close-focus portraits are rare.
+  91% of focus distances come from a random depth quantile, 9% from named focus points.
+- Blur: p95 per sample is 4-43 px by design (`COC_FRAC_RANGE`); the largest blur in a frame reaches 64 px in
+  **1.0%** of samples; **0.02% of all pixels** have blur >= 64 px, 1.6% >= 32 px. Far background blur is under
+  16 px in 83% of samples.
+- Reading: Professor Yan's point holds at both ends. Small apertures (nearly all-sharp photos) are missing
+  entirely, and realistic large blur (wide aperture + close focus) is rare. Scene by scene the picture is
+  similar; rooftop and desk have the most blur, terminal and pool the least.
+
+### E0. Under-blur check (2026-10-29, job 352532; `runs/underblur.json`)
+Pixels with blur >= 64 px in the hard crops (90k px from 18 crops, so indicative only):
+
+| | detail vs target | coarse error | fine error | bias (log units) |
+|---|---|---|---|---|
+| sharp input | 2.27 | 0.353 | 0.132 | -0.164 |
+| classic | 0.68 | **0.122** | **0.044** | +0.018 |
+| run K (w32) | 1.06 | 0.212 | 0.056 | -0.056 |
+| w24 | 1.15 | 0.236 | 0.068 | -0.049 |
+| w64 | 1.15 | 0.259 | 0.069 | -0.061 |
+
+- Hypothesis 1 (leftover fine detail) is **only a small part** at >= 64 px: the models keep 6-15% more detail
+  than the target, and their fine-detail error is close to the classic method's.
+- The main error is **coarse**: the models' output is too **dark** over large blur (bias -0.05 to -0.06,
+  about 5% too dim), and their coarse error is about twice the classic method's. In the lens image, bright
+  lights spread their light over large discs, raising the brightness of everything around them. The classic
+  method averages light linearly and gets this right (bias +0.02); the models, working in log space, get only
+  about two thirds of it, and wider models do not do better.
+- At 16-64 px the leftover-detail problem is real: models keep 30-70% too much detail (the classic method too:
+  45-67%).
+- Consequences for the plan: T2 (a loss in linear HDR, where spreading light is measured correctly) moves up;
+  M1's large-blur arm should **blur in linear light** (convert to linear inside the model, blur, convert back,
+  all fixed elementwise steps, so still a pure network); D2 should also add realistic small-aperture samples.
