@@ -190,3 +190,15 @@ Pixels with blur >= 64 px in the hard crops (90k px from 18 crops, so indicative
 - Consequences for the plan: T2 (a loss in linear HDR, where spreading light is measured correctly) moves up;
   M1's large-blur arm should **blur in linear light** (convert to linear inside the model, blur, convert back,
   all fixed elementwise steps, so still a pure network); D2 should also add realistic small-aperture samples.
+
+### E2. Large-blur crop oversampling (2026-10-29, job 352534)
+U-Net w24, FiLM, gamma 20, `--big-blur-prob 0.25`, otherwise as w24 (350202):
+
+| | all | hard all | hard CoC >= 32 | hard CoC >= 64 |
+|---|---|---|---|---|
+| classic | 0.603 | 0.479 | 0.365 | 0.312 |
+| w24 | 0.593 | 0.495 | 0.428 | 0.599 |
+| w24 + big-blur crops | 0.597 | 0.485 | 0.411 | 0.585 |
+
+Small gains on large blur (2-4%), nothing lost elsewhere; within one-seed noise. More practice alone does not fix
+large blur, as E0 suggested (the error is light spreading, not rarity). Kept on for later runs (cheap).

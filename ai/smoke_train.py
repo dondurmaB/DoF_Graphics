@@ -32,6 +32,7 @@ MARGIN = 48                                   # CoC context around a crop: blur 
 RADII = (1, 2, 4, 8, 16, 24, 32, 48)          # dilation steps (disc radius in px)
 BOUNDARY_D = 4.0                              # an in-focus pixel under a neighbour's disc of >= 4 px
 BINS = ((1, 4), (4, 16), (16, 64), (64, float("inf")))
+ENERGY_K = (4, 16)                            # box sizes (px) of the light-energy loss (experiment_plan.md T2)
 HARD_COC, HARD_MIN_PX = 32.0, 20000           # hard crops: windows full of blur >= 32 px (>= 64 px is ~1% of samples)
 
 
@@ -83,6 +84,31 @@ def weights(coc, args):
     g = regions(coc)
     return (1 + args.alpha * (g["blur"] / args.c0).clamp(max=args.cap)
             + args.beta * g["fg_spill"].float() + args.gamma * g["bg_edge"].float())
+
+
+def energy_map(t, k):
+    """Local light energy: linear radiance box-averaged over k x k px, back in model space. Blur spreads light
+    linearly, so this is what a lens image conserves and what log-space L1 misjudges (experiment_plan.md E0)."""
+    return torch.log1p(F.avg_pool2d(torch.expm1(t.float()).clamp(min=0), k, ceil_mode=True))
+
+
+def aux_losses(model, coc, y, args):
+    """Per-arm losses for twoarm2 (experiment_plan.md M1), label-side only: arm B on pixels whose blur reaches
+    aux_t px, arm A on the rest, and the mask towards a soft step at aux_t."""
+    aux = getattr(model, "aux", None)
+    if aux is None or not (args.aux_b or args.aux_a or args.aux_m):
+        return 0.0
+    blur = regions(coc)["blur"]
+    big = (blur >= args.aux_t).float()
+    out = 0.0
+    if args.aux_b:
+        out = out + args.aux_b * ((aux["B"] - y).abs().mean(1, keepdim=True) * big).sum() / (big.sum() + 1)
+    if args.aux_a:
+        out = out + args.aux_a * ((aux["A"] - y).abs().mean(1, keepdim=True) * (1 - big)).sum() / ((1 - big).sum() + 1)
+    if args.aux_m:
+        tm = torch.sigmoid((blur - args.aux_t) / 4.0)
+        out = out + args.aux_m * F.binary_cross_entropy(aux["m"].clamp(1e-4, 1 - 1e-4), tm)
+    return out
 
 
 def datasets(args):
@@ -143,6 +169,17 @@ def evaluate(model, dl, dev, pred=None):
         for lo, hi in BINS:
             add(f"coc_{lo}_{hi if hi < float('inf') else 'up'}", (own >= lo) & (own < hi), e, e_id)
         add("coc_32_up", own >= 32, e, e_id)
+        # bokeh: the brightest 1% of target pixels in each crop that are blurred by >= 16 px
+        lum = y.mean(1, keepdim=True)
+        q = torch.quantile(lum.flatten(1), 0.99, dim=1)[:, None, None, None]
+        add("highlight_blur16", (lum >= q) & (own >= 16), e, e_id)
+        # light energy at 8 px (linear box average): too dark / too bright over an area, not fine detail
+        ey = energy_map(y, 8)
+        en = F.interpolate((energy_map(yh, 8) - ey).abs().mean(1, keepdim=True), size=own.shape[-2:], mode="nearest")
+        en_id = F.interpolate((energy_map(x[:, :3], 8) - ey).abs().mean(1, keepdim=True), size=own.shape[-2:],
+                              mode="nearest")
+        add("energy_all", torch.ones_like(own, dtype=torch.bool), en, en_id)
+        add("energy_coc_32_up", own >= 32, en, en_id)
     if model is not None:
         model.train()
     total = acc["all"][2]
@@ -204,7 +241,8 @@ def train(args, overfit=False):
 
     model = build(args.arch, args.width, args.film).to(dev).to(memory_format=torch.channels_last)
     print(f"arch {args.arch} | params {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M | film {args.film} | "
-          f"crops/frame {args.crops_per_image} | big-blur crops {args.big_blur_prob} | loss alpha "
+          f"crops/frame {args.crops_per_image} | big-blur crops {args.big_blur_prob} | energy {args.energy} | aux "
+          f"b {args.aux_b} a {args.aux_a} m {args.aux_m} t {args.aux_t} | loss alpha "
           f"{args.alpha} beta {args.beta} gamma {args.gamma} c0 {args.c0} cap {args.cap}", flush=True)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, args.lr, total_steps=args.steps, pct_start=0.05)
@@ -221,11 +259,16 @@ def train(args, overfit=False):
             continue
         x = b["x"].to(dev, non_blocking=True).to(memory_format=torch.channels_last)
         y = b["y"].to(dev, non_blocking=True)
-        w = weights(b["coc"].to(dev, non_blocking=True), args)
+        coc = b["coc"].to(dev, non_blocking=True)
+        w = weights(coc, args)
         with torch.autocast("cuda", torch.bfloat16):
             yh = model(x, b["settings"].to(dev, non_blocking=True)).float()
         err = (yh - y).abs().mean(1, keepdim=True)
         loss = (w * err).sum() / w.sum()
+        if args.energy:
+            loss = loss + args.energy * sum((energy_map(yh, k) - energy_map(y, k)).abs().mean()
+                                            for k in ENERGY_K) / len(ENERGY_K)
+        loss = loss + aux_losses(model, coc, y, args)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -272,6 +315,11 @@ def main():
     ap.add_argument("--alpha", type=float, default=0.0, help="extra weight for large dilated CoC")
     ap.add_argument("--beta", type=float, default=0.0, help="extra weight for in-focus pixels under a nearer blur")
     ap.add_argument("--gamma", type=float, default=0.0, help="extra weight for in-focus edges over a blurred background")
+    ap.add_argument("--energy", type=float, default=0.0, help="weight of the light-energy loss (ENERGY_K boxes)")
+    ap.add_argument("--aux-b", type=float, default=0.0, help="twoarm2: loss on the large-blur arm where blur >= aux-t")
+    ap.add_argument("--aux-a", type=float, default=0.0, help="twoarm2: loss on the U-Net arm where blur < aux-t")
+    ap.add_argument("--aux-m", type=float, default=0.0, help="twoarm2: mask towards a soft step at aux-t")
+    ap.add_argument("--aux-t", type=float, default=24.0, help="twoarm2: blur (px) that splits the two arms")
     ap.add_argument("--film", action="store_true", help="condition every U-Net level on the camera settings")
     ap.add_argument("--c0", type=float, default=8.0, help="CoC (px) at which the alpha term reaches alpha")
     ap.add_argument("--cap", type=float, default=4.0, help="cap on D / c0")
