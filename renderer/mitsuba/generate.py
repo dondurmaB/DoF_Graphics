@@ -7,6 +7,8 @@
   python generate.py release --out DATASET                       # requeue chunks claimed by dead workers
   python generate.py sheet  --out DATASET --per-scene 8          # PNG per scene: sharp | DoF pairs to review
   python generate.py ship   --out DATASET --to HOST:/path        # copy finished poses there, keep only markers
+  python generate.py plan-topup --out TOPUP --from DATASET/_queue/plan.json --name topup1
+                                                                 # one extra realistic lens per existing pose
 
 With `work --ship-to HOST:/path` each worker ships after every chunk, so the render machine only holds the
 chunks in progress (the student-lab cluster renders, CIAI's /nfs-stor stores). A shipped pose keeps its empty
@@ -66,6 +68,23 @@ def make_plan(args) -> dict:
             "sampler_args": args.sampler_args, "created": time.strftime("%Y-%m-%d %H:%M:%S"), "chunks": chunks}
 
 
+def cmd_plan_topup(args) -> int:
+    """A top-up plan: the same chunks and sampler arguments as an existing plan, so every pose is redrawn
+    exactly, plus the top-up name the workers pass to sampler.py (experiment_plan.md D2)."""
+    q = queue_dir(args.out)
+    if (q / "plan.json").exists() and not args.force:
+        print(f"{q / 'plan.json'} exists; --force replaces it")
+        return 1
+    for sub in ("claimed", "done", "failed", "logs"):
+        (q / sub).mkdir(parents=True, exist_ok=True)
+    src = json.loads(Path(args.source).read_text())
+    plan = {**src, "topup": args.name, "topup_of": str(args.source), "created": time.strftime("%Y-%m-%d %H:%M:%S")}
+    (q / "plan.json").write_text(json.dumps(plan, indent=1))
+    print(f"top-up {args.name}: {len(plan['chunks'])} chunks, {sum(c['count'] for c in plan['chunks'])} poses, "
+          f"one new lens each")
+    return 0
+
+
 def cmd_plan(args) -> int:
     q = queue_dir(args.out)
     if (q / "plan.json").exists() and not args.force:
@@ -115,7 +134,8 @@ def ship(out: Path, dest: str) -> int:
             continue
         for env_dir in out.glob(f"{c['scene']}/s*/{c['env']}"):
             for i in range(c["start"], c["start"] + c["count"]):
-                poses += [p for p in env_dir.glob(f"p{i:06d}_*") if (p / ".done").exists() and (p / "sharp.exr").exists()]
+                poses += [p for p in env_dir.glob(f"p{i:06d}_*") if (p / ".done").exists()
+                          and ((p / "sharp.exr").exists() or (p / "topup.json").exists())]
             extra += [m for m in env_dir.glob(f"manifest.{c['id']}.jsonl")]
         extra += [marker] + [p for p in (q / "logs" / f"{c['id']}.log",) if p.exists()]
     if not poses:
@@ -189,7 +209,8 @@ def cmd_work(args) -> int:
         cmd = [sys.executable, "-u", str(HERE / "sampler.py"), "--scene", c["scene"], "--env", c["env"],
                "--start", str(c["start"]), "--count", str(c["count"]),
                "--lenses-per-pose", str(plan["lenses_per_pose"]), "--out", str(args.out),
-               "--manifest-name", f"manifest.{c['id']}.jsonl", *plan["sampler_args"]]
+               "--manifest-name", f"manifest.{c['id']}.jsonl", *plan["sampler_args"],
+               *(["--topup", plan["topup"]] if plan.get("topup") else [])]
         log = q / "logs" / f"{c['id']}.log"
         t0 = time.time()
         print(f"[{time.strftime('%H:%M:%S')}] {c['id']}: {c['count']} poses ...", flush=True)
@@ -289,9 +310,13 @@ def cmd_sheet(args) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("plan", "work", "status", "release", "sheet", "ship"):
+    for name in ("plan", "plan-topup", "work", "status", "release", "sheet", "ship"):
         p = sub.add_parser(name)
         p.add_argument("--out", type=Path, required=True, help="dataset root")
+        if name == "plan-topup":
+            p.add_argument("--from", dest="source", required=True, help="the original dataset's _queue/plan.json")
+            p.add_argument("--name", required=True, help="top-up name, e.g. topup1")
+            p.add_argument("--force", action="store_true")
         if name == "plan":
             p.add_argument("--samples", type=int, required=True, help="(pose, lens) samples in total")
             p.add_argument("--lenses-per-pose", type=int, default=2)
@@ -312,7 +337,7 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     if args.cmd == "plan":
         args.sampler_args = [a for a in args.sampler_args if a != "--"]
-    return {"plan": cmd_plan, "work": cmd_work, "status": cmd_status, "release": cmd_release,
+    return {"plan": cmd_plan, "plan-topup": cmd_plan_topup, "work": cmd_work, "status": cmd_status, "release": cmd_release,
             "sheet": cmd_sheet, "ship": cmd_ship}[args.cmd](args)
 
 

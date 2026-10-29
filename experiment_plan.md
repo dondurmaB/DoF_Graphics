@@ -242,3 +242,20 @@ Diagnostic of E4b (ratio to identity per blur bin; m = mask weight on the large-
 
 Next: the realistic data top-up (D2) is now the main lever for >= 64 px, for training and for a usable test set;
 model-side, a sharper mask at object edges and a finer arm B for highlights; keep the energy loss.
+
+### D2. Realistic top-up `topup1` (started 2026-10-29)
+- Code: `sampler.py --topup` (redraws each existing pose exactly, renders one extra lens), `generate.py plan-topup`,
+  `merge_topup.py` (moves lenses into the dataset, recomputes CoC from the stored depth); loader `--no-topup`.
+  Also fixes the lens-collision bug in the main draw (cafe p000281).
+- Lens policy: 65% wide open (f/1.2-2.8 by what primes reach at the pose's focal length; focus on a named subject
+  or the near part of the scene; stop down if p95 blur would pass 10% of the frame), 35% stopped down (f/8-16,
+  focus a third of the way in). Overrides the scenes' f/1.4-8 range within real-lens limits.
+- Check (old cluster, 3 cafe poses): pose ids, depth (byte-identical) and original lens ids reproduce exactly;
+  about 20 s per lens on an RTX 5000 Ada.
+- Dry run (300 poses, all scenes): wide lenses put 6.6% of pixels at >= 32 px and 1.6% at >= 64 px (originals:
+  1.6% and 0.02%); 7% of wide samples reach 64 px. Stopped-down lenses: p95 blur median 2.2 px. Close focus stays
+  limited by the views (10% under 2 m).
+- Size: 5,000 lenses (one per pose), about 28 GPU-hours; rendering on the old cluster, shipped to CIAI
+  `/nfs-stor/rui.gao/Researches/dof/dof_dataset/topup1`, merged into train10k when done.
+- Evaluation: held-out (validation) poses get their top-up lens too; scored separately as `top_*`, so the original
+  validation set and all earlier numbers stay unchanged. Beibarys's held-out test scenes are not rendered or touched.

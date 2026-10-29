@@ -11,6 +11,11 @@ Per sample index it draws a *pose* (position in camera_box, target in target_box
 roll, focal length), renders the 1-spp G-buffer to accept or reject it, then draws
 `--lenses-per-pose` *lens variants* (focus distance, f-number). Focal length belongs
 to the pose because it changes the field of view; f-number and focus only change blur.
+`--topup NAME` adds one more lens to each existing pose instead (experiment_plan.md D2): the pose is redrawn
+exactly as before (same random streams, so the same pose_id), only the new lens's DoF pass is rendered, and the
+output holds `p<index>_<hash>/{topup.json, lens_<hash>/{dof.exr, coc.npy, metadata.json}, .done}` to be merged
+into the original dataset (merge_topup.py). The sharp image, depth and G-buffer already exist there.
+
 Layout (SCENE_CONTRACT.md section 6):
 
   <out>/<scene>/s<seed>/<env>/p<index>_<hash>/{pose.json, depth.npy, gbuffer.exr, sharp.exr,
@@ -60,6 +65,17 @@ COC_BINS = 8
 FOCUS_NAMED_PROB = 0.5
 FOCUS_VISIBLE_TOL_M = 0.15     # a named point counts as visible if a surface pixel lies this close
 MAX_POSE_TRIES, MAX_LENS_TRIES = 60, 30
+# Top-up lenses (experiment_plan.md D2): realistic setups the main draw leaves out. Scenes allow f/1.4-8 and the main
+# draw aims every sample at visible blur, so wide-open close-focus shots and small-aperture deep-focus shots are
+# rare or missing (E1 audit, 2026-10-29). These override the scene's f-number range, within what real lenses do.
+TOPUP_KINDS = (("wide", 0.65), ("small", 0.35))
+TOPUP_WIDE_N_MAX = 2.8                 # wide open up to f/2.8
+TOPUP_WIDE_FOCUS_Q = (0.02, 0.4)       # focus in the near part of the scene: a subject in front
+TOPUP_WIDE_NAMED_P = 0.7               # ... preferably a named focus point (a subject)
+TOPUP_WIDE_P95_MAX = 0.10              # a photographer stops down before p95 blur passes 10% of the frame (108 px)
+TOPUP_SMALL_N = (8.0, 16.0)            # stopped down: nearly everything sharp
+TOPUP_SMALL_FOCUS_Q = (0.2, 0.6)
+TOPUP_SMALL_NAMED_P = 0.3
 
 
 def rng_for(scene: S.SceneDef, args, index: int, stream: int, attempt: int = 0) -> np.random.Generator:
@@ -181,6 +197,48 @@ def draw_lens(scene: S.SceneDef, rng, pose_lens: R.Lens, depth, pos, focus_point
     return fallback
 
 
+def widest_f_number(focal_mm: float) -> float:
+    """Widest aperture common primes reach at this focal length (24/1.4, 35-85/1.2, 105/1.4, 135/1.8)."""
+    if focal_mm < 30:
+        return 1.4
+    if focal_mm <= 90:
+        return 1.2
+    return 1.4 if focal_mm <= 110 else 1.8
+
+
+def draw_lens_topup(kind: str, rng, pose_lens: R.Lens, depth, pos, focus_points, height_px: int):
+    """One realistic top-up lens: 'wide' (wide open, focused on something near, as for a portrait or a close-up)
+    or 'small' (f/8-16, focused a third of the way in, as for a landscape). Blur is whatever that setup gives."""
+    finite = depth[np.isfinite(depth)]
+    wide = kind == "wide"
+    named_p, q = (TOPUP_WIDE_NAMED_P, TOPUP_WIDE_FOCUS_Q) if wide else (TOPUP_SMALL_NAMED_P, TOPUP_SMALL_FOCUS_Q)
+    focus, source = None, "depth_quantile"
+    if focus_points and rng.random() < named_p:
+        for _ in range(MAX_LENS_TRIES):
+            name = list(focus_points)[int(rng.integers(len(focus_points)))]
+            p = np.asarray(focus_points[name][int(rng.integers(len(focus_points[name])))])
+            z = pose_lens.depth_of(p)
+            if z > MIN_CLEARANCE_M and (np.linalg.norm(pos - p, axis=-1) < FOCUS_VISIBLE_TOL_M).any():
+                focus, source = z, f"point:{name}"
+                break
+    if focus is None:
+        focus = float(np.quantile(finite, rng.uniform(*q)))
+    focal_mm = pose_lens.lens_m * 1000
+    unit = R.Lens(pose_lens.origin, pose_lens.target, focal_mm, S.SENSOR_HEIGHT_MM, 1.0, focus, pose_lens.roll_deg)
+    p95_at_f1 = float(np.percentile(np.abs(unit.coc_map(depth, height_px)), 95)) / height_px
+    if wide:
+        n = math.exp(rng.uniform(math.log(widest_f_number(focal_mm)), math.log(TOPUP_WIDE_N_MAX)))
+        n = max(n, p95_at_f1 / TOPUP_WIDE_P95_MAX)
+    else:
+        n = math.exp(rng.uniform(math.log(TOPUP_SMALL_N[0]), math.log(TOPUP_SMALL_N[1])))
+    return dict(focus=float(focus), f_number=float(n), focus_source=source, achieved_frac=p95_at_f1 / n,
+                stratum=-1, coc_out_of_range=False, topup_kind=kind)
+
+
+def lens_key(spec: dict) -> dict:
+    return {"focus": round(spec["focus"], 4), "n": round(spec["f_number"], 4), "aperture": "disc"}
+
+
 def write_exr(path: Path, rgb: np.ndarray) -> None:
     import mitsuba as mi
 
@@ -207,8 +265,16 @@ def run_sample(index, scene_def, bundle, scene, ctx, args, base: Path, fp: str, 
             continue
         # A pose whose depth range cannot give a blur inside COC_FRAC_RANGE at any allowed f-number (a wide lens
         # facing only distant surfaces) would yield a sample below the floor: draw another pose instead.
-        lenses = [draw_lens(scene_def, rng_for(scene_def, args, index, 2 + j), pose_lens, depth, layers["pos"],
-                            bundle.focus_points, h) for j in range(args.lenses_per_pose)]
+        lenses = []
+        for j in range(args.lenses_per_pose):
+            # two draws of one pose can land on the same focus point with a collapsed blur window and give the
+            # same lens (cafe p000281 in train10k): redraw from a fresh stream until the lens is new
+            for t in range(10):
+                ls = draw_lens(scene_def, rng_for(scene_def, args, index, 2 + j, t), pose_lens, depth, layers["pos"],
+                               bundle.focus_points, h)
+                if lens_key(ls) not in [lens_key(o) for o in lenses]:
+                    break
+            lenses.append(ls)
         if any(ls["coc_out_of_range"] for ls in lenses):
             reasons["blur_unreachable"] += 1
             continue
@@ -223,12 +289,18 @@ def run_sample(index, scene_def, bundle, scene, ctx, args, base: Path, fp: str, 
     pose_id = f"p{index:06d}_{short_hash(pose_key)[:8]}"
     out = {"index": index, "pose_id": pose_id, "reasons": dict(reasons), "lenses": lenses, "pose": pose_key}
     if args.dry_run:
+        if args.topup:                         # the top-up lens this pose would get, without rendering it
+            out["lenses"] = [topup_spec(index, scene_def, bundle, args, pose_lens, depth, layers, lenses, h)[1]]
+            out["original_lenses"] = lenses
         return out
 
     pdir = base / pose_id
     if (pdir / ".done").exists():
         out["skipped"] = True
         return out
+    if args.topup:
+        return run_topup(index, scene_def, bundle, scene, args, pdir, pose_key, pose_lens, depth, layers, lenses,
+                         out, fp, git, variant, mi_version)
     pdir.mkdir(parents=True, exist_ok=True)
     sharp_seed = int(rng_for(scene_def, args, index, 100).integers(0, 10000))
     sharp, sharp_sec = R.render_beauty(scene, pose_lens, w, h, False, args.spp, args.spp_per_pass, sharp_seed,
@@ -285,6 +357,68 @@ def run_sample(index, scene_def, bundle, scene, ctx, args, base: Path, fp: str, 
     return out
 
 
+def topup_spec(index, scene_def, bundle, args, pose_lens, depth, layers, lenses, h):
+    """The top-up lens of a pose: its kind, then a draw that differs from the pose's existing lenses."""
+    u = rng_for(scene_def, args, index, 300).random()
+    kind = next(k for k, c in zip((k for k, _ in TOPUP_KINDS), np.cumsum([p for _, p in TOPUP_KINDS])) if u < c)
+    taken = [lens_key(o) for o in lenses]
+    for t in range(10):
+        spec = draw_lens_topup(kind, rng_for(scene_def, args, index, 301, t), pose_lens, depth, layers["pos"],
+                               bundle.focus_points, h)
+        if lens_key(spec) not in taken:
+            break
+    spec["topup"] = args.topup
+    lens = R.Lens(pose_lens.origin, pose_lens.target, pose_lens.lens_m * 1000, S.SENSOR_HEIGHT_MM, spec["f_number"],
+                  spec["focus"], pose_lens.roll_deg)
+    coc = np.abs(lens.coc_map(depth, h))
+    spec["coc_max_px"] = float(coc.max())
+    spec["frac_ge32"], spec["frac_ge64"] = float((coc >= 32).mean()), float((coc >= 64).mean())
+    return kind, spec, taken
+
+
+def run_topup(index, scene_def, bundle, scene, args, pdir, pose_key, pose_lens, depth, layers, lenses, out, fp, git,
+              variant, mi_version):
+    """Render one extra, realistic lens for an existing pose (see the module docstring)."""
+    w, h = args.width, args.height
+    kind, spec, taken = topup_spec(index, scene_def, bundle, args, pose_lens, depth, layers, lenses, h)
+    out["lenses"] = [spec]
+    pdir.mkdir(parents=True, exist_ok=True)
+    lens = R.Lens(pose_lens.origin, pose_lens.target, pose_lens.lens_m * 1000, S.SENSOR_HEIGHT_MM, spec["f_number"],
+                  spec["focus"], pose_lens.roll_deg, scene_def.far_clip)
+    lens_id = "lens_" + short_hash(lens_key(spec))[:8]
+    ldir = pdir / lens_id
+    ldir.mkdir(exist_ok=True)
+    dof_spp = args.dof_spp or max(args.spp, scene_def.spp_hint)
+    dof_seed = 20000 + int(rng_for(scene_def, args, index, 400).integers(0, 10000))
+    dof, dof_sec = R.render_beauty(scene, lens, w, h, True, dof_spp, args.spp_per_pass, dof_seed, "dof")
+    write_exr(ldir / "dof.exr", dof)
+    np.save(ldir / "coc.npy", lens.coc_map(depth, h))
+    sample_id = short_hash({**pose_key, "focus": round(spec["focus"], 4), "f_number": round(spec["f_number"], 4),
+                            "aperture": "disc"})
+    meta = {"contract_version": S.CONTRACT_VERSION, "sample_id": sample_id, "pose_id": pdir.name, "lens_id": lens_id,
+            "scene": {"id": scene_def.id, "seed": args.scene_seed, "env": args.env, "fingerprint": fp,
+                      "asset_version": scene_def.asset_version, **bundle.meta},
+            "git": git, "variant": variant, "mitsuba": mi_version, "resolution": [w, h],
+            "camera": lens.metadata(w, h), "lens_draw": spec,
+            "coc": {"definition": "signed diameter in px, positive behind the focus plane; sky = at infinity",
+                    "formula": "H f^2 (z - s) / (N z s sensor_h)"},
+            "passes": {"sharp": "see pose.json", "dof": {"spp": dof_spp, "seconds": round(dof_sec, 2), "seed": dof_seed}},
+            "sampler": {"sampler_seed": args.sampler_seed, "index": index, "topup": args.topup}}
+    (ldir / "metadata.json").write_text(json.dumps(meta, indent=2))
+    (pdir / "topup.json").write_text(json.dumps({
+        "topup": args.topup, "pose_id": pdir.name, "pose": pose_key, "kind": kind, "lens_id": lens_id,
+        "original_lenses": ["lens_" + short_hash(k)[:8] for k in taken],
+        "depth_md5": hashlib.md5(np.ascontiguousarray(depth).tobytes()).hexdigest()}, indent=1))
+    (pdir / ".done").write_text("")
+    entry = {"sample_id": sample_id, "path": f"{pdir.name}/{lens_id}", "stratum": -1, "topup": args.topup,
+             "topup_kind": kind, "focal_mm": round(pose_lens.lens_m * 1000, 2), "f_number": round(spec["f_number"], 3),
+             "focus_m": round(spec["focus"], 3), "roll_deg": round(pose_lens.roll_deg, 2),
+             "coc_p95_frac": round(spec["achieved_frac"], 5), "coc_out_of_range": False}
+    with open(pdir.parent / args.manifest_name, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--scene", default="cafe")
@@ -301,6 +435,7 @@ def main(argv=None) -> int:
     ap.add_argument("--variant", default="auto")
     ap.add_argument("--out", default=str(R.REPO / "dataset" / "mitsuba"))
     ap.add_argument("--assets", default=str(HERE / "generated"))
+    ap.add_argument("--topup", default=None, help="name of a top-up: one extra realistic lens per existing pose")
     ap.add_argument("--dry-run", action="store_true", help="draw and check poses and lenses, render no beauty passes")
     ap.add_argument("--manifest-name", default="manifest.jsonl",
                     help="manifest file in the env directory; give each parallel worker its own (manifest.<chunk>.jsonl)")
@@ -342,6 +477,10 @@ def main(argv=None) -> int:
         l0 = r["lenses"][0]
         print(f"[{index}] {r['pose_id']} {tag}: f/{l0['f_number']:.1f} focus {l0['focus']:.2f} m "
               f"({l0['focus_source']}) CoC p95 {l0['achieved_frac'] * args.height:.1f} px", flush=True)
+        if args.topup and args.dry_run:
+            print("TOPUP " + json.dumps({"index": index, "pose_id": r["pose_id"], "focal": r["pose"]["focal"], **l0,
+                                         "orig_p95_px": [o["achieved_frac"] * args.height
+                                                         for o in r["original_lenses"]]}), flush=True)
     print(f"\n{args.count} poses in {time.time() - t0:.1f}s | pose rejections {dict(reasons)} | failed {failed}")
     print(f"CoC strata (achieved p95 bins, low to high): {[strata[i] for i in range(COC_BINS)]} | "
           f"outside the CoC range {missed}/{n_lenses}")

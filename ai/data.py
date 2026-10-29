@@ -48,16 +48,22 @@ class Sample:
         return self.lens_dir.parent
 
 
-def find_samples(root, split: str | None = "train", scenes=None) -> list[Sample]:
-    """Samples under root/<scene>/s<seed>/<env>/ listed in manifest*.jsonl whose pose finished (.done)."""
+def find_samples(root, split: str | None = "train", scenes=None, topups: bool = True) -> list[Sample]:
+    """Samples under root/<scene>/s<seed>/<env>/ listed in manifest*.jsonl whose pose finished (.done).
+    topups=False leaves out lenses merged from top-up renders (manifest.topup*.jsonl, experiment_plan.md D2), for
+    reproducing runs made before them. Top-up samples come after all original ones, so the originals keep their
+    indices (fixed evaluation crops are seeded by index)."""
     root = Path(root)
     allowed = set(scenes) if scenes else None
     if split is not None:
         in_split = set(json.loads(SPLITS.read_text())[split])
         allowed = in_split if allowed is None else allowed & in_split
-    out = []
+    out, extra = [], []
     seen = set()
     for manifest in sorted(root.glob("*/s*/*/manifest*.jsonl")):
+        is_topup = manifest.name.startswith("manifest.topup")
+        if is_topup and not topups:
+            continue
         env_dir = manifest.parent
         scene, env = env_dir.parent.parent.name, env_dir.name
         if allowed is not None and scene not in allowed:
@@ -71,8 +77,8 @@ def find_samples(root, split: str | None = "train", scenes=None) -> list[Sample]
                 continue
             seen.add(lens_dir)
             if (lens_dir.parent / ".done").exists() and (lens_dir / "dof.exr").exists():
-                out.append(Sample(lens_dir, scene, env, entry))
-    return out
+                (extra if is_topup else out).append(Sample(lens_dir, scene, env, entry))
+    return out + extra
 
 
 def read_exr(path) -> np.ndarray:
@@ -233,7 +239,7 @@ def hard_crop_at(coc: np.ndarray, crop: int, min_coc: float, step: int = 8):
 
 
 def DofDataset(root, split="train", crop=CROP, augment=True, seed=0, scenes=None, coc_margin=None,
-               deterministic=False, hard_coc=None, crops_per_image=1, big_blur_prob=0.0):
+               deterministic=False, hard_coc=None, crops_per_image=1, big_blur_prob=0.0, topups=True):
     """PyTorch Dataset over find_samples(); each worker gets its own random stream.
 
     deterministic=True ties each sample's crop to (seed, index) only, so every run and epoch sees the same
@@ -246,7 +252,7 @@ def DofDataset(root, split="train", crop=CROP, augment=True, seed=0, scenes=None
 
     class _Dof(Dataset):
         def __init__(self):
-            self.samples = find_samples(root, split, scenes)
+            self.samples = find_samples(root, split, scenes, topups)
             self.seed = seed
 
         def __len__(self):

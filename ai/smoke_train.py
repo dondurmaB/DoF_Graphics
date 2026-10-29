@@ -112,19 +112,23 @@ def aux_losses(model, coc, y, args):
 
 
 def datasets(args):
+    top = not getattr(args, "no_topup", False)
     full = D.DofDataset(args.root, split="train", crop=args.crop, seed=args.seed, coc_margin=MARGIN,
                         crops_per_image=getattr(args, "crops_per_image", 1),
-                        big_blur_prob=getattr(args, "big_blur_prob", 0.0))
+                        big_blur_prob=getattr(args, "big_blur_prob", 0.0), topups=top)
     evalset = D.DofDataset(args.root, split="train", crop=args.crop, seed=12345, coc_margin=MARGIN,
-                           augment=False, deterministic=True)
+                           augment=False, deterministic=True, topups=top)
     hardset = D.DofDataset(args.root, split="train", crop=args.crop, seed=12345, coc_margin=MARGIN,
-                           augment=False, deterministic=True, hard_coc=HARD_COC)
+                           augment=False, deterministic=True, hard_coc=HARD_COC, topups=top)
     drop = set(Path(args.exclude).read_text().split()) if args.exclude else set()
     keep = [i for i, s in enumerate(full.samples) if str(s.lens_dir) not in drop]
     tr = [i for i in keep if not held_out(full.samples[i])]
-    va = [i for i in keep if held_out(full.samples[i])]
-    print(f"samples {len(full.samples)}, excluded {len(full.samples) - len(keep)}, train {len(tr)}, held-out {len(va)}",
-          flush=True)
+    va = [i for i in keep if held_out(full.samples[i]) and not full.samples[i].entry.get("topup")]
+    # held-out top-up lenses (experiment_plan.md D2) are scored separately ("top_" keys), so the regular and hard
+    # sets stay exactly the ones every earlier run was scored on
+    args.va_topup = [i for i in keep if held_out(full.samples[i]) and full.samples[i].entry.get("topup")]
+    print(f"samples {len(full.samples)}, excluded {len(full.samples) - len(keep)}, train {len(tr)}, held-out {len(va)}"
+          f" + {len(args.va_topup)} top-up", flush=True)
     hard = [i for i in va if D.hard_crop_at(np.load(full.samples[i].lens_dir / "coc.npy"), args.crop, HARD_COC)[2]
             >= HARD_MIN_PX]
     print(f"hard held-out crops (>= {HARD_MIN_PX} px with CoC >= {HARD_COC:.0f}): {len(hard)} of {len(va)}", flush=True)
@@ -222,6 +226,7 @@ def train(args, overfit=False):
         dl_tr = loader(full, tr, args, True, batch=max(1, args.batch // k))
         dl_va = loader(evalset, va, args, False)
         dl_hard = loader(hardset, hard, args, False) if hard else None
+        dl_top = loader(evalset, args.va_topup, args, False) if args.va_topup else None
         mix = np.random.default_rng(args.seed + 1)
 
         def batches():
@@ -285,6 +290,8 @@ def train(args, overfit=False):
             ev = evaluate(model, dl_va, dev)
             if dl_hard is not None:       # separate fixed crops full of blur >= 32 px; keys prefixed "hard_"
                 ev.update({"hard_" + k: v for k, v in evaluate(model, dl_hard, dev).items()})
+            if dl_top is not None:        # held-out top-up lenses (wide open / stopped down), random fixed crops
+                ev.update({"top_" + k: v for k, v in evaluate(model, dl_top, dev).items()})
             print(f"EVAL step {step}", flush=True)
             for k, v in ev.items():
                 print(f"  {k:18s} frac {v['frac']:.4f}  l1 {v['l1']:.5f}  identity {v['identity']:.5f}  "
@@ -311,6 +318,7 @@ def main():
     ap.add_argument("--crops-per-image", type=int, default=1, help="crops cut from each decoded frame")
     ap.add_argument("--big-blur-prob", type=float, default=0.0,
                     help="share of training crops centred on large blur (data.load_examples)")
+    ap.add_argument("--no-topup", action="store_true", help="leave out top-up lenses (runs before 2026-10-29)")
     ap.add_argument("--mix", type=int, default=64, help="pool of crops each batch is drawn from (crops-per-image > 1)")
     ap.add_argument("--alpha", type=float, default=0.0, help="extra weight for large dilated CoC")
     ap.add_argument("--beta", type=float, default=0.0, help="extra weight for in-focus pixels under a nearer blur")
