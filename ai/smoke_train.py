@@ -93,21 +93,31 @@ def energy_map(t, k):
 
 
 def aux_losses(model, coc, y, args):
-    """Per-arm losses for twoarm2 (experiment_plan.md M1), label-side only: arm B on pixels whose blur reaches
-    aux_t px, arm A on the rest, and the mask towards a soft step at aux_t."""
+    """Per-arm losses for twoarm2 / pyramid (experiment_plan.md M1), label-side only. Arm B (or each pyramid
+    level) on pixels whose blur it should handle; arm A on the rest; the blur share m towards a soft step at aux_t
+    (slope aux_m_s px); and m pushed to 0 on sharp pixels that nothing in front blurs over (in_focus and bg_edge,
+    bg_edge weighted 1 + gamma like the main loss), where any blur arm leaks a halo."""
     aux = getattr(model, "aux", None)
-    if aux is None or not (args.aux_b or args.aux_a or args.aux_m):
+    if aux is None or not (args.aux_b or args.aux_a or args.aux_m or args.aux_m_halo):
         return 0.0
-    blur = regions(coc)["blur"]
+    g = regions(coc)
+    blur = g["blur"]
     big = (blur >= args.aux_t).float()
     out = 0.0
-    if args.aux_b:
+    if args.aux_b and "B_levels" in aux:      # each level where blur is at least 4x its pixel size
+        for b, sc in zip(aux["B_levels"], aux["scales"]):
+            msk = (blur >= 4 * sc).float()
+            out = out + args.aux_b / len(aux["scales"]) * ((b - y).abs().mean(1, keepdim=True) * msk).sum() / (msk.sum() + 1)
+    elif args.aux_b:
         out = out + args.aux_b * ((aux["B"] - y).abs().mean(1, keepdim=True) * big).sum() / (big.sum() + 1)
     if args.aux_a:
         out = out + args.aux_a * ((aux["A"] - y).abs().mean(1, keepdim=True) * (1 - big)).sum() / ((1 - big).sum() + 1)
     if args.aux_m:
-        tm = torch.sigmoid((blur - args.aux_t) / 4.0)
+        tm = torch.sigmoid((blur - args.aux_t) / args.aux_m_s)
         out = out + args.aux_m * F.binary_cross_entropy(aux["m"].clamp(1e-4, 1 - 1e-4), tm)
+    if args.aux_m_halo:
+        wgt = (g["in_focus"] | g["bg_edge"]).float() * (1 + args.gamma * g["bg_edge"].float())
+        out = out + args.aux_m_halo * (aux["m"] * wgt).sum() / (wgt.sum() + 1)
     return out
 
 
@@ -247,7 +257,7 @@ def train(args, overfit=False):
     model = build(args.arch, args.width, args.film).to(dev).to(memory_format=torch.channels_last)
     print(f"arch {args.arch} | params {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M | film {args.film} | "
           f"crops/frame {args.crops_per_image} | big-blur crops {args.big_blur_prob} | energy {args.energy} | aux "
-          f"b {args.aux_b} a {args.aux_a} m {args.aux_m} t {args.aux_t} | loss alpha "
+          f"b {args.aux_b} a {args.aux_a} m {args.aux_m} t {args.aux_t} s {args.aux_m_s} halo {args.aux_m_halo} | loss alpha "
           f"{args.alpha} beta {args.beta} gamma {args.gamma} c0 {args.c0} cap {args.cap}", flush=True)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, args.lr, total_steps=args.steps, pct_start=0.05)
@@ -328,6 +338,9 @@ def main():
     ap.add_argument("--aux-a", type=float, default=0.0, help="twoarm2: loss on the U-Net arm where blur < aux-t")
     ap.add_argument("--aux-m", type=float, default=0.0, help="twoarm2: mask towards a soft step at aux-t")
     ap.add_argument("--aux-t", type=float, default=24.0, help="twoarm2: blur (px) that splits the two arms")
+    ap.add_argument("--aux-m-s", type=float, default=4.0, help="slope (px) of the mask target's soft step")
+    ap.add_argument("--aux-m-halo", type=float, default=0.0,
+                    help="weight of the penalty on blur-arm share at sharp pixels (bg_edge weighted 1 + gamma)")
     ap.add_argument("--film", action="store_true", help="condition every U-Net level on the camera settings")
     ap.add_argument("--c0", type=float, default=8.0, help="CoC (px) at which the alpha term reaches alpha")
     ap.add_argument("--cap", type=float, default=4.0, help="cap on D / c0")

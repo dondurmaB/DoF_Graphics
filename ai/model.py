@@ -170,13 +170,14 @@ class TwoArmLinear(nn.Module):
     elementwise or resampling steps, no gather. At the start m is about 0.02 and A is the identity.
     After each forward pass `self.aux` holds A, B (model space, full resolution) and m for the per-arm losses."""
 
-    def __init__(self, cin=10, width=16, ctx_width=48, ctx_dilations=(1, 2, 4, 8, 2, 1), pyramid=(8, 16, 32),
+    def __init__(self, cin=10, width=16, ctx_width=48, ctx_dilations=(1, 2, 4, 8, 2, 1), pyramid=None, scale=4,
                  film=False, n_settings=6):
         super().__init__()
         self.arm1 = UNet(cin, 3, width, film=film, n_settings=n_settings, extra=1)
         with torch.no_grad():
             self.arm1.out.bias[3] = -4.0
-        self.pyramid = pyramid
+        self.scale = scale                      # arm B's resolution: 1/scale (4 in E4a/b; 2 for finer bokeh)
+        self.pyramid = pyramid or (2 * scale, 4 * scale, 8 * scale)
         self.stem = block(3 * (1 + len(pyramid)) + 1 + n_settings, ctx_width)
         self.ctx = nn.ModuleList(ResBlock(ctx_width, d) for d in ctx_dilations)
         self.head = nn.Conv2d(ctx_width, 3, 1)
@@ -191,13 +192,13 @@ class TwoArmLinear(nn.Module):
         a = self.arm1(x, s)
         A, m = a[:, :3], torch.sigmoid(a[:, 3:4].float())
         lin = torch.expm1(x[:, :3].float()).clamp(min=0)
-        base = F.avg_pool2d(lin, 4, ceil_mode=True)
+        base = F.avg_pool2d(lin, self.scale, ceil_mode=True)
         size4 = base.shape[-2:]
         feats = [torch.log1p(base)]
         for k in self.pyramid:
             p = F.avg_pool2d(lin, k, ceil_mode=True)
             feats.append(torch.log1p(F.interpolate(p, size=size4, mode="bilinear", align_corners=False)))
-        feats.append(F.avg_pool2d(x[:, 3:4].float(), 4, ceil_mode=True))
+        feats.append(F.avg_pool2d(x[:, 3:4].float(), self.scale, ceil_mode=True))
         feats.append(s.float()[:, :, None, None].expand(-1, -1, *size4))
         mods = film_mods(self.film, self.film_chans, s)
         h = mods[0](self.stem(torch.cat(feats, 1)))
@@ -211,7 +212,72 @@ class TwoArmLinear(nn.Module):
         return y
 
 
-ARCHS = ("unet", "unet_noskip", "plain", "dilated", "twoarm", "twoarm2")
+class BlurLevel(nn.Module):
+    """One blur level of BlurPyramid: predicts the blurred image at 1/scale resolution from the sharp image
+    box-averaged in linear radiance at that scale and three coarser ones, plus depth and settings; dilated blocks
+    refine it (residual on the 1/scale average, zero-initialised)."""
+
+    def __init__(self, scale, width, dilations, film, n_settings):
+        super().__init__()
+        self.scale, self.coarser = scale, (2 * scale, 4 * scale, 8 * scale)
+        self.stem = block(3 * 4 + 1 + n_settings, width)
+        self.blocks = nn.ModuleList(ResBlock(width, d) for d in dilations)
+        self.head = nn.Conv2d(width, 3, 1)
+        nn.init.zeros_(self.head.weight)
+        nn.init.zeros_(self.head.bias)
+        self.film_chans = [width] * (1 + len(dilations))
+        self.film = film_net(n_settings, self.film_chans) if film else None
+
+    def forward(self, lin, inv_depth, s, size):
+        base = F.avg_pool2d(lin, self.scale, ceil_mode=True)
+        sz = base.shape[-2:]
+        feats = [torch.log1p(base)]
+        for k in self.coarser:
+            p = F.avg_pool2d(lin, k, ceil_mode=True)
+            feats.append(torch.log1p(F.interpolate(p, size=sz, mode="bilinear", align_corners=False)))
+        feats += [F.avg_pool2d(inv_depth, self.scale, ceil_mode=True), s[:, :, None, None].expand(-1, -1, *sz)]
+        mods = film_mods(self.film, self.film_chans, s)
+        h = mods[0](self.stem(torch.cat(feats, 1)))
+        for blk, mo in zip(self.blocks, mods[1:]):
+            h = mo(blk(h))
+        b = torch.log1p(base) + self.head(h).float()
+        return F.interpolate(torch.expm1(b).clamp(min=0), size=size, mode="bilinear", align_corners=False)
+
+
+class BlurPyramid(nn.Module):
+    """experiment_plan.md M1, multi-scale version (E4e/f). A U-Net at full resolution predicts the fine image A and
+    per-pixel weights over 1 + L sources: A itself and L blurred images from BlurLevels at 1/2, 1/4, 1/8
+    resolution. Medium blur (16-32 px) can come from 1/2 resolution, where a bokeh disc keeps its rim, and the
+    largest from 1/4 or 1/8, cheaply. Everything is mixed as light: y = log(1 + sum_l w_l * lin_l). At the start
+    the weights favour A (about 0.95) and A is the identity. `self.aux` holds A, the B images, their scales,
+    the weights and m = 1 - w_A (the share given to the blur levels)."""
+
+    def __init__(self, cin=10, width=24, scales=(2, 4, 8), level_width=32, level_dilations=(1, 2, 4, 2),
+                 film=False, n_settings=6):
+        super().__init__()
+        self.scales = scales
+        self.arm1 = UNet(cin, 3, width, film=film, n_settings=n_settings, extra=1 + len(scales))
+        with torch.no_grad():
+            self.arm1.out.bias[3] = 4.0          # softmax favours A at the start
+        self.levels = nn.ModuleList(BlurLevel(sc, level_width, level_dilations, film, n_settings) for sc in scales)
+        self.aux = None
+
+    def forward(self, x, settings=None):
+        s = (settings if settings is not None else x[:, 4:, 0, 0]).float()
+        a = self.arm1(x, s)
+        A, w = a[:, :3].float(), torch.softmax(a[:, 3:].float(), 1)
+        lin = torch.expm1(x[:, :3].float()).clamp(min=0)
+        inv_depth = x[:, 3:4].float()
+        bs = [lvl(lin, inv_depth, s, x.shape[-2:]) for lvl in self.levels]
+        mix = w[:, :1] * torch.expm1(A).clamp(min=0)
+        for i, b in enumerate(bs):
+            mix = mix + w[:, i + 1:i + 2] * b
+        self.aux = {"A": A, "B_levels": [torch.log1p(b) for b in bs], "scales": self.scales, "w": w,
+                    "m": 1 - w[:, :1]}
+        return torch.log1p(mix)
+
+
+ARCHS = ("unet", "unet_noskip", "plain", "dilated", "twoarm", "twoarm2", "twoarm2_half", "pyramid")
 
 
 def build(arch="unet", width=None, film=False):
@@ -226,4 +292,8 @@ def build(arch="unet", width=None, film=False):
         return TwoArm(width=width or 32, film=film)
     if arch == "twoarm2":
         return TwoArmLinear(width=width or 16, film=film)
+    if arch == "twoarm2_half":                  # arm B at 1/2 resolution, narrower to keep the cost down
+        return TwoArmLinear(width=width or 16, ctx_width=32, scale=2, film=film)
+    if arch == "pyramid":
+        return BlurPyramid(width=width or 24, film=film)
     raise ValueError(f"unknown arch {arch!r}; one of {ARCHS}")
