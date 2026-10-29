@@ -202,3 +202,43 @@ U-Net w24, FiLM, gamma 20, `--big-blur-prob 0.25`, otherwise as w24 (350202):
 
 Small gains on large blur (2-4%), nothing lost elsewhere; within one-seed noise. More practice alone does not fix
 large blur, as E0 suggested (the error is light spreading, not rarity). Kept on for later runs (cheap).
+
+### E3 / E4. Light-energy loss and two-arm v2 (2026-10-29, jobs 352592-352594; diagnostic 352766)
+All with FiLM, gamma 20, big-blur crops 0.25. New metrics: `highlight_blur16` (brightest 1% of target pixels per
+crop with blur >= 16 px, where bokeh shows) and `energy_*` (light box-averaged over 8 px in linear radiance:
+too dark or too bright over an area). Older runs and the classic method re-scored (`ai/reeval.py`, job 352767).
+
+| | ms | all | fg_spill | bg_edge | CoC 16-64 | highlight | energy | hard all | hard >= 64 | hard energy >= 32 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| classic | 58 | 0.603 | 1.000 | 1.000 | 0.406 | **0.464** | 0.647 | 0.479 | **0.312** | **0.332** |
+| run K (w32, 1 crop/frame) | 130 | **0.549** | **0.534** | 1.032 | 0.366 | 0.664 | 0.635 | **0.444** | 0.526 | 0.392 |
+| w24 | 96 | 0.593 | 0.610 | 1.077 | 0.418 | 0.639 | 0.669 | 0.495 | 0.599 | 0.452 |
+| w24 + big-blur crops (E2) | 96 | 0.597 | 0.615 | 1.049 | 0.411 | 0.669 | 0.668 | 0.485 | 0.585 | 0.429 |
+| E3: + energy loss (weight 1) | 96 | 0.595 | 0.593 | 1.070 | 0.412 | 0.597 | 0.635 | 0.480 | 0.542 | 0.413 |
+| E4a: two-arm v2, arm 1 w16 | 82 | 0.635 | 0.650 | 1.745 | 0.380 | 0.702 | 0.684 | 0.504 | 0.674 | 0.507 |
+| E4b: two-arm v2, arm 1 w24 | 116 | 0.584 | 0.555 | 1.102 | **0.369** | 0.769 | 0.638 | 0.483 | 0.665 | 0.489 |
+
+Diagnostic of E4b (ratio to identity per blur bin; m = mask weight on the large-blur arm B):
+
+| bin | output | arm A alone | arm B alone | m | B closer |
+|---|---|---|---|---|---|
+| in focus | 0.874 | 0.877 | 4.28 | 0.01 | 21% |
+| 4-16 px | 0.436 | 0.458 | 1.49 | 0.02 | 32% |
+| 16-32 px | 0.315 | 0.459 | 0.345 | 0.54 | 66% |
+| 32-64 px | 0.473 | 0.695 | 0.521 | 0.92 | 76% |
+| >= 64 px (hard crops) | 0.665 | 0.797 | 0.665 | 1.00 | 71% |
+| in focus (hard crops) | 0.865 | 0.850 | 3.12 | 0.16 | 15% |
+
+1. The energy loss is the first change that moves the largest blur (0.585 -> 0.542) and bokeh highlights
+   (0.669 -> 0.597) without cost elsewhere. Keep it.
+2. Two-arm v2: the mask routes correctly and arm B cuts the error by about a third at 16-64 px, which gives the
+   best width-24 overall score (0.584). At >= 64 px arm B itself is the limit (0.665 with all the weight): the
+   training data has almost no such pixels (0.02%, E1), and the evaluation has only 90k of them (a few frames).
+3. Halo: in the hard crops the mask leaks 16% of arm B onto in-focus pixels (bg_edge 1.10; 1.75 with a w16
+   arm 1). Arm B at 1/4 resolution also smears small bright bokeh discs (highlight 0.77).
+4. The classic method is far ahead on bokeh highlights (0.464) and light energy in large blur (0.332): it spreads
+   light linearly over an exact disc. No model is within reach there yet.
+5. Two-arm v2 costs 82 / 116 ms (w16 / w24), against 58 ms for the classic method (unoptimised).
+
+Next: the realistic data top-up (D2) is now the main lever for >= 64 px, for training and for a usable test set;
+model-side, a sharper mask at object edges and a finer arm B for highlights; keep the energy loss.
