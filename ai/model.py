@@ -178,7 +178,7 @@ class TwoArmLinear(nn.Module):
             self.arm1.out.bias[3] = -4.0
         self.scale = scale                      # arm B's resolution: 1/scale (4 in E4a/b; 2 for finer bokeh)
         self.pyramid = pyramid or (2 * scale, 4 * scale, 8 * scale)
-        self.stem = block(3 * (1 + len(pyramid)) + 1 + n_settings, ctx_width)
+        self.stem = block(3 * (1 + len(self.pyramid)) + 1 + n_settings, ctx_width)
         self.ctx = nn.ModuleList(ResBlock(ctx_width, d) for d in ctx_dilations)
         self.head = nn.Conv2d(ctx_width, 3, 1)
         nn.init.zeros_(self.head.weight)
