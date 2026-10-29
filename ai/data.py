@@ -30,6 +30,9 @@ HFLIP_PROB = 0.5
 ROT90_PROB = 0.1           # sideways pictures break gravity and sun cues (SCENE_CONTRACT.md section 7)
 VFLIP_PROB = 0.1
 MIN_DEPTH_M = 0.05
+BIG_BLUR_RANGE = (16.0, 64.0)   # big-blur crops: threshold drawn log-uniformly in this range (px)
+BIG_BLUR_MIN_PX = 2000          # ... and used only if the frame has at least this many pixels above it
+BIG_BLUR_JITTER = 64            # px of random shift around the window with the most big blur
 SETTINGS = ("log_focal_50mm", "log_fnumber_4", "log_aperture_10mm", "inv_focus_m", "sensor_24mm", "frame_1080px")
 
 
@@ -140,10 +143,15 @@ def load_example(sample: Sample, crop: int | None = CROP, rng: np.random.Generat
 
 def load_examples(sample: Sample, crop: int | None = CROP, rng: np.random.Generator | None = None,
                   augment: bool = True, validate: bool = False, coc_margin: int | None = None,
-                  crop_at: tuple[int, int] | None = None, n_crops: int = 1) -> list[dict]:
+                  crop_at: tuple[int, int] | None = None, n_crops: int = 1,
+                  big_blur_prob: float = 0.0) -> list[dict]:
     """n_crops independent crops (each with its own position and flips) from one decode of the frame, as
     load_example. Decoding the two EXRs is most of the cost, so this multiplies loader throughput. With
-    n_crops=1 it draws exactly what load_example always drew."""
+    n_crops=1 and big_blur_prob=0 it draws exactly what load_example always drew.
+
+    big_blur_prob=p: each random crop is, with probability p, placed on the window with the most pixels of
+    |CoC| >= T (T log-uniform in BIG_BLUR_RANGE), shifted by up to BIG_BLUR_JITTER px; frames without enough such
+    pixels keep a random crop. The CoC only chooses where to crop; it is not an input (DATA_PROTOCOL.md v1.1)."""
     rng = rng or np.random.default_rng()
     meta = json.loads((sample.lens_dir / "metadata.json").read_text())
     scale = float(sample.entry.get("auto_exposure_scale")
@@ -163,16 +171,26 @@ def load_examples(sample: Sample, crop: int | None = CROP, rng: np.random.Genera
     coc_full = None
     if coc_margin is not None:
         coc_full = np.pad(np.load(sample.lens_dir / "coc.npy").astype(np.float32), coc_margin)
+    coc_raw = None
+    if big_blur_prob > 0 and crop is not None and crop_at is None:
+        coc_raw = np.load(sample.lens_dir / "coc.npy").astype(np.float32)
     settings = settings_vector(meta)
     cam = meta["camera"]
     outs = []
     for _ in range(n_crops):
-        planes, coc, y0, x0 = full, coc_full, 0, 0
+        planes, coc, y0, x0, big = full, coc_full, 0, 0, False
         if crop is not None:
             if h < crop or w < crop:
                 raise ValueError(f"{sample.lens_dir}: {w}x{h} is smaller than the {crop} crop")
-            y0, x0 = crop_at if crop_at is not None else (int(rng.integers(0, h - crop + 1)),
-                                                           int(rng.integers(0, w - crop + 1)))
+            at = crop_at
+            if coc_raw is not None and rng.random() < big_blur_prob:
+                t = float(np.exp(rng.uniform(np.log(BIG_BLUR_RANGE[0]), np.log(BIG_BLUR_RANGE[1]))))
+                by, bx, n = hard_crop_at(coc_raw, crop, t)
+                jy, jx = rng.integers(-BIG_BLUR_JITTER, BIG_BLUR_JITTER + 1, size=2)
+                if n >= BIG_BLUR_MIN_PX:
+                    at, big = (int(np.clip(by + jy, 0, h - crop)), int(np.clip(bx + jx, 0, w - crop))), True
+            y0, x0 = at if at is not None else (int(rng.integers(0, h - crop + 1)),
+                                                 int(rng.integers(0, w - crop + 1)))
             planes = planes[y0:y0 + crop, x0:x0 + crop]
             if coc is not None:
                 coc = coc[y0:y0 + crop + 2 * coc_margin, x0:x0 + crop + 2 * coc_margin]
@@ -194,7 +212,8 @@ def load_examples(sample: Sample, crop: int | None = CROP, rng: np.random.Genera
                 "focal_mm": cam["focal_length_mm"], "f_number": cam["f_number"],
                 "aperture_mm": cam["focal_length_mm"] / cam["f_number"], "focus_m": cam["focus_distance_m"],
                 "sensor_mm": cam["sensor_height_mm"], "frame_px": meta["resolution"][1],
-                "auto_exposure_scale": scale, "augment": ops, "crop_yx": (y0, x0), "lens_dir": str(sample.lens_dir)}
+                "auto_exposure_scale": scale, "augment": ops, "crop_yx": (y0, x0), "big_blur_crop": big,
+                "lens_dir": str(sample.lens_dir)}
         out = {"x": x.astype(np.float32), "y": planes[4:7].copy(), "settings": settings, "meta": info}
         if coc is not None:
             out["coc"] = np.ascontiguousarray(coc)
@@ -214,14 +233,14 @@ def hard_crop_at(coc: np.ndarray, crop: int, min_coc: float, step: int = 8):
 
 
 def DofDataset(root, split="train", crop=CROP, augment=True, seed=0, scenes=None, coc_margin=None,
-               deterministic=False, hard_coc=None, crops_per_image=1):
+               deterministic=False, hard_coc=None, crops_per_image=1, big_blur_prob=0.0):
     """PyTorch Dataset over find_samples(); each worker gets its own random stream.
 
     deterministic=True ties each sample's crop to (seed, index) only, so every run and epoch sees the same
     pixels (held-out evaluation). coc_margin adds the `coc` field (see load_example). hard_coc=T centres every
     crop on the window with the most pixels of |CoC| >= T px (the blurs a random crop rarely contains).
     crops_per_image=K > 1 cuts K crops from each decoded frame; every tensor then has a leading K dimension
-    and `meta` is a list (the training loop flattens and mixes them)."""
+    and `meta` is a list (the training loop flattens and mixes them). big_blur_prob: see load_examples."""
     import torch
     from torch.utils.data import Dataset
 
@@ -243,7 +262,7 @@ def DofDataset(root, split="train", crop=CROP, augment=True, seed=0, scenes=None
             if hard_coc is not None:
                 at = hard_crop_at(np.load(self.samples[i].lens_dir / "coc.npy"), crop, hard_coc)[:2]
             exs = load_examples(self.samples[i], crop, rng, augment, coc_margin=coc_margin, crop_at=at,
-                                n_crops=crops_per_image)
+                                n_crops=crops_per_image, big_blur_prob=big_blur_prob)
             keys = ["x", "y", "settings"] + (["coc"] if "coc" in exs[0] else [])
             if crops_per_image == 1:
                 return {**{k: torch.from_numpy(exs[0][k]) for k in keys}, "meta": exs[0]["meta"]}

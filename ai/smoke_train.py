@@ -87,7 +87,8 @@ def weights(coc, args):
 
 def datasets(args):
     full = D.DofDataset(args.root, split="train", crop=args.crop, seed=args.seed, coc_margin=MARGIN,
-                        crops_per_image=getattr(args, "crops_per_image", 1))
+                        crops_per_image=getattr(args, "crops_per_image", 1),
+                        big_blur_prob=getattr(args, "big_blur_prob", 0.0))
     evalset = D.DofDataset(args.root, split="train", crop=args.crop, seed=12345, coc_margin=MARGIN,
                            augment=False, deterministic=True)
     hardset = D.DofDataset(args.root, split="train", crop=args.crop, seed=12345, coc_margin=MARGIN,
@@ -203,7 +204,7 @@ def train(args, overfit=False):
 
     model = build(args.arch, args.width, args.film).to(dev).to(memory_format=torch.channels_last)
     print(f"arch {args.arch} | params {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M | film {args.film} | "
-          f"crops/frame {args.crops_per_image} | loss alpha "
+          f"crops/frame {args.crops_per_image} | big-blur crops {args.big_blur_prob} | loss alpha "
           f"{args.alpha} beta {args.beta} gamma {args.gamma} c0 {args.c0} cap {args.cap}", flush=True)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, args.lr, total_steps=args.steps, pct_start=0.05)
@@ -265,6 +266,8 @@ def main():
     ap.add_argument("--arch", choices=ARCHS, default="unet")
     ap.add_argument("--width", type=int, default=None, help="base channels; default per arch (model.build)")
     ap.add_argument("--crops-per-image", type=int, default=1, help="crops cut from each decoded frame")
+    ap.add_argument("--big-blur-prob", type=float, default=0.0,
+                    help="share of training crops centred on large blur (data.load_examples)")
     ap.add_argument("--mix", type=int, default=64, help="pool of crops each batch is drawn from (crops-per-image > 1)")
     ap.add_argument("--alpha", type=float, default=0.0, help="extra weight for large dilated CoC")
     ap.add_argument("--beta", type=float, default=0.0, help="extra weight for in-focus pixels under a nearer blur")
