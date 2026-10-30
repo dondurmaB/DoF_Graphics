@@ -279,11 +279,11 @@ def train(args, overfit=False):
         with torch.autocast("cuda", torch.bfloat16):
             yh = model(x, b["settings"].to(dev, non_blocking=True)).float()
         err = (yh - y).abs().mean(1, keepdim=True)
-        loss = (w * err).sum() / w.sum()
-        if args.energy:
-            loss = loss + args.energy * sum((energy_map(yh, k) - energy_map(y, k)).abs().mean()
-                                            for k in ENERGY_K) / len(ENERGY_K)
-        loss = loss + aux_losses(model, coc, y, args)
+        main = (w * err).sum() / w.sum()
+        en = (args.energy * sum((energy_map(yh, k) - energy_map(y, k)).abs().mean() for k in ENERGY_K)
+              / len(ENERGY_K)) if args.energy else 0.0
+        aux = aux_losses(model, coc, y, args)
+        loss = main + en + aux
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -291,7 +291,8 @@ def train(args, overfit=False):
         sched.step()
         step += 1
         if step % args.log_every == 0 or step == 1:
-            rec = {"step": step, "loss": loss.item(), "l1": err.mean().item(), "lr": sched.get_last_lr()[0],
+            rec = {"step": step, "loss": loss.item(), "l1": err.mean().item(), "main": main.item(),
+                   "energy": float(en), "aux": float(aux), "lr": sched.get_last_lr()[0],
                    "s_per_step": (time.time() - t0) / step,
                    "mem_gb": torch.cuda.max_memory_allocated() / 2 ** 30}
             print(json.dumps(rec), flush=True)
