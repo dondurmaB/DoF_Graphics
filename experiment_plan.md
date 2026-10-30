@@ -259,3 +259,24 @@ model-side, a sharper mask at object edges and a finer arm B for highlights; kee
   `/nfs-stor/rui.gao/Researches/dof/dof_dataset/topup1`, merged into train10k when done.
 - Evaluation: held-out (validation) poses get their top-up lens too; scored separately as `top_*`, so the original
   validation set and all earlier numbers stay unchanged. Beibarys's held-out test scenes are not rendered or touched.
+
+### E4c-f. Mask fix and finer blur arms (2026-10-30, jobs 352979, 352986) — confounded, rerun as E5
+Mask fix = `--aux-m 0.5 --aux-m-s 2 --aux-m-halo 1`; all with energy loss, big-blur crops, FiLM, gamma 20.
+
+| | all | in_focus | fg_spill | bg_edge | CoC 16-64 | highlight | hard >= 64 |
+|---|---|---|---|---|---|---|---|
+| E4b two-arm w24 (aux-m 0.1) | **0.584** | **0.895** | **0.555** | **1.102** | **0.369** | 0.769 | 0.665 |
+| E4c two-arm w24 + mask fix | 0.679 | 0.973 | 0.710 | 1.908 | 0.428 | 0.890 | 0.676 |
+| E4d two-arm, arm B at 1/2 + mask fix | 0.660 | 0.949 | 0.698 | 1.399 | 0.450 | 0.868 | 0.671 |
+| E4e pyramid w24 + mask fix | 0.645 | 0.973 | 0.579 | 1.101 | 0.371 | 0.772 | **0.661** |
+| E4f pyramid w16 + mask fix | 0.750 | 0.994 | 0.629 | 1.152 | 0.388 | **0.744** | 0.672 |
+
+Everything got worse, halos included. Cause: loss scale. The mask terms (BCE to a soft target, ~0.1-0.7) dwarf the
+image L1 (~0.01): at the end of training the extra terms were about 90% of the pyramid's loss (0.188 total vs
+0.016 L1) and about 60% for the two-arm runs, so the models fit the mask and lost image quality (in-focus 0.95-0.99
+vs 0.90). The comparison says nothing yet about the designs. Within the same bad weighting, arm B at 1/2
+resolution beat 1/4 on halo (1.40 vs 1.91) and highlights (0.87 vs 0.89), a weak hint for finer resolution.
+
+Rerun as E5c-f (jobs 354643, 354644) with mask weights scaled to the image loss: `--aux-m 0.02 --aux-m-halo 0.05`
+(aux-b / aux-a unchanged at 0.5, they are image L1 terms). Lesson: weight every extra term by its magnitude
+relative to the main L1, and log each term separately.
