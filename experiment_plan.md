@@ -280,3 +280,29 @@ resolution beat 1/4 on halo (1.40 vs 1.91) and highlights (0.87 vs 0.89), a weak
 Rerun as E5c-f (jobs 354643, 354644) with mask weights scaled to the image loss: `--aux-m 0.02 --aux-m-halo 0.05`
 (aux-b / aux-a unchanged at 0.5, they are image L1 terms). Lesson: weight every extra term by its magnitude
 relative to the main L1, and log each term separately.
+
+### E5c-f. Point-2 fixes with scaled weights (2026-10-31, jobs 354643, 354644)
+`--aux-m 0.02 --aux-m-halo 0.05` (logged terms at the end: main 0.008-0.014, energy 0.003-0.005, aux 0.004-0.018).
+
+| | ms | all | in_focus | fg_spill | bg_edge | CoC 16-64 | highlight | energy | hard all | hard >= 32 | hard >= 64 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| classic | 59 | 0.603 | 1.000 | 1.000 | 1.000 | 0.406 | **0.464** | 0.647 | 0.479 | **0.365** | **0.312** |
+| E4b two-arm w24 | 116 | 0.584 | 0.895 | 0.555 | 1.102 | 0.369 | 0.769 | 0.638 | 0.483 | 0.425 | 0.665 |
+| E5c two-arm w24 + mask fix | 116 | 0.576 | 0.884 | 0.572 | 1.106 | 0.358 | 0.659 | 0.619 | 0.477 | 0.425 | 0.676 |
+| E5d two-arm, arm B at 1/2 + mask fix | 153 | 0.591 | 0.902 | 0.609 | 1.229 | 0.383 | 0.680 | 0.640 | 0.496 | 0.436 | 0.662 |
+| **E5e pyramid w24 + mask fix** | 151 | **0.551** | **0.879** | **0.546** | 1.043 | **0.312** | 0.578 | **0.612** | **0.434** | 0.375 | 0.621 |
+| E5f pyramid w16 + mask fix | 118 | 0.575 | 0.909 | 0.567 | 1.249 | 0.327 | 0.645 | 0.637 | 0.445 | 0.386 | 0.599 |
+
+1. The blur pyramid wins. At w24 it is the best learned model on almost every region: overall 0.551 (as good as
+   run K's w32 at 0.549), the lowest halo of the learned models (1.043), medium blur 0.312 (best of any model), and
+   bokeh highlights 0.578 (best learned). It beats the classic method overall, on light energy (0.612 vs 0.647) and
+   on the strong-blur crops (0.434 vs 0.479), ties it at >= 32 px, and is still behind on highlights (0.578 vs
+   0.464) and >= 64 px (0.621 vs 0.312, the data-limited bin).
+2. The mask fix helps a little (E5c vs E4b: overall 0.584 -> 0.576, highlights 0.769 -> 0.659) but does not remove
+   the halo leak (1.106). The pyramid's per-pixel choice of level does better on halos (1.043).
+3. A single blur arm at 1/2 resolution (E5d) is worse than at 1/4 and slower: one level cannot serve all blur
+   sizes. Several levels can.
+4. Speed: pyramid w24 151 ms, w16 118 ms (2.6x / 2.0x the classic method, unoptimised). Next for speed: compile,
+   fp16, fewer or narrower levels.
+
+Next: retrain the pyramid on the top-up data (>= 64 px), then speed work on it.
