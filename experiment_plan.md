@@ -306,3 +306,28 @@ relative to the main L1, and log each term separately.
    fp16, fewer or narrower levels.
 
 Next: retrain the pyramid on the top-up data (>= 64 px), then speed work on it.
+
+### M3. Compiled speed (2026-10-31, job 356731, `ai/speed_compile.py`)
+One 1920 x 1088 frame, A100, batch 1, median of 30; trained checkpoints. The classic gather (PyTorch port, fp32) is
+compiled too. `max` = `torch.compile(mode="max-autotune")` (autotuned kernels + CUDA graphs).
+
+| ms per frame | eager (before) | compile fp16 | max-autotune fp16 | max-autotune, fp16 weights | quality (all) |
+|---|---|---|---|---|---|
+| classic gather (fp32) | 57.7 | 19.5 | **19.5** | - | 0.603 |
+| U-Net w16 | 63.1 | 7.1 | 6.3 | **5.9** | 0.690 |
+| U-Net w24 (E3) | 96.3 | 10.4 | 10.2 | **9.6** | 0.595 |
+| U-Net w32 | 130.1 | 15.0 | 15.0 | **14.3** | 0.563 |
+| two-arm w16 (E4a) | 82.3 | **10.1** | 10.9 | fails | 0.635 |
+| two-arm w24 (E5c) | 115.5 | 13.4 | **12.9** | fails | 0.576 |
+| pyramid w16 (E5f) | 117.8 | 17.8 | **14.5** | fails | 0.575 |
+| pyramid w24 (E5e) | 151.0 | 19.4 | **18.4** | fails | 0.551 |
+
+- Compiling speeds the models up 6-10x (eager PyTorch was dominated by per-layer overhead and unfused GroupNorm
+  / activation passes) and the classic gather 3x.
+- **Every learned model now runs at or below the compiled classic method's time.** The best-quality model, the
+  w24 pyramid (0.551), takes 18.4 ms against 19.5 ms. The w24 U-Net (0.595) takes 9.6 ms, half the classic time.
+- Outputs are unchanged: compiled fp16 differs from fp32 by 0.2-0.4% of what the model changes (eager bf16, used in
+  all training-time evaluations, differs by 2-5%). The fp16-weights mode fails for two-arm / pyramid because their
+  light-space steps are deliberately fp32; mixed fp16 works for them.
+- Caveats: A100, batch 1, PyTorch for both. A hand-written CUDA kernel or the DoFScene GLSL shader for the classic
+  method could be faster than its compiled PyTorch port; that comparison (and a consumer GPU) is still to do.
