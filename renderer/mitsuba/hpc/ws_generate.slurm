@@ -33,12 +33,21 @@ echo "[$(date '+%F %T')] start on $(hostname), GPU $(nvidia-smi --query-gpu=name
 
 requeue() {
   echo "[$(date '+%F %T')] time limit near: requeueing $SLURM_JOB_ID"
+  REQUEUED=1
   kill "$worker" 2>/dev/null
   scontrol requeue "$SLURM_JOB_ID"
 }
 trap requeue USR1
 
-python -u renderer/mitsuba/generate.py work --out "$OUT" ${SHIP:+--ship-to "$SHIP"} &
-worker=$!
-wait "$worker"   # returns early when USR1 arrives; the trap then requeues
+# Up to 6 rounds: a chunk that crashed (random Dr.Jit CUDA errors in heavy scenes) is requeued and resumes from its
+# last finished pose, so each round gets further.
+for round in 1 2 3 4 5 6; do
+  python -u renderer/mitsuba/generate.py work --out "$OUT" ${SHIP:+--ship-to "$SHIP"} &
+  worker=$!
+  wait "$worker"   # returns early when USR1 arrives; the trap then requeues
+  [ -n "${REQUEUED:-}" ] && break
+  n=$(python renderer/mitsuba/generate.py retry-failed --out "$OUT" | grep -o '^[0-9]*')
+  echo "[$(date '+%F %T')] round $round: ${n:-0} failed chunks requeued"
+  [ "${n:-0}" -eq 0 ] && break
+done
 python renderer/mitsuba/generate.py status --out "$OUT"

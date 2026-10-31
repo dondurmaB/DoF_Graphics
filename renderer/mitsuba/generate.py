@@ -5,6 +5,7 @@
   python generate.py work   --out DATASET                        # one worker per GPU, until the queue is empty
   python generate.py status --out DATASET
   python generate.py release --out DATASET                       # requeue chunks claimed by dead workers
+  python generate.py retry-failed --out DATASET                  # requeue only failed chunks (safe with live workers)
   python generate.py sheet  --out DATASET --per-scene 8          # PNG per scene: sharp | DoF pairs to review
   python generate.py ship   --out DATASET --to HOST:/path        # copy finished poses there, keep only markers
   python generate.py plan-topup --out TOPUP --from DATASET/_queue/plan.json --name topup1
@@ -265,6 +266,23 @@ def cmd_release(args) -> int:
     return 0
 
 
+def cmd_retry_failed(args) -> int:
+    """Requeue chunks marked failed (not done): drop their failed marker and claim. Safe while other workers run,
+    since a failed chunk is no longer held by anyone. Finished poses inside them are skipped on the rerun, so a
+    chunk that crashes at random (Dr.Jit CUDA_ERROR_ILLEGAL_ADDRESS in night_street, 2026-10-30) gets further
+    each time. Prints the number of chunks requeued first, for scripts."""
+    q = queue_dir(args.out)
+    n = 0
+    for p in sorted((q / "failed").iterdir()):
+        if (q / "done" / p.name).exists():
+            continue
+        shutil.rmtree(q / "claimed" / p.name, ignore_errors=True)
+        p.unlink()
+        n += 1
+    print(f"{n} failed chunks requeued")
+    return 0
+
+
 def cmd_sheet(args) -> int:
     """One PNG per scene of tone-mapped sharp | DoF pairs, labelled with env and lens, for review by eye."""
     import numpy as np
@@ -310,7 +328,7 @@ def cmd_sheet(args) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("plan", "plan-topup", "work", "status", "release", "sheet", "ship"):
+    for name in ("plan", "plan-topup", "work", "status", "release", "retry-failed", "sheet", "ship"):
         p = sub.add_parser(name)
         p.add_argument("--out", type=Path, required=True, help="dataset root")
         if name == "plan-topup":
@@ -337,7 +355,7 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     if args.cmd == "plan":
         args.sampler_args = [a for a in args.sampler_args if a != "--"]
-    return {"plan": cmd_plan, "plan-topup": cmd_plan_topup, "work": cmd_work, "status": cmd_status, "release": cmd_release,
+    return {"plan": cmd_plan, "plan-topup": cmd_plan_topup, "work": cmd_work, "status": cmd_status, "release": cmd_release, "retry-failed": cmd_retry_failed,
             "sheet": cmd_sheet, "ship": cmd_ship}[args.cmd](args)
 
 
