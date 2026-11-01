@@ -331,3 +331,23 @@ compiled too. `max` = `torch.compile(mode="max-autotune")` (autotuned kernels + 
   light-space steps are deliberately fp32; mixed fp16 works for them.
 - Caveats: A100, batch 1, PyTorch for both. A hand-written CUDA kernel or the DoFScene GLSL shader for the classic
   method could be faster than its compiled PyTorch port; that comparison (and a consumer GPU) is still to do.
+
+### M3b. The classic method as the real GLSL shader (2026-11-01, student lab job 259148, `ai/classic_glsl.py`)
+The DoFScene shader's own `gatherDof()` (shaders/dof_scene/screen.frag), headless OpenGL 3.3 (EGL, moderngl) on an
+RTX 5000 Ada, full 1920 x 1080 frames in fp32 textures; depth fed linear, HDR output. 4 validation frames:
+
+| frame | f-number | focal | GPU time (timer query) | wall time / frame | error vs numpy port |
+|---|---|---|---|---|---|
+| cafe p000162 | f/2.1 | 72 mm | 0.62 ms | 0.63 ms | 1.6% |
+| greenhouse p000175 | f/2.3 | 44 mm | 5.54 ms | 0.80 ms | 9.4% |
+| courtyard p000245 | f/4.8 | 132 mm | 1.03 ms | 0.95 ms | 4.8% |
+| museum p000302 | f/3.0 | 37 mm | 5.50 ms | 0.36 ms | 1.9% |
+
+- The shader takes **about 0.4-5.5 ms per frame** (median timer 3.3 ms): 4-30x faster than its compiled PyTorch port
+  on the A100 (19.5 ms), and faster than every compiled model (5.9-18.4 ms on the A100). In-focus pixels exit early,
+  so frames with less blur are cheaper. The two timers disagree on two frames (timer query > wall time); the timer
+  with a `finish()` per pass is the conservative number.
+- Its output matches the numpy port to within 2-9% of the blur it adds (it computes the CoC from bilinearly sampled
+  depth rather than sampling a CoC map, and uses hardware texture filtering).
+- So against a real shader the learned models are not yet at "similar speed". A fair comparison also needs the
+  models timed on the same RTX GPU (PyTorch is not installed on the student lab; about 5 GB on the home quota).
