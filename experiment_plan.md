@@ -5,8 +5,10 @@ current best setting is in `notes.md`.
 
 ## 0. Goal and ground rules
 
-- **Goal:** a learned model that **reaches the classic screen-space method's quality in the same or less time**.
-  Beating it is not required.
+- **Goal:** a learned model that **reaches the classic screen-space method's quality** at interactive speed.
+  Beating it is not required. **Speed target (Professor Yan, 2026-11-01): under about 30 ms per 1080p frame.**
+  The classic method itself takes about 2 ms (hand-written kernel, M3c), so "same time as classic" is not the bar;
+  30 ms is.
 - **Pure network at inference.** No fixed gather or hand-written blur step inside the model; only standard layers
   (convolutions, up/downsampling). Option D (network corrects the classic output) is a reference ceiling only.
 - **The blur map (CoC) never enters the model.** It may shape losses, sampling and metrics (DATA_PROTOCOL.md v1.1).
@@ -351,3 +353,13 @@ RTX 5000 Ada, full 1920 x 1080 frames in fp32 textures; depth fed linear, HDR ou
   depth rather than sampling a CoC map, and uses hardware texture filtering).
 - So against a real shader the learned models are not yet at "similar speed". A fair comparison also needs the
   models timed on the same RTX GPU (PyTorch is not installed on the student lab; about 5 GB on the home quota).
+
+### M3c. Hand-written classic kernel and the speed target (2026-11-01, jobs 358858, 358860)
+- The classic gather as one hand-written Triton kernel (`ai/classic_triton.py`) on the A100: **1.96 ms** per 1080p
+  frame, identical to the numpy port (1e-5), against 19.5 ms for the compiled PyTorch port and 57.7 ms eager. This
+  agrees with the GLSL shader on the RTX (0.4-5.5 ms, M3b). The learned models (compiled, A100) take 5.9-18.4 ms.
+- Professor Yan: under about 30 ms per frame is fine. Every compiled model meets it, including the best one (pyramid
+  w24, 18.4 ms). Speed is no longer the constraint; the remaining budget (about 10 ms) can buy quality.
+- Top-up validation lenses (86 held-out wide-open / stopped-down lenses, scored as `top_*`): classic all 0.587,
+  >= 64 px 0.433; E3 0.603 / 0.623; E5e 0.557 / 0.627 (both trained before the top-up). The pyramid still beats the
+  classic method overall on realistic wide-open shots, and is still behind on the largest blur.
