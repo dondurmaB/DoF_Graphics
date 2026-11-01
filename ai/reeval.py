@@ -2,8 +2,9 @@
 
     python ai/reeval.py ROOT --ckpts w24=runs/smoke-train-350202/last.pt --exclude runs/bad_samples.txt
 
-Writes runs/reeval-<name>/log.jsonl with one "eval" record (regular and hard_ crops), the same format as
-smoke_train.py, so runs/cmp.py can read it.
+Writes runs/reeval-<name>/log.jsonl with one "eval" record (regular, hard_ and top_ crops: top_ = held-out top-up
+lenses, experiment_plan.md D2), the same format as smoke_train.py, so runs/cmp.py can read it. `--classic NAME` also
+scores the classic gather (speed.gather_torch on the GPU, full frame, cropped like each item).
 """
 
 import argparse
@@ -22,7 +23,8 @@ from model import build   # noqa: E402
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("root")
-    ap.add_argument("--ckpts", nargs="+", required=True, help="name=path/to/last.pt")
+    ap.add_argument("--ckpts", nargs="*", default=[], help="name=path/to/last.pt")
+    ap.add_argument("--classic", default=None, help="also score the classic gather under this name")
     ap.add_argument("--exclude")
     ap.add_argument("--crop", type=int, default=D.CROP)
     ap.add_argument("--batch", type=int, default=8)
@@ -32,19 +34,40 @@ def main():
     dev = torch.device("cuda")
     _, evalset, hardset, _, va, hard = S.datasets(args)
     dl_va, dl_hard = S.loader(evalset, va, args, False), S.loader(hardset, hard, args, False)
+    dl_top = S.loader(evalset, args.va_topup, args, False) if args.va_topup else None
+    sets = [("", dl_va, evalset, va), ("hard_", dl_hard, hardset, hard)] + \
+        ([("top_", dl_top, evalset, args.va_topup)] if dl_top is not None else [])
+
+    def save(name, ev, step=0):
+        out = Path(f"runs/reeval-{name}")
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "log.jsonl").write_text(json.dumps({"eval": {"step": step, **ev}}) + "\n")
+        print(name, {k: round(ev[k]["ratio"], 3) for k in ("all", "highlight_blur16", "hard_coc_64_up",
+                                                            "top_all", "top_coc_64_up") if k in ev}, flush=True)
+
+    if args.classic:
+        from underblur import classic_crop
+
+        def batches(ds, idx):
+            for i in idx:
+                item = ds[i]
+                b = S.collate([item])
+                b["yh"] = classic_crop(item["meta"]["lens_dir"], item["meta"], args.crop, dev)[None]
+                yield b
+        ev = {}
+        for prefix, _, ds, idx in sets:
+            ev.update({prefix + k: v for k, v in S.evaluate(None, batches(ds, idx), dev, pred=lambda b: b["yh"]).items()})
+        save(args.classic, ev)
     for spec in args.ckpts:
         name, path = spec.split("=", 1)
         ck = torch.load(path, map_location="cpu", weights_only=False)
         a = ck["args"]
         model = build(a.get("arch", "unet"), a.get("width"), a.get("film", False)).to(dev)
         model.load_state_dict(ck["model"])
-        ev = S.evaluate(model, dl_va, dev)
-        ev.update({"hard_" + k: v for k, v in S.evaluate(model, dl_hard, dev).items()})
-        out = Path(f"runs/reeval-{name}")
-        out.mkdir(parents=True, exist_ok=True)
-        (out / "log.jsonl").write_text(json.dumps({"eval": {"step": ck.get("step", 0), **ev}}) + "\n")
-        print(name, {k: round(ev[k]["ratio"], 3) for k in ("all", "highlight_blur16", "energy_all",
-                                                            "hard_energy_coc_32_up") if k in ev}, flush=True)
+        ev = {}
+        for prefix, dl, _, _ in sets:
+            ev.update({prefix + k: v for k, v in S.evaluate(model, dl, dev).items()})
+        save(name, ev, ck.get("step", 0))
 
 
 if __name__ == "__main__":
