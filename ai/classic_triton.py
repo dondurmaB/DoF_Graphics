@@ -34,7 +34,7 @@ def _bil(ptr, i00, i01, i10, i11, w00, w01, w10, w11, mask):
             + tl.load(ptr + i10, mask=mask, other=0.0) * w10 + tl.load(ptr + i11, mask=mask, other=0.0) * w11)
 
 
-@triton.autotune(configs=[triton.Config({"BLOCK": b}, num_warps=w) for b in (64, 128, 256, 512) for w in (2, 4, 8)],
+@triton.autotune(configs=[triton.Config({"BLOCK": b}, num_warps=w) for b, w in ((128, 4), (256, 4), (256, 8))],
                  key=["H", "W"])
 @triton.jit
 def _gather_kernel(rgb, depth, radius, disk, out, H, W, MAXR: tl.constexpr, BLOCK: tl.constexpr):
@@ -53,7 +53,7 @@ def _gather_kernel(rgb, depth, radius, disk, out, H, W, MAXR: tl.constexpr, BLOC
     acc_g = tl.load(rgb + HW + offs, mask=mask, other=0.0)
     acc_b = tl.load(rgb + 2 * HW + offs, mask=mask, other=0.0)
     wsum = tl.full([BLOCK], 1.0, tl.float32)
-    for i in tl.static_range(64):
+    for i in range(64):                         # a real loop: unrolling 64 taps x 20 loads made compiling crawl
         dx = tl.load(disk + 3 * i)
         dy = tl.load(disk + 3 * i + 1)
         dl = tl.load(disk + 3 * i + 2)

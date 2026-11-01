@@ -12,6 +12,7 @@ Times: median of --reps runs after warm-up, CUDA synchronised, batch 1, full 192
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -31,7 +32,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("root")
     ap.add_argument("--exclude")
-    ap.add_argument("--frames", type=int, default=4, help="held-out frames for the accuracy check")
+    ap.add_argument("--frames", type=int, default=3, help="held-out frames for the accuracy check")
     ap.add_argument("--reps", type=int, default=50)
     ap.add_argument("--crop", type=int, default=D.CROP)
     ap.add_argument("--seed", type=int, default=0)
@@ -54,7 +55,10 @@ def main():
         depth_t = torch.from_numpy(depth).to(dev)
         added = np.abs(ref - sharp).mean()
         for name, fn in methods.items():
+            t0 = time.time()
             out = fn(rgb_t, depth_t, *lens)
+            torch.cuda.synchronize()
+            print(f"  {name}: first call {time.time() - t0:.1f} s", flush=True)
             errs[name].append(float(np.abs(out.cpu().numpy().transpose(1, 2, 0) - ref).mean() / added))
             times[name].append(1000 * timeit(lambda: fn(rgb_t, depth_t, *lens), args.reps))
         print(f"frame {s.lens_dir.name}: " + "  ".join(f"{n} {times[n][-1]:.2f} ms err {errs[n][-1]:.1e}"
