@@ -42,7 +42,10 @@ import web_assets as W
 ASSET_VERSION = 1
 EYE = np.eye(4)
 SUN = env_kit.default_sun_direction(52.0, 65.0)
-SKY_SCALE = {"clear": 22.0, "overcast": 50.0, "wet": 70.0}
+# forest_floor's 22 / 50 / 70 left the along_log view under the 0.02 median-luminance floor (clear 0.012, overcast
+# 0.017, wet 0.024; check_scene 269605 and 269625). x2.5 / x2 / x1.43 puts it at ~0.03; the brightest view
+# (mushrooms, 0.077 in clear) goes to ~0.19, inside the 0.5 ceiling.
+SKY_SCALE = {"clear": 55.0, "overcast": 100.0, "wet": 100.0}
 LITTER_DARKEN = 0.55
 
 TERRAIN = N.Terrain(-90.0, 90.0, -110.0, 70.0, spacing=0.4,
