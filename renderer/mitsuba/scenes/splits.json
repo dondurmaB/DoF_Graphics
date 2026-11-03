@@ -17,6 +17,7 @@
     "workshop"
   ],
   "val": [
+    "alpine_scree",
     "dune_field"
   ],
   "test": [
