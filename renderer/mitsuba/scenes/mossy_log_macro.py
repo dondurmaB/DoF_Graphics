@@ -12,7 +12,9 @@ Layout, meters, y up, the hero cameras look toward -z:
                4 texels per mm (the scanned 1k textures give ~1 per mm, soft at this range)
   mushrooms    seven at the log's foot around (-0.75, -0.5), five on its top around x = 0.6, 3-9 cm tall
   ground       dark leaf litter on a gently rolling height field; in front of the log ~2,600 fallen leaves and
-               ~140 twigs as real geometry, so near silhouettes are sharp where the texture would not be
+               ~140 twigs as real geometry, so near silhouettes are sharp where the texture would not be. The
+               leaves are ovate, lobed or toothed, cupped, curled and crumpled, each with one of 16 procedural
+               albedos (midrib and side veins, rot blotches, browned edges)
   around       ferns at (2.0, -0.35) and (-2.3, 0.2), a small mossy rock at (1.15, -0.15), a stump at (-4.0, -2.8)
   wood         scanned trees outside the clearing to ~55 m, a sparser belt to ~95 m, the forest_floor backdrop
                band at 100 m
@@ -39,7 +41,7 @@ from scene_kit import Assets, SceneBuilder, bitmap, principled
 from scenes import _nature_kit as N
 import web_assets as W
 
-ASSET_VERSION = 1
+ASSET_VERSION = 2                                        # 2: mushroom caps face out; shaped, veined fallen leaves
 EYE = np.eye(4)
 SUN = env_kit.default_sun_direction(52.0, 65.0)
 # forest_floor's 22 / 50 / 70 left the along_log view under the 0.02 median-luminance floor (clear 0.012, overcast
@@ -66,7 +68,10 @@ NEAR_TREES = [(-4.6, 3.8), (4.8, 2.6), (-5.2, -4.2), (4.4, -4.8), (0.8, -6.6)]
 CLEARING = ((-5.8, -5.5), (5.8, 4.5))
 BACKDROP = {"centre": (0.0, -20.0), "radius": 100.0, "y0": -6.0, "y_tex": 22.0, "tile": 30.0}
 SKYLINE = N.Skyline(71, BACKDROP["radius"], base=13.0, spread=4.0)
-LEAF_COLOURS = {"leaf_brown": (0.10, 0.045, 0.015), "leaf_tan": (0.17, 0.095, 0.03), "leaf_dark": (0.05, 0.028, 0.012)}
+LEAF_ATLAS = 4                                           # 4 x 4 leaf albedos in one texture, LEAF_PX each
+LEAF_PX = 256
+LEAF_PALETTE = [(0.10, 0.045, 0.015), (0.17, 0.095, 0.03), (0.05, 0.028, 0.012), (0.20, 0.12, 0.035),
+                (0.14, 0.05, 0.016), (0.08, 0.06, 0.04)]                 # brown, tan, dark, ochre, rust, grey-brown
 
 
 def rng_for(ctx: BuildContext, k: int) -> np.random.Generator:
@@ -131,8 +136,10 @@ def mushroom(h: float, cap_r: float, stem_r: float) -> dict[str, G.Mesh]:
     cap_h = 0.45 * cap_r
     stem = G.lathe([(0.0, -0.004), (stem_r * 1.15, -0.004), (stem_r * 1.1, 0.2 * h), (stem_r * 0.9, h - 0.3 * cap_h),
                     (cap_r * 0.92, h - 0.2 * cap_h), (0.0, h - 0.18 * cap_h)], segments=40)
-    cap = G.lathe([(0.0, h + cap_h), (cap_r * 0.45, h + 0.9 * cap_h), (cap_r * 0.8, h + 0.55 * cap_h),
-                   (cap_r, h + 0.1 * cap_h), (cap_r * 0.96, h - 0.2 * cap_h), (0.0, h - 0.18 * cap_h)], segments=48)
+    # from the axis under the cap out to the rim and over the top, like the stem: lathe's normals point to the
+    # profile's right, so a profile run the other way faces inward and renders black
+    cap = G.lathe([(0.0, h - 0.18 * cap_h), (cap_r * 0.96, h - 0.2 * cap_h), (cap_r, h + 0.1 * cap_h),
+                   (cap_r * 0.8, h + 0.55 * cap_h), (cap_r * 0.45, h + 0.9 * cap_h), (0.0, h + cap_h)], segments=48)
     return {"cap": cap, "stem": stem}
 
 
@@ -170,20 +177,78 @@ def mushrooms() -> tuple[dict[str, G.Mesh], dict[str, list]]:
     return {k: N._concat(v) for k, v in parts.items()}, tops
 
 
+def leaf_atlas(darken: float = 1.0, seed: int = 61) -> np.ndarray:
+    """sRGB albedos of LEAF_ATLAS x LEAF_ATLAS dead leaves, one per tile. Tile u runs across the blade (midrib at
+    0.5), v from stalk (top row) to tip. Lighter midrib and side veins angled toward the tip, rot blotches and
+    specks, browned edges; colour drifts from the stalk to the tip."""
+    rng = np.random.default_rng(seed)
+    n = LEAF_PX
+    v, u = np.mgrid[0:n, 0:n] / (n - 1.0)
+    across = np.abs(u - 0.5) * 2.0
+    out = np.zeros((LEAF_ATLAS * n, LEAF_ATLAS * n, 3))
+    for t in range(LEAF_ATLAS * LEAF_ATLAS):
+        a = np.array(LEAF_PALETTE[int(rng.integers(len(LEAF_PALETTE)))])
+        b = np.array(LEAF_PALETTE[int(rng.integers(len(LEAF_PALETTE)))])
+        mix = np.clip(v + rng.uniform(-0.3, 0.3), 0, 1)[..., None] * rng.uniform(0.2, 0.7)
+        lin = a * (1 - mix) + b * mix
+        blot = G.fbm(n, n, octaves=5, base=4, seed=seed + 10 * t)
+        speck = G.fbm(n, n, octaves=3, base=40, seed=seed + 10 * t + 1)
+        lin = lin * (0.7 + 0.55 * blot)[..., None]
+        lin = np.where((blot < rng.uniform(0.12, 0.3))[..., None], lin * 0.45, lin)        # rotted patches
+        lin = np.where((speck > 0.82)[..., None], lin * 0.6, lin)
+        k, step = rng.uniform(0.25, 0.5), 1.0 / rng.uniform(6, 10)
+        side = np.abs(((v - k * across) / step) % 1.0 - 0.5) < 0.035 * (1.2 - across)       # side veins
+        mid = np.abs(u - 0.5) < 0.012 * (1.4 - v)
+        lin = np.where((side & (v > 0.04))[..., None], lin * 1.22, lin)
+        lin = np.where(mid[..., None], lin * 1.45, lin)
+        edge = np.clip((1.0 - across) / 0.12, 0, 1) * np.clip(v / 0.05, 0, 1) * np.clip((1 - v) / 0.05, 0, 1)
+        lin = lin * (0.55 + 0.45 * edge)[..., None]
+        r, c = divmod(t, LEAF_ATLAS)
+        out[r * n:(r + 1) * n, c * n:(c + 1) * n] = lin * darken
+    return N._srgb(out).astype(np.float32)
+
+
+def fallen_leaf(rng, length: float, rows: int = 16, cols: int = 7) -> G.Mesh:
+    """A dead leaf along +z from the stalk end, lying on y = 0 at its lowest point: ovate, lobed (oak-like) or
+    toothed outline, cupped across, curled at the tip, crumpled, uv on one random tile of `leaf_atlas`."""
+    s = np.linspace(0.0, 1.0, rows)[:, None]
+    w = np.linspace(-1.0, 1.0, cols)[None, :]
+    width = length * rng.uniform(0.4, 0.65)
+    kind = rng.choice(3, p=[0.45, 0.3, 0.25])
+    shape = np.sin(np.pi * np.clip(s, 0, 1) ** rng.uniform(0.7, 1.0)) ** 0.8
+    if kind == 1:                                        # lobed
+        shape = shape * (1.0 - rng.uniform(0.25, 0.4) * (0.5 - 0.5 * np.cos(2 * np.pi * rng.uniform(3.0, 4.5) * s)))
+    elif kind == 2:                                      # toothed
+        shape = shape * (1.0 - 0.08 * (s * rng.uniform(9, 13) % 1.0))
+    x = w * width * 0.5 * shape * (1.0 + rng.uniform(-0.1, 0.1) * np.sign(w))         # slightly lopsided
+    z = s * length
+    ph = rng.uniform(0, math.tau, 3)
+    crumple = (np.sin(9 * s + 3 * w + ph[0]) + 0.6 * np.sin(17 * s - 7 * w + ph[1]) + 0.4 * np.sin(29 * s + 13 * w + ph[2]))
+    y = (rng.uniform(0.02, 0.22) * length * s ** 2                                    # tip curls up
+         + rng.uniform(0.1, 0.45) * np.abs(x) + rng.uniform(0.0, 1.2) * x * x / width  # cupped across
+         + rng.uniform(0.01, 0.025) * length * crumple)
+    y = y - y.min()
+    p = np.stack(np.broadcast_arrays(x, y, z), -1).reshape(-1, 3)
+    f = G._grid_faces(rows, cols)
+    tile = int(rng.integers(LEAF_ATLAS * LEAF_ATLAS))
+    pad = 2.0 / LEAF_PX                                  # keep bilinear lookups inside the tile
+    tu, tv = tile % LEAF_ATLAS, tile // LEAF_ATLAS
+    uu, vv = np.broadcast_arrays((w + 1) / 2, s)
+    uv = np.stack([(tu + pad + (1 - 2 * pad) * uu) / LEAF_ATLAS, (tv + pad + (1 - 2 * pad) * vv) / LEAF_ATLAS], -1)
+    return G.Mesh(p, G.vertex_normals(p, f), uv.reshape(-1, 2), f)
+
+
 def litter_meshes(ctx: BuildContext) -> dict[str, G.Mesh]:
-    """{'leaf_<colour>', 'twigs'}: fallen leaves and twigs lying on the terrain in front of the log."""
+    """{'leaves', 'twigs'}: fallen leaves and twigs lying on the terrain in front of the log."""
     rng = rng_for(ctx, 5)
     (xa, za), (xb, zb) = LEAF_ZONE
-    acc: dict[str, list] = {k: [] for k in LEAF_COLOURS}
-    names = list(LEAF_COLOURS)
+    leaves = []
     for _ in range(2600):
         x, z = rng.uniform(xa, xb), rng.uniform(za, zb)
-        length = rng.uniform(0.05, 0.12)
-        leaf = G.leaf(length, length * rng.uniform(0.4, 0.65), curl=-rng.uniform(0.02, 0.2),
-                      fold=rng.uniform(0.1, 0.45), rows=8, cols=5)
-        m = G.compose(G.translate(TERRAIN.at(x, z, 0.002 + rng.uniform(0, 0.004))),
+        leaf = fallen_leaf(rng, rng.uniform(0.05, 0.12))
+        m = G.compose(G.translate(TERRAIN.at(x, z, 0.001 + rng.uniform(0, 0.004))),
                       G.rotate((0, 1, 0), rng.uniform(0, 360)), G.rotate((1, 0, 0), rng.uniform(-6, 6)))
-        acc[names[int(rng.choice(3, p=[0.5, 0.3, 0.2]))]].append(leaf.transformed(m))
+        leaves.append(leaf.transformed(m))
     twigs = []
     for _ in range(140):
         x, z = rng.uniform(xa, xb), rng.uniform(za, zb)
@@ -194,9 +259,7 @@ def litter_meshes(ctx: BuildContext) -> dict[str, G.Mesh]:
         pz = z + s * length * math.sin(yaw) + side * math.cos(yaw)
         path = np.stack([px, TERRAIN.height(px, pz) + 0.8 * r, pz], -1)
         twigs.append(G.sweep(path, r * (1 - 0.4 * s), sides=8))
-    out = {k: N._concat(v) for k, v in acc.items()}
-    out["twigs"] = N._concat(twigs)
-    return out
+    return {"leaves": N._concat(leaves), "twigs": N._concat(twigs)}
 
 
 def add_materials(b: SceneBuilder, L: N.Library, ctx: BuildContext) -> None:
@@ -215,8 +278,8 @@ def add_materials(b: SceneBuilder, L: N.Library, ctx: BuildContext) -> None:
     b.material("moss", {"type": "twosided", "bsdf": principled(bitmap(moss, uv_scale=(1 / MOSS_TILE_M,) * 2),
                                                                0.55 if wet else 0.85, sheen=0.4, **coat)})
     dk = 0.7 if wet else 1.0
-    for name, c in LEAF_COLOURS.items():
-        b.material(name, {"type": "twosided", "bsdf": principled(tuple(dk * t for t in c), 0.6, **coat)})
+    atlas = b.assets.texture(f"leaf_atlas_{'wet' if wet else 'dry'}_v{ASSET_VERSION}", lambda: leaf_atlas(dk))
+    b.material("leaves", {"type": "twosided", "bsdf": principled(bitmap(atlas), 0.5 if wet else 0.75, **coat)})
     b.material("mush_cap", principled((0.24 * dk, 0.11 * dk, 0.045 * dk), 0.35, **coat))
     b.material("mush_stem", principled((0.50, 0.45, 0.36), 0.6))
     alb = b.assets.texture("backdrop_albedo_v2", lambda: N.backdrop_albedo(71, BACKDROP["tile"], BACKDROP["y0"], BACKDROP["y_tex"]))
