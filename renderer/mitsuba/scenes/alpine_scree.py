@@ -49,8 +49,9 @@ from scenes import _stream_props as SP
 ASSET_VERSION = 1
 EYE = np.eye(4)
 SUN = {"clear": env_kit.default_sun_direction(42.0, 45.0), "snow": env_kit.default_sun_direction(30.0, 50.0)}
-# Open and rocky, between dry_riverbed (clear 5, overcast 15) and stream's snow (5.5); calibrate on check_scene.
-SKY_SCALE = {"clear": 6.0, "overcast": 18.0, "snow": 4.5}
+# Open and rocky, between dry_riverbed (clear 5, overcast 15) and stream's snow (5.5). Snow 4.5 gave medians
+# 0.61-1.49 in check_scene 275284 once the lowered peaks stopped shading the 30-degree snow sun; x0.27 -> ~0.16-0.40.
+SKY_SCALE = {"clear": 6.0, "overcast": 18.0, "snow": 1.2}
 MEADOW_TOP = 1.2                     # meadow below this height, talus above
 CLIFF_FROM = 21.0                    # cliff rock above this height (the talus tops out at ~20 m, 55 m ahead)
 GRANITE_TINT = {"talus": (0.85, 0.85, 0.88), "cliff": (0.55, 0.55, 0.58)}
