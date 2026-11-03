@@ -11,14 +11,16 @@ level frame the target box allows, and the talus is side-lit with sharp block sh
 Layout, meters, y up, the hero cameras look up the cirque toward -z:
   bench        an alpine meadow (`leafy_grass`) rising 3 cm per metre, grass tufts, periwinkle and gazania
                clumps and small weeds
-  talus        from ~22 m ahead the slope steepens into a talus cone at ~28 degrees (`acg:Granite006B`, grey) up to
-               ~20 m high at 55 m, angular procedural scree stones on its lower part and scanned blocks (opaque, recoloured
-               to lichen-grey granite) all over it; valley sides rising to both sides
+  talus        from ~22 m ahead the slope steepens into a talus cone at ~28 degrees up to ~20 m high at 55 m
+               (`acg:Granite006B` turned grey: the texture is a red granite), angular procedural scree stones on
+               its lower part and scanned blocks (opaque, recoloured to lichen-grey granite) all over it; valley
+               sides rising to both sides
   cliff        a cliff band (49 degrees) above the talus up to the cirque's rim, ~35 m high at 68 m, ~25 degrees
                up from the cameras, then a gentle plateau (darker granite); the terrain is cut along two contours
                (meadow below 1.2 m, cliff above 21 m) so material edges are smooth lines
-  peaks        a band of rock and snow peaks ~480 m away, 160-360 m high, rising above the rim; all geometry, so
-               depth and image agree
+  peaks        a band of rock and snow peaks ~480 m away, 80-290 m high, the highest rising above the rim with
+               sky above them (at 160-360 m they filled the sky: 7% sky in the talus view); all geometry, so depth
+               and image agree
   subjects     the boulder at (-1.6, -4.2), the cairn at (2.4, -6.5), a flower patch at (0.6, -0.8)
 Light is only `env_kit`'s sun and sky.
 
@@ -162,7 +164,7 @@ class PeakSkyline:
     """Ridge line of the far peaks along a ring: long-wavelength rises plus ridged (|sin|-folded) terms, so the
     summits are sharp and the cols rounded. Whole cycles round the ring, so it closes."""
 
-    def __init__(self, seed, radius, base=260.0):
+    def __init__(self, seed, radius, base=185.0):
         rng = np.random.default_rng(seed)
         self.radius, self.base = radius, base
         lam = np.array([900.0, 380.0, 160.0, 60.0, 22.0])
@@ -188,7 +190,7 @@ def peaks_albedo(seed: int, tile_w: float, y0: float, y_top: float, ppm: int = 4
     gully = G.fbm(H_, W_ + O, octaves=3, base=10, seed=seed + 1, aspect=aspect * 0.25)
     lin = np.array([0.075, 0.074, 0.072])[None, None, :] * (0.7 + 0.6 * rock[..., None])
     lin = lin * (1.0 - 0.45 * (gully > 0.62)[..., None])
-    line = 250.0 + 30.0 * (G.fbm(H_, W_ + O, octaves=4, base=6, seed=seed + 2, aspect=aspect) - 0.5)
+    line = 175.0 + 30.0 * (G.fbm(H_, W_ + O, octaves=4, base=6, seed=seed + 2, aspect=aspect) - 0.5)
     snow = (y > line) | ((gully > 0.66) & (y > line - 60.0))
     lin[snow] = np.array([0.62, 0.64, 0.68])
     out = N._periodic(N._srgb(lin).transpose(2, 0, 1).reshape(3 * H_, W_ + O), O).reshape(3, H_, W_).transpose(1, 2, 0)
@@ -207,6 +209,27 @@ def lichen_granite(src: str) -> np.ndarray:
     return np.clip(grey + 0.6 * green * np.array([0.25, 0.3, 0.0], np.float32), 0.0, 1.0)
 
 
+def grey_granite(src: str, tint) -> np.ndarray:
+    """sRGB albedo from ambientCG Granite006B (a red granite): its luminance times `tint`, so the grain stays
+    and the stone reads grey."""
+    from PIL import Image
+
+    a = np.asarray(Image.open(src).convert("RGB"), np.float32) / 255.0
+    lum = a @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    return np.clip(lum[..., None] * np.asarray(tint, np.float32), 0.0, 1.0)
+
+
+def granite_surface(b: SceneBuilder, tint, uv_scale=None) -> dict:
+    """W.surface of Granite006B (its roughness and normal maps) with the albedo turned grey by `grey_granite`."""
+    d = W.surface("acg:Granite006B", uv_scale=uv_scale)
+    inner = d["bsdf"] if d["type"] == "normalmap" else d
+    src = inner["base_color"]["filename"]
+    key = "_".join(f"{c:.2f}" for c in tint)
+    inner["base_color"] = dict(inner["base_color"], filename=b.assets.texture(f"grey_granite_{key}",
+                                                                              lambda: grey_granite(src, tint)))
+    return d
+
+
 # --------------------------------------------------------------------------
 # Materials and ground
 # --------------------------------------------------------------------------
@@ -223,12 +246,12 @@ def granite_block(b: SceneBuilder, bsdf: dict, snow: bool) -> dict:
 def add_materials(b: SceneBuilder, L: N.Library, ctx: BuildContext) -> None:
     snow = ctx.env == "snow"
     b.material("meadow", env_kit.ground("snow") if snow else W.surface("leafy_grass", tint=(0.85, 0.85, 0.75)))
-    b.material("talus", env_kit.ground("snow") if snow else W.surface("acg:Granite006B", tint=GRANITE_TINT["talus"]))
-    b.material("cliff", W.surface("acg:Granite006B", tint=GRANITE_TINT["cliff"]))
+    b.material("talus", env_kit.ground("snow") if snow else granite_surface(b, GRANITE_TINT["talus"]))
+    b.material("cliff", granite_surface(b, GRANITE_TINT["cliff"]))
     for name, tint in SCREE_TONES.items():
-        b.material(name, W.surface("acg:Granite006B", uv_scale=(0.25, 0.25), tint=tint))
-    b.material("cairn", W.surface("acg:Granite006B", uv_scale=(0.3, 0.3), tint=(0.8, 0.8, 0.82)))
-    alb = b.assets.texture(f"peaks_albedo_v{ASSET_VERSION}", lambda: peaks_albedo(37, PEAKS["tile"], PEAKS["y0"], PEAKS["y_tex"]))
+        b.material(name, granite_surface(b, tint, uv_scale=(0.25, 0.25)))
+    b.material("cairn", granite_surface(b, (0.8, 0.8, 0.82), uv_scale=(0.3, 0.3)))
+    alb = b.assets.texture(f"peaks_albedo_v{ASSET_VERSION}_b185", lambda: peaks_albedo(37, PEAKS["tile"], PEAKS["y0"], PEAKS["y_tex"]))
     b.material("peaks", {"type": "twosided", "bsdf": principled(bitmap(alb), 0.9)})
     L.material_set("rock_moss_set_01", "_granite", lambda bsdf: granite_block(b, bsdf, snow))
 
@@ -239,7 +262,7 @@ def add_ground(b: SceneBuilder, ctx: BuildContext, focus: dict) -> None:
         b.ply(parts[name], EYE, name, prefix=name)
     c0, c1 = PEAKS["centre"]
     sky = PeakSkyline(19, PEAKS["radius"])
-    b.ply(b.assets.mesh(f"cirque_peaks_v{ASSET_VERSION}", lambda: N.backdrop_band(c0, c1, sky, PEAKS["y0"], PEAKS["y_tex"],
+    b.ply(b.assets.mesh(f"cirque_peaks_v{ASSET_VERSION}_b185", lambda: N.backdrop_band(c0, c1, sky, PEAKS["y0"], PEAKS["y_tex"],
                                                                                   PEAKS["tile"], step=0.5)),
           EYE, "peaks", prefix="backdrop")
     seeded = Assets(ctx.assets_dir, ctx.rebuild)

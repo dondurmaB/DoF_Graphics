@@ -16,7 +16,8 @@ Layout, meters, y up, the shoreline runs roughly along x, the lake is toward -z:
   lake         rippled water (roughdielectric) over a lakebed sloping to -2 m: a finely rippled sheet round the
                cameras, a flat one beyond it to the far shore; both stop exactly on one grid line, so they never
                overlap; a dark lake floor under all of it at -2.5 m
-  stones       ~3,800 procedural pebbles (2-8 cm, four granite tones, wet-coated within 40 cm of the water)
+  stones       ~3,800 procedural pebbles (2-8 cm, four grey granite tones: ambientCG's Granite006B is red, so
+               its luminance is used; wet-coated within 40 cm of the water)
                densest along the waterline, scanned cobbles and boulders recoloured to grey granite
   foreground   the granite boulder at the waterline (1.3, shore + 0.2), two boulders on the beach at x = -3.8, the
                driftwood log at x 2.5-5.2
@@ -57,10 +58,10 @@ LAKEBED_TOP = -0.06                  # lakebed material below this height, beach
 BANK_FROM = 0.8                      # grassy bank above this height
 NEAR_WATER = ((-16.0, -30.0), (16.0, 6.0))       # finely rippled sheet; its edges sit on FAR_WATER's 2 m grid
 FAR_WATER = ((-340.0, -360.0), (340.0, 330.0), 2.0)
-PEBBLE_TONES = {"grey": (0.95, 0.95, 0.97), "tan": (1.15, 1.0, 0.82), "dark": (0.45, 0.45, 0.47), "pale": (1.5, 1.45, 1.4)}
+PEBBLE_TONES = {"grey": (0.95, 0.95, 0.97), "tan": (1.08, 1.0, 0.9), "dark": (0.5, 0.5, 0.52), "pale": (1.35, 1.33, 1.3)}
 
 FAR = {"centre": (0.0, -20.0), "radius": 320.0, "y0": -1.5, "y_tex": 26.0, "tile": 40.0}
-SKYLINE = N.Skyline(57, FAR["radius"], base=16.0, spread=10.0)                # wooded hills
+SKYLINE = N.Skyline(57, FAR["radius"], base=14.0, spread=3.0)                 # spread 10 read as black teeth
 
 
 def shore(x):
@@ -200,6 +201,27 @@ def granite_rock(src: str) -> np.ndarray:
     return np.clip((0.08 + 0.95 * lum)[..., None] * np.array([1.0, 1.0, 1.04], np.float32), 0.0, 1.0)
 
 
+def grey_granite(src: str, tint) -> np.ndarray:
+    """sRGB albedo from ambientCG Granite006B (a red granite): its luminance times `tint`, so the grain stays
+    and the stone reads grey."""
+    from PIL import Image
+
+    a = np.asarray(Image.open(src).convert("RGB"), np.float32) / 255.0
+    lum = a @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    return np.clip(lum[..., None] * np.asarray(tint, np.float32), 0.0, 1.0)
+
+
+def granite_surface(b: SceneBuilder, tint, uv_scale=None) -> dict:
+    """W.surface of Granite006B (its roughness and normal maps) with the albedo turned grey by `grey_granite`."""
+    d = W.surface("acg:Granite006B", uv_scale=uv_scale)
+    inner = d["bsdf"] if d["type"] == "normalmap" else d
+    src = inner["base_color"]["filename"]
+    key = "_".join(f"{c:.2f}" for c in tint)
+    inner["base_color"] = dict(inner["base_color"], filename=b.assets.texture(f"grey_granite_{key}",
+                                                                              lambda: grey_granite(src, tint)))
+    return d
+
+
 # --------------------------------------------------------------------------
 # Materials and ground
 # --------------------------------------------------------------------------
@@ -230,10 +252,9 @@ def add_materials(b: SceneBuilder, L: N.Library, ctx: BuildContext) -> None:
     alb = b.assets.texture("backdrop_albedo_v2", lambda: N.backdrop_albedo(71, FAR["tile"], FAR["y0"], FAR["y_tex"]))
     b.material("far_shore", {"type": "twosided", "bsdf": principled(bitmap(alb), 0.9)})
     for tone, tint in PEBBLE_TONES.items():
-        dry = W.surface("acg:Granite006B", uv_scale=(0.12, 0.12), tint=tint)
+        dry = granite_surface(b, tint, uv_scale=(0.12, 0.12))
         b.material(f"pebble_{tone}", coat(dry) if wet else dry)
-        b.material(f"pebble_{tone}_wet", coat(W.surface("acg:Granite006B", uv_scale=(0.12, 0.12),
-                                                        tint=tuple(0.7 * t for t in tint))))
+        b.material(f"pebble_{tone}_wet", coat(granite_surface(b, tuple(0.7 * t for t in tint), uv_scale=(0.12, 0.12))))
     L.material_set("rock_moss_set_01", "_granite", lambda bsdf: granite(b, bsdf, wet=wet))
     L.material_set("rock_moss_set_01", "_granite_wet", lambda bsdf: granite(b, bsdf, wet=True))
 
@@ -247,7 +268,7 @@ def add_ground(b: SceneBuilder, ctx: BuildContext, focus: dict) -> None:
     b.rect(G.compose(G.translate((0.0, -2.5, -20.0)), G.rotate((1, 0, 0), -90.0), G.scale(360.0)), "lake_floor",
            prefix="lake_floor")
     c0, c1 = FAR["centre"]
-    b.ply(b.assets.mesh(f"shore_far_band_v{ASSET_VERSION}", lambda: N.backdrop_band(c0, c1, SKYLINE, FAR["y0"],
+    b.ply(b.assets.mesh(f"shore_far_band_v{ASSET_VERSION}_s3", lambda: N.backdrop_band(c0, c1, SKYLINE, FAR["y0"],
                                                                                     FAR["y_tex"], FAR["tile"])),
           EYE, "far_shore", prefix="backdrop")
     seeded = Assets(ctx.assets_dir, ctx.rebuild)
