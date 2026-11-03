@@ -16,7 +16,9 @@
     "terminal",
     "workshop"
   ],
-  "val": [],
+  "val": [
+    "dune_field"
+  ],
   "test": [
     "dry_riverbed"
   ],
