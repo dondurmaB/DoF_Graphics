@@ -46,7 +46,7 @@ from scenes import _nature_kit as N
 
 ASSET_VERSION = 1
 EYE = np.eye(4)
-SUN = {"clear": env_kit.default_sun_direction(25.0, 75.0), "sand": env_kit.default_sun_direction(19.0, 70.0)}
+SUN = {"clear": env_kit.default_sun_direction(25.0, 60.0), "sand": env_kit.default_sun_direction(19.0, 55.0)}
 # Bright open sand; dry_riverbed's clear 5 / overcast 15 / sand 4 gave frame medians 0.15-0.25 on darker ground.
 # Calibrate on check_scene.
 SKY_SCALE = {"clear": 4.0, "overcast": 12.0, "sand": 3.5}
@@ -324,9 +324,9 @@ SCENE = SceneDef(
     },
     default_view="crest",
     camera_box=((-6.0, 0.3, -2.0), (6.0, 1.8, 8.0)),
-    # at most ~52 degrees of yaw from -z: with a 42-degree half field the frame stays clear of the sun (105 degrees
-    # round from -z, 25 up)
-    target_box=((-12.0, -0.5, -200.0), (12.0, 8.0, -6.0)),
+    # at most ~68 degrees of yaw from -z: with a 42-degree half field a level frame stays clear of the sun (120
+    # degrees round from -z, 25 up)
+    target_box=((-12.0, -0.5, -200.0), (12.0, 8.0, 0.6)),
     exclude_boxes=_exclusions(),
     lens_mm=(24.0, 135.0), f_number=(1.4, 16.0),
     envs=("clear", "overcast", "sand"),

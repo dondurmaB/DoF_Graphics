@@ -391,8 +391,8 @@ SCENE = SceneDef(
         "pebbles": View((-1.2, 0.5, float(shore(-1.2)) + 2.0), (-1.0, 0.0, float(shore(-1.0)) + 0.5), focus="pebbles"),
         # Standing on the beach, focused on the headland's trees across the water.
         "headland": View((-1.5, 1.6, float(shore(-1.5)) + 4.5), (-30.0, 3.0, -22.0), focus="headland"),
-        # The driftwood log, the beach and the bay behind it.
-        "log": View((6.5, 0.9, float(shore(6.5)) + 6.0), (3.5, 0.2, float(shore(3.5)) + 3.8), focus="log"),
+        # From up the beach past the driftwood log to the waterline and the lake, the log in front.
+        "log": View((4.2, 1.0, float(shore(4.2)) + 6.6), (3.0, 0.1, -0.6), focus="log"),
     },
     default_view="boulder",
     camera_box=((-8.0, 0.35, -0.5), (8.0, 1.8, 6.5)),
